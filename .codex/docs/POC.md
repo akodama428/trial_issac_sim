@@ -206,6 +206,21 @@ xhost +local:root
 /isaac-sim/python.sh scripts/run_poc.py --mode isaac --headless --test
 ```
 
+## 物理把持 PoC の学び
+- 学び:
+  - `fruit を dynamic rigid body`、`tray を fixed collider`、`hand-fruit を fixed joint` とする最小物理把持構成までは PoC として成立した
+  - 一方で、`fruit-stem を PhysX fixed joint の break で素直に表現する` 方式は、現状の簡易 scene と URDF import ベースの Franka 構成では安定しなかった
+  - 特に `FruitStemJoint` は Isaac Sim 6.0 headless 実行時に `disjoint body transforms` warning を出しやすく、探索開始前の fruit 落下や、Reset 後に元位置へ戻らない原因になった
+  - そのため PoC では、`収穫前は fruit を kinematic hold で枝位置に保持し、把持成立後だけ dynamic に戻して hand-fruit joint へ引き渡す` 方式に切り替えた
+  - この方式により、`Reset 時だけ fruit を初期位置へ戻す`、`Start では fruit を勝手に戻さない`、`把持前に片指が当たっただけで fruit が落ちない` という利用者体験は安定した
+  - ただし、その代償として `把持前の fruit-stem 接続` は厳密な breakable joint 物理ではなく、`PoC 用の強い保持モデル` になっている
+  - また、ロボットの最終的な grasp 成功率は `運動計画の精度` に強く依存し、PoC の手書き IK と固定オフセットだけで最後まで詰めるのは効率が悪いことが分かった
+- PoC への反映:
+  - 本番設計では、fruit / stem / branch を asset 側で分離し、`fruit-stem joint anchor を asset ローカル座標で厳密定義した breakable joint` に置き換える必要がある
+  - PoC の `kinematic hold` は、利用者体験確認のための暫定実装として扱い、本番の物理モデルそのものとは見なさない
+  - REQUIREMENTS / ADR へ進む際は、`PoC では物理保持を段階導入し、fruit-stem detach の完全物理再現は未完` であることを前提にする
+  - ロボットの接近姿勢、grasp center、collision 回避、再現性ある把持は、PoC の手書き IK で深追いせず、MoveIt2 と grasp pose 設計のフェーズへ分離して進める
+
 # 観察項目
 - `Ready` まで到達する時間
 - `Start` 押下後に探索が始まるか

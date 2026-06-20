@@ -40,14 +40,28 @@ class HarvestScenarioPlan:
     place_position_m: tuple[float, float, float]
     branch_center_world_m: tuple[float, float, float]
     branch_scale_m: tuple[float, float, float]
+    stem_center_world_m: tuple[float, float, float]
+    stem_scale_m: tuple[float, float, float]
     tomato_initial_world_m: tuple[float, float, float]
     tomato_radius_m: float
+    tomato_mass_kg: float
     hand_camera_local_offset_m: tuple[float, float, float]
     hand_camera_local_rotation_deg: tuple[float, float, float]
     hand_camera_xy_limit_m: float
     hand_camera_min_depth_m: float
     hand_camera_max_depth_m: float
     search_height_tolerance_m: float
+    pull_offset_m: tuple[float, float, float]
+    tray_inner_size_m: tuple[float, float, float]
+    tray_wall_thickness_m: float
+    stem_break_force_n: float
+    stem_break_torque_nm: float
+    finger_contact_force_threshold_n: float
+    grasp_hold_frame_count: int
+    settle_linear_speed_threshold_mps: float
+    settle_angular_speed_threshold_radps: float
+    settle_frame_count: int
+    settle_timeout_frames: int
 
 
 def build_harvest_scenario_plan() -> HarvestScenarioPlan:
@@ -73,14 +87,28 @@ def build_harvest_scenario_plan() -> HarvestScenarioPlan:
         place_position_m=(0.35, -0.45, 0.385),
         branch_center_world_m=(0.50, 0.00, 0.57),
         branch_scale_m=(0.22, 0.03, 0.03),
+        stem_center_world_m=(0.50, 0.00, 0.435),
+        stem_scale_m=(0.012, 0.012, 0.05),
         tomato_initial_world_m=(0.50, 0.00, 0.42),
         tomato_radius_m=0.01,
+        tomato_mass_kg=0.015,
         hand_camera_local_offset_m=(0.0, 0.0, 0.10),
         hand_camera_local_rotation_deg=(0.0, 180.0, 0.0),
-        hand_camera_xy_limit_m=0.20,
+        hand_camera_xy_limit_m=0.60,
         hand_camera_min_depth_m=0.03,
-        hand_camera_max_depth_m=0.80,
-        search_height_tolerance_m=0.08,
+        hand_camera_max_depth_m=1.50,
+        search_height_tolerance_m=0.25,
+        pull_offset_m=(0.0, 0.0, 0.10),
+        tray_inner_size_m=(0.12, 0.18, 0.06),
+        tray_wall_thickness_m=0.01,
+        stem_break_force_n=3.5,
+        stem_break_torque_nm=0.35,
+        finger_contact_force_threshold_n=1.8,
+        grasp_hold_frame_count=12,
+        settle_linear_speed_threshold_mps=0.02,
+        settle_angular_speed_threshold_radps=0.35,
+        settle_frame_count=18,
+        settle_timeout_frames=240,
     )
 
 
@@ -106,6 +134,43 @@ def is_target_visible(
 
 def format_xyz(point_m: tuple[float, float, float]) -> str:
     return f"({point_m[0]:.4f}, {point_m[1]:.4f}, {point_m[2]:.4f})"
+
+
+def _vector_norm(vector: tuple[float, float, float]) -> float:
+    return (vector[0] ** 2 + vector[1] ** 2 + vector[2] ** 2) ** 0.5
+
+
+def has_dual_finger_contact(
+    contact_forces_n: tuple[tuple[float, float, float], tuple[float, float, float]],
+    *,
+    force_threshold_n: float,
+) -> bool:
+    left_force, right_force = contact_forces_n
+    return _vector_norm(left_force) >= force_threshold_n and _vector_norm(right_force) >= force_threshold_n
+
+
+def is_object_settled(
+    linear_velocity_mps: tuple[float, float, float],
+    angular_velocity_radps: tuple[float, float, float],
+    *,
+    linear_speed_threshold_mps: float,
+    angular_speed_threshold_radps: float,
+) -> bool:
+    return _vector_norm(linear_velocity_mps) <= linear_speed_threshold_mps and _vector_norm(
+        angular_velocity_radps
+    ) <= angular_speed_threshold_radps
+
+
+def is_point_in_box_xy(
+    point_m: tuple[float, float, float],
+    center_m: tuple[float, float, float],
+    size_m: tuple[float, float, float],
+    *,
+    margin_m: float = 0.0,
+) -> bool:
+    half_x = max(size_m[0] * 0.5 - margin_m, 0.0)
+    half_y = max(size_m[1] * 0.5 - margin_m, 0.0)
+    return abs(point_m[0] - center_m[0]) <= half_x and abs(point_m[1] - center_m[1]) <= half_y
 
 
 def build_target_found_messages(
