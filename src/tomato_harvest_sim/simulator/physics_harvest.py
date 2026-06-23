@@ -1,0 +1,477 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from tomato_harvest_sim.api.contracts import Pose3D, TomatoStatus
+
+
+@dataclass(frozen=True)
+class PhysicsHarvestScenePaths:
+    ground_prim_path: str
+    tray_prim_path: str
+    tomato_prim_path: str
+    stem_anchor_prim_path: str
+    stem_joint_prim_path: str
+    grasp_joint_prim_path: str
+    hand_mount_prim_path: str
+
+
+class IsaacPhysicsHarvestBridge:
+    STEM_BREAK_FORCE_N = 2.0
+    STEM_BREAK_TORQUE_NM = 2.0
+    TOMATO_MASS_KG = 0.03
+    DETACH_DISTANCE_M = 0.02
+    PLACE_DISTANCE_M = 0.06
+    CONTACT_LATCH_GRACE_STEPS = 3
+    HAND_TO_TOMATO_DISTANCE_TOLERANCE_M = 0.08
+    FINGER_MIDPOINT_TO_TOMATO_TOLERANCE_M = 0.012
+    FINGER_CONTACT_POINT_OFFSET_Z_M = 0.0447
+    FINGER_GAP_MIN_M = 0.015
+    FINGER_GAP_MAX_M = 0.065
+
+    def __init__(
+        self,
+        *,
+        stage: object,
+        scene_paths: PhysicsHarvestScenePaths,
+        initial_tomato_pose: Pose3D,
+    ) -> None:
+        self._stage = stage
+        self._scene_paths = scene_paths
+        self._initial_tomato_pose = initial_tomato_pose
+        self._last_cycle_id = 0
+        self._pending_finger_contacts: set[str] = set()
+        self._active_finger_contacts: set[str] = set()
+        self._latched_finger_contacts: set[str] = set()
+        self._recent_finger_contacts: set[str] = set()
+        self._recent_contact_grace_steps_remaining = 0
+        self._grasp_joint_active = False
+        self._detach_reported = False
+        self._contact_subscription = None
+        self._debug_enabled = os.environ.get(
+            "TOMATO_HARVEST_DEBUG_PHYSICS_GRASP",
+            "",
+        ).strip() not in {"", "0", "false", "False"}
+
+    def prepare_scene(self) -> None:
+        self._enable_static_collision(self._scene_paths.ground_prim_path)
+        self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/Base")
+        self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallFront")
+        self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallBack")
+        self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallLeft")
+        self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallRight")
+        self._define_stem_anchor()
+        self._define_tomato_physics()
+        self._create_stem_joint()
+        self._subscribe_contact_reports()
+
+    def begin_physics_step(self) -> None:
+        self._pending_finger_contacts = set()
+
+    def finalize_physics_step(self, controller: object) -> None:
+        snapshot = controller.current_scene_snapshot()
+        self._promote_pending_contacts(gripper_closed=snapshot.gripper_closed)
+        self._debug_log(
+            "[PhysicsHarvest] finalize "
+            f"phase={snapshot.phase.value} "
+            f"tomato_status={snapshot.tomato_status.value} "
+            f"gripper_closed={snapshot.gripper_closed} "
+            f"contacts={sorted(self._active_finger_contacts)} "
+            f"latched_contacts={sorted(self._latched_finger_contacts)} "
+            f"recent_contacts={sorted(self._recent_finger_contacts)} "
+            f"grace_steps={self._recent_contact_grace_steps_remaining} "
+            f"grasp_joint_active={self._grasp_joint_active}"
+        )
+
+        if snapshot.cycle_id != self._last_cycle_id:
+            self._last_cycle_id = snapshot.cycle_id
+            if snapshot.phase.value == "ready":
+                self.reset_scene(controller)
+                return
+
+        tomato_pose = self._world_pose(self._scene_paths.tomato_prim_path)
+        controller.sync_tomato_physics(tomato_pose)
+        self._augment_contacts_from_grasp_geometry(tomato_pose=tomato_pose, gripper_closed=snapshot.gripper_closed)
+
+        if (
+            snapshot.gripper_closed
+            and not self._grasp_joint_active
+            and self._latched_finger_contacts == {"left", "right"}
+        ):
+            self._debug_log("[PhysicsHarvest] both finger contacts detected. Creating grasp joint.")
+            self._create_grasp_joint(tomato_pose)
+            controller.sync_tomato_physics(
+                tomato_pose,
+                attached=True,
+                status=TomatoStatus.HELD,
+                reason="stable_grasp_established_physx",
+            )
+            return
+
+        if self._grasp_joint_active and not self._detach_reported:
+            if self._distance(self._world_pose(self._scene_paths.stem_anchor_prim_path), tomato_pose) >= self.DETACH_DISTANCE_M:
+                self._debug_log("[PhysicsHarvest] detach distance reached. Reporting DETACHED.")
+                self._detach_reported = True
+                controller.sync_tomato_physics(
+                    tomato_pose,
+                    attached=False,
+                    status=TomatoStatus.DETACHED,
+                    reason="tomato_detached_from_stem_physx",
+                )
+                return
+
+        if self._grasp_joint_active and not snapshot.gripper_closed:
+            self._debug_log("[PhysicsHarvest] gripper opened while grasp joint active. Removing grasp joint.")
+            self._remove_grasp_joint()
+            if snapshot.place_pose is not None and self._distance(snapshot.robot_tool_pose, snapshot.place_pose) <= self.PLACE_DISTANCE_M:
+                controller.sync_tomato_physics(
+                    tomato_pose,
+                    attached=False,
+                    status=TomatoStatus.PLACED,
+                    reason="tomato_placed_in_tray_physx",
+                )
+            else:
+                controller.sync_tomato_physics(
+                    tomato_pose,
+                    attached=False,
+                    status=TomatoStatus.FALLEN,
+                    reason="released_outside_place_target_physx",
+                )
+
+    def reset_scene(self, controller: object) -> None:
+        self._active_finger_contacts = set()
+        self._pending_finger_contacts = set()
+        self._latched_finger_contacts = set()
+        self._recent_finger_contacts = set()
+        self._recent_contact_grace_steps_remaining = 0
+        self._detach_reported = False
+        self._remove_grasp_joint()
+        self._set_world_pose(self._scene_paths.stem_anchor_prim_path, self._initial_tomato_pose)
+        self._set_world_pose(self._scene_paths.tomato_prim_path, self._initial_tomato_pose)
+        self._zero_rigid_body_velocity(self._scene_paths.tomato_prim_path)
+        self._create_stem_joint()
+        controller.sync_tomato_physics(
+            self._initial_tomato_pose,
+            attached=True,
+            status=TomatoStatus.ATTACHED,
+        )
+
+    def _subscribe_contact_reports(self) -> None:
+        from omni.physx import get_physx_simulation_interface
+        from pxr import PhysxSchema
+
+        tomato_prim = self._stage.GetPrimAtPath(self._scene_paths.tomato_prim_path)
+        contact_api = PhysxSchema.PhysxContactReportAPI.Apply(tomato_prim)
+        contact_api.CreateThresholdAttr().Set(0.0)
+        self._contact_subscription = get_physx_simulation_interface().subscribe_contact_report_events(
+            self._on_contact_report_event
+        )
+
+    def _on_contact_report_event(self, contact_headers: object, _: object) -> None:
+        from pxr import PhysicsSchemaTools
+
+        active_contacts: set[str] = set()
+        for header in contact_headers:
+            actor0 = str(PhysicsSchemaTools.intToSdfPath(header.actor0))
+            actor1 = str(PhysicsSchemaTools.intToSdfPath(header.actor1))
+            finger_name = self._match_finger_contact(actor0, actor1)
+            self._debug_log(
+                "[PhysicsHarvest] contact "
+                f"actor0={actor0} actor1={actor1} matched={finger_name}"
+            )
+            if finger_name is not None:
+                active_contacts.add(finger_name)
+        self._accumulate_pending_contacts(active_contacts)
+
+    def _accumulate_pending_contacts(self, contacts: set[str]) -> None:
+        self._pending_finger_contacts.update(contacts)
+
+    def _promote_pending_contacts(self, *, gripper_closed: bool) -> None:
+        self._active_finger_contacts = set(self._pending_finger_contacts)
+        if self._active_finger_contacts:
+            self._recent_finger_contacts = set(self._active_finger_contacts)
+            self._recent_contact_grace_steps_remaining = self.CONTACT_LATCH_GRACE_STEPS
+        elif self._recent_contact_grace_steps_remaining > 0:
+            self._recent_contact_grace_steps_remaining -= 1
+            if self._recent_contact_grace_steps_remaining == 0:
+                self._recent_finger_contacts = set()
+        if gripper_closed:
+            contacts_to_latch = (
+                self._active_finger_contacts
+                if self._active_finger_contacts
+                else self._recent_finger_contacts
+            )
+            self._latched_finger_contacts.update(contacts_to_latch)
+            return
+        self._latched_finger_contacts = set()
+
+    def _match_finger_contact(self, actor0: str, actor1: str) -> str | None:
+        pair = (actor0, actor1)
+        if self._scene_paths.tomato_prim_path not in pair:
+            return None
+        other_actor = actor1 if actor0 == self._scene_paths.tomato_prim_path else actor0
+        if "panda_leftfinger" in other_actor:
+            return "left"
+        if "panda_rightfinger" in other_actor:
+            return "right"
+        return None
+
+    def _augment_contacts_from_grasp_geometry(self, *, tomato_pose: Pose3D, gripper_closed: bool) -> None:
+        if not gripper_closed:
+            return
+        if self._latched_finger_contacts == {"left", "right"}:
+            return
+        if not (self._active_finger_contacts or self._recent_finger_contacts):
+            self._debug_log(
+                "[PhysicsHarvest] geometry fallback skipped because no physical contact "
+                "was observed in the current or recent frames."
+            )
+            return
+        geometric_contacts = self._infer_finger_contacts_from_geometry(tomato_pose)
+        if not geometric_contacts:
+            return
+        self._debug_log(
+            "[PhysicsHarvest] geometry fallback inferred "
+            f"contacts={sorted(geometric_contacts)}"
+        )
+        self._active_finger_contacts.update(geometric_contacts)
+        self._recent_finger_contacts.update(geometric_contacts)
+        self._recent_contact_grace_steps_remaining = self.CONTACT_LATCH_GRACE_STEPS
+        self._latched_finger_contacts.update(geometric_contacts)
+
+    def _infer_finger_contacts_from_geometry(self, tomato_pose: Pose3D) -> set[str]:
+        hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
+        hand_to_tomato_distance = self._distance(hand_pose, tomato_pose)
+        left_finger_pose = self._world_pose(self._left_finger_prim_path())
+        right_finger_pose = self._world_pose(self._right_finger_prim_path())
+        left_contact_pose = self._inferred_finger_contact_pose(left_finger_pose)
+        right_contact_pose = self._inferred_finger_contact_pose(right_finger_pose)
+        left_distance = self._distance(left_contact_pose, tomato_pose)
+        right_distance = self._distance(right_contact_pose, tomato_pose)
+        finger_gap = self._distance(left_contact_pose, right_contact_pose)
+        if (
+            finger_gap < self.FINGER_GAP_MIN_M
+            or finger_gap > self.FINGER_GAP_MAX_M
+        ):
+            midpoint = Pose3D(
+                x=(left_contact_pose.x + right_contact_pose.x) * 0.5,
+                y=(left_contact_pose.y + right_contact_pose.y) * 0.5,
+                z=(left_contact_pose.z + right_contact_pose.z) * 0.5,
+                roll=0.0,
+                pitch=0.0,
+                yaw=0.0,
+            )
+            midpoint_distance = self._distance(midpoint, tomato_pose)
+            self._debug_log_geometry_state(
+                hand_pose=hand_pose,
+                tomato_pose=tomato_pose,
+                left_finger_pose=left_finger_pose,
+                right_finger_pose=right_finger_pose,
+                hand_to_tomato_distance=hand_to_tomato_distance,
+                left_distance=left_distance,
+                right_distance=right_distance,
+                midpoint_distance=midpoint_distance,
+            )
+            return set()
+
+        midpoint = Pose3D(
+            x=(left_contact_pose.x + right_contact_pose.x) * 0.5,
+            y=(left_contact_pose.y + right_contact_pose.y) * 0.5,
+            z=(left_contact_pose.z + right_contact_pose.z) * 0.5,
+            roll=0.0,
+            pitch=0.0,
+            yaw=0.0,
+        )
+        midpoint_distance = self._distance(midpoint, tomato_pose)
+        if midpoint_distance > self.FINGER_MIDPOINT_TO_TOMATO_TOLERANCE_M:
+            self._debug_log_geometry_state(
+                hand_pose=hand_pose,
+                tomato_pose=tomato_pose,
+                left_finger_pose=left_contact_pose,
+                right_finger_pose=right_contact_pose,
+                hand_to_tomato_distance=hand_to_tomato_distance,
+                left_distance=left_distance,
+                right_distance=right_distance,
+                midpoint_distance=midpoint_distance,
+            )
+            return set()
+        return {"left", "right"}
+
+    def _inferred_finger_contact_pose(self, finger_pose: Pose3D) -> Pose3D:
+        # The finger prim pose is near the finger root, while the actual grasp contact
+        # happens near the pad/tip lower along the approach axis in this top-down POC.
+        return Pose3D(
+            x=finger_pose.x,
+            y=finger_pose.y,
+            z=finger_pose.z - self.FINGER_CONTACT_POINT_OFFSET_Z_M,
+            roll=finger_pose.roll,
+            pitch=finger_pose.pitch,
+            yaw=finger_pose.yaw,
+        )
+
+    def _debug_log_geometry_state(
+        self,
+        *,
+        hand_pose: Pose3D,
+        tomato_pose: Pose3D,
+        left_finger_pose: Pose3D | None,
+        right_finger_pose: Pose3D | None,
+        hand_to_tomato_distance: float | None,
+        left_distance: float | None,
+        right_distance: float | None,
+        midpoint_distance: float | None,
+    ) -> None:
+        if not self._debug_enabled:
+            return
+        finger_gap = None
+        if left_finger_pose is not None and right_finger_pose is not None:
+            finger_gap = self._distance(left_finger_pose, right_finger_pose)
+        self._debug_log(
+            "[PhysicsHarvest] geometry check "
+            f"hand_xyz=({hand_pose.x:.4f}, {hand_pose.y:.4f}, {hand_pose.z:.4f}) "
+            f"tomato_xyz=({tomato_pose.x:.4f}, {tomato_pose.y:.4f}, {tomato_pose.z:.4f}) "
+            f"left_xyz={self._format_pose(left_finger_pose)} "
+            f"right_xyz={self._format_pose(right_finger_pose)} "
+            f"hand_to_tomato={self._format_distance(hand_to_tomato_distance)} "
+            f"left_to_tomato={self._format_distance(left_distance)} "
+            f"right_to_tomato={self._format_distance(right_distance)} "
+            f"midpoint_to_tomato={self._format_distance(midpoint_distance)} "
+            f"finger_gap={self._format_distance(finger_gap)}"
+        )
+
+    @staticmethod
+    def _format_pose(pose: Pose3D | None) -> str:
+        if pose is None:
+            return "n/a"
+        return f"({pose.x:.4f}, {pose.y:.4f}, {pose.z:.4f})"
+
+    @staticmethod
+    def _format_distance(distance_m: float | None) -> str:
+        if distance_m is None:
+            return "n/a"
+        return f"{distance_m:.4f}"
+
+    def _left_finger_prim_path(self) -> str:
+        return self._scene_paths.hand_mount_prim_path.replace("panda_hand", "panda_leftfinger")
+
+    def _right_finger_prim_path(self) -> str:
+        return self._scene_paths.hand_mount_prim_path.replace("panda_hand", "panda_rightfinger")
+
+    def _define_stem_anchor(self) -> None:
+        from pxr import Gf, UsdGeom, UsdPhysics
+
+        anchor = UsdGeom.Cube.Define(self._stage, self._scene_paths.stem_anchor_prim_path)
+        anchor.AddTranslateOp().Set(
+            Gf.Vec3d(self._initial_tomato_pose.x, self._initial_tomato_pose.y, self._initial_tomato_pose.z)
+        )
+        anchor.AddScaleOp().Set(Gf.Vec3f(0.006, 0.006, 0.006))
+        UsdGeom.Imageable(anchor).MakeInvisible()
+
+        anchor_prim = anchor.GetPrim()
+        UsdPhysics.CollisionAPI.Apply(anchor_prim)
+        rigid_api = UsdPhysics.RigidBodyAPI.Apply(anchor_prim)
+        rigid_api.CreateKinematicEnabledAttr(True)
+
+    def _define_tomato_physics(self) -> None:
+        from pxr import UsdPhysics
+
+        tomato_prim = self._stage.GetPrimAtPath(self._scene_paths.tomato_prim_path)
+        UsdPhysics.CollisionAPI.Apply(tomato_prim)
+        UsdPhysics.RigidBodyAPI.Apply(tomato_prim)
+        mass_api = UsdPhysics.MassAPI.Apply(tomato_prim)
+        mass_api.CreateMassAttr(self.TOMATO_MASS_KG)
+
+    def _create_stem_joint(self) -> None:
+        from pxr import UsdPhysics
+
+        self._remove_joint(self._scene_paths.stem_joint_prim_path)
+        joint = UsdPhysics.FixedJoint.Define(self._stage, self._scene_paths.stem_joint_prim_path)
+        joint.CreateBody0Rel().SetTargets([self._scene_paths.stem_anchor_prim_path])
+        joint.CreateBody1Rel().SetTargets([self._scene_paths.tomato_prim_path])
+        joint.CreateLocalPos0Attr().Set((0.0, 0.0, 0.0))
+        joint.CreateLocalPos1Attr().Set((0.0, 0.0, 0.0))
+        joint.CreateBreakForceAttr(self.STEM_BREAK_FORCE_N)
+        joint.CreateBreakTorqueAttr(self.STEM_BREAK_TORQUE_NM)
+        self._detach_reported = False
+
+    def _create_grasp_joint(self, tomato_pose: Pose3D) -> None:
+        from pxr import Gf, Gf as _Gf, UsdPhysics
+
+        self._remove_grasp_joint()
+        joint = UsdPhysics.FixedJoint.Define(self._stage, self._scene_paths.grasp_joint_prim_path)
+        joint.CreateBody0Rel().SetTargets([self._scene_paths.hand_mount_prim_path])
+        joint.CreateBody1Rel().SetTargets([self._scene_paths.tomato_prim_path])
+        world_point = Gf.Vec3d(tomato_pose.x, tomato_pose.y, tomato_pose.z)
+        hand_local = self._world_point_to_local(self._scene_paths.hand_mount_prim_path, world_point)
+        tomato_local = self._world_point_to_local(self._scene_paths.tomato_prim_path, world_point)
+        joint.CreateLocalPos0Attr().Set(_Gf.Vec3f(hand_local[0], hand_local[1], hand_local[2]))
+        joint.CreateLocalPos1Attr().Set(_Gf.Vec3f(tomato_local[0], tomato_local[1], tomato_local[2]))
+        self._grasp_joint_active = True
+
+    def _remove_grasp_joint(self) -> None:
+        self._remove_joint(self._scene_paths.grasp_joint_prim_path)
+        self._grasp_joint_active = False
+
+    def _remove_joint(self, prim_path: str) -> None:
+        prim = self._stage.GetPrimAtPath(prim_path)
+        if prim.IsValid():
+            self._stage.RemovePrim(prim_path)
+
+    def _debug_log(self, message: str) -> None:
+        if self._debug_enabled:
+            print(message, flush=True)
+
+    def _enable_static_collision(self, prim_path: str) -> None:
+        from pxr import UsdPhysics
+
+        prim = self._stage.GetPrimAtPath(prim_path)
+        if prim.IsValid():
+            UsdPhysics.CollisionAPI.Apply(prim)
+
+    def _set_world_pose(self, prim_path: str, pose: Pose3D) -> None:
+        from pxr import Gf, UsdGeom
+
+        prim = self._stage.GetPrimAtPath(prim_path)
+        xformable = UsdGeom.Xformable(prim)
+        translate_op = xformable.GetOrderedXformOps()[0]
+        translate_op.Set(Gf.Vec3d(pose.x, pose.y, pose.z))
+
+    def _zero_rigid_body_velocity(self, prim_path: str) -> None:
+        from pxr import Gf
+
+        prim = self._stage.GetPrimAtPath(prim_path)
+        for attr_name in ("physics:velocity", "physics:angularVelocity"):
+            attr = prim.GetAttribute(attr_name)
+            if attr.IsValid():
+                attr.Set(Gf.Vec3f(0.0, 0.0, 0.0))
+
+    def _world_pose(self, prim_path: str) -> Pose3D:
+        from pxr import UsdGeom
+
+        prim = self._stage.GetPrimAtPath(prim_path)
+        matrix = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0.0)
+        translation = matrix.ExtractTranslation()
+        return Pose3D(
+            x=float(translation[0]),
+            y=float(translation[1]),
+            z=float(translation[2]),
+            roll=0.0,
+            pitch=0.0,
+            yaw=0.0,
+        )
+
+    def _world_point_to_local(self, prim_path: str, point: object) -> tuple[float, float, float]:
+        from pxr import Gf, UsdGeom
+
+        prim = self._stage.GetPrimAtPath(prim_path)
+        world_transform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0.0)
+        local_point = world_transform.GetInverse().Transform(point)
+        return float(local_point[0]), float(local_point[1]), float(local_point[2])
+
+    @staticmethod
+    def _distance(left: Pose3D, right: Pose3D) -> float:
+        dx = left.x - right.x
+        dy = left.y - right.y
+        dz = left.z - right.z
+        return (dx * dx + dy * dy + dz * dz) ** 0.5

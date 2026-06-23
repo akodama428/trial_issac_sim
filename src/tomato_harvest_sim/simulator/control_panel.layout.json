@@ -1,0 +1,9 @@
+{
+  "title": "Tomato Harvest Controls",
+  "width": 320,
+  "height": 230,
+  "visible": true,
+  "dock_preference": "MAIN",
+  "dock_target": "Property",
+  "dock_policy": "DO_NOTHING"
+}

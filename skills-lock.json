@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "physical-ai-neural-reconstruction": {
+      "source": "NVIDIA/skills",
+      "sourceType": "github",
+      "skillPath": "skills/physical-ai-neural-reconstruction/SKILL.md",
+      "computedHash": "5481ac1ad1976fe3b2b888f03a1aca20823986f9f0f4512aa8f0fd7ac5247b5e"
+    }
+  }
+}

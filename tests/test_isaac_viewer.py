@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import unittest
+
+from tomato_harvest_sim.simulator.isaac_viewer import (
+    OFFICIAL_FRANKA_ASSET_RELATIVE_PATH,
+    build_appframework_argv,
+    build_official_franka_asset_path,
+    build_simulation_app_config,
+    parse_args,
+    select_hand_mount_prim_path,
+)
+from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
+from tomato_harvest_sim.simulator.scene_plan import build_review_scene_plan
+
+
+class IsaacViewerConfigTest(unittest.TestCase):
+    def test_parse_args_defaults_to_fixed_camera_gui_mode(self) -> None:
+        args = parse_args([])
+
+        self.assertFalse(args.headless)
+        self.assertFalse(args.auto_start)
+        self.assertEqual(args.headless_steps, 64)
+        self.assertEqual(args.camera_view, "fixed")
+        self.assertEqual(args.timeout_seconds, 0.0)
+        self.assertEqual(args.transport, "in_memory")
+
+    def test_build_appframework_argv_includes_viewport_extensions(self) -> None:
+        argv = build_appframework_argv(headless=False)
+
+        self.assertIn("omni.kit.viewport.window", argv)
+        self.assertIn("omni.kit.viewport.utility", argv)
+        self.assertIn("omni.kit.window.toolbar", argv)
+        self.assertNotIn("--no-window", argv)
+
+    def test_build_appframework_argv_adds_no_window_in_headless_mode(self) -> None:
+        argv = build_appframework_argv(headless=True)
+
+        self.assertIn("--no-window", argv)
+
+    def test_build_simulation_app_config_uses_gui_defaults(self) -> None:
+        config = build_simulation_app_config(headless=False)
+
+        self.assertFalse(config["headless"])
+        self.assertEqual(config["renderer"], "RaytracedLighting")
+        self.assertFalse(config["disable_viewport_updates"])
+        self.assertIn("--/app/hangDetector/timeout=300", config["extra_args"])
+
+    def test_build_official_franka_asset_path_appends_known_relative_path(self) -> None:
+        path = build_official_franka_asset_path("https://assets.example.com/Assets/Isaac/6.0/")
+
+        self.assertEqual(
+            path,
+            "https://assets.example.com/Assets/Isaac/6.0/" + OFFICIAL_FRANKA_ASSET_RELATIVE_PATH,
+        )
+
+    def test_review_scene_plan_contains_reviewable_scene_items(self) -> None:
+        layout = load_scene_layout_config()
+        plan = build_review_scene_plan()
+
+        self.assertEqual(plan.robot_prim_path, "/World/FrankaPanda")
+        self.assertEqual(plan.fixed_camera_prim_path, "/World/Camera_Fixed")
+        self.assertEqual(plan.hand_camera_mount_prim_suffix, "panda_hand")
+        self.assertEqual(plan.hand_camera_prim_name, "HandCamera")
+        self.assertEqual(plan.fixed_camera_pose.x, layout.fixed_camera_pose.x)
+        self.assertEqual(plan.fixed_camera_pose.y, layout.fixed_camera_pose.y)
+        self.assertEqual(plan.fixed_camera_focal_length_mm, layout.fixed_camera_focal_length_mm)
+        self.assertEqual(plan.tray_inner_size_m, layout.tray_inner_size_m)
+        self.assertEqual(plan.tray_wall_thickness_m, layout.tray_wall_thickness_m)
+        self.assertEqual(plan.hand_camera_pose.z, layout.hand_camera_pose.z)
+        self.assertEqual(plan.hand_camera_pose.pitch, layout.hand_camera_pose.pitch)
+        self.assertEqual(plan.hand_camera_clipping_range_m, layout.hand_camera_clipping_range_m)
+        self.assertIn("/World/TomatoBranch", plan.required_prim_paths)
+        self.assertIn("/World/TomatoStem", plan.required_prim_paths)
+        self.assertIn("/World/TargetTomato", plan.required_prim_paths)
+        self.assertIn("/World/PlaceTray", plan.required_prim_paths)
+        self.assertIn("/World/RobotToolProxy", plan.required_prim_paths)
+
+    def test_select_hand_mount_prim_path_prefers_geometry_hand(self) -> None:
+        prim_path = select_hand_mount_prim_path(
+            (
+                "/World/FrankaPanda/panda_hand",
+                "/World/FrankaPanda/Geometry/panda_hand",
+            ),
+            hand_mount_prim_suffix="panda_hand",
+        )
+
+        self.assertEqual(prim_path, "/World/FrankaPanda/Geometry/panda_hand")
+
+
+if __name__ == "__main__":
+    unittest.main()
