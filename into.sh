@@ -40,8 +40,14 @@ has_missing_gui_cache_binds() {
   return 1
 }
 
+has_incorrect_shm_size() {
+  local shm_size
+  shm_size="$(docker inspect --format '{{.HostConfig.ShmSize}}' "$1" 2>/dev/null || true)"
+  [[ "${shm_size}" != "1073741824" ]]
+}
+
 should_recreate_container() {
-  has_legacy_tmp_bind "$1" || has_legacy_hub_detect_only "$1" || has_missing_gui_cache_binds "$1"
+  has_legacy_tmp_bind "$1" || has_legacy_hub_detect_only "$1" || has_missing_gui_cache_binds "$1" || has_incorrect_shm_size "$1"
 }
 
 if docker ps --format '{{.Names}}' | grep -Fxq "${CONTAINER_NAME}"; then
@@ -72,6 +78,7 @@ DOCKER_ARGS=(
   --name "${CONTAINER_NAME}"
   --gpus all
   --network=host
+  --shm-size=1g
   -e "ACCEPT_EULA=${ACCEPT_EULA}"
   -e "PRIVACY_CONSENT=${PRIVACY_CONSENT}"
   -e "ROS_DISTRO=${ROS_DISTRO}"

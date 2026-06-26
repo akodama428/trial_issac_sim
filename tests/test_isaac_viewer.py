@@ -45,6 +45,8 @@ class IsaacViewerConfigTest(unittest.TestCase):
         self.assertEqual(config["renderer"], "RaytracedLighting")
         self.assertFalse(config["disable_viewport_updates"])
         self.assertIn("--/app/hangDetector/timeout=300", config["extra_args"])
+        self.assertIn("--empty", config["extra_args"])
+        self.assertIn("omni.kit.viewport.window", config["extra_args"])
 
     def test_build_official_franka_asset_path_appends_known_relative_path(self) -> None:
         path = build_official_franka_asset_path("https://assets.example.com/Assets/Isaac/6.0/")
@@ -86,6 +88,11 @@ class IsaacViewerConfigTest(unittest.TestCase):
         )
 
         self.assertEqual(prim_path, "/World/FrankaPanda/Geometry/panda_hand")
+
+    def test_build_simulation_app_config_adds_no_window_in_headless_mode(self) -> None:
+        config = build_simulation_app_config(headless=True)
+
+        self.assertIn("--no-window", config["extra_args"])
 
 
 if __name__ == "__main__":

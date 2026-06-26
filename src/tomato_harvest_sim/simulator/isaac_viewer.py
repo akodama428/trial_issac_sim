@@ -127,6 +127,13 @@ def build_appframework_argv(*, headless: bool) -> list[str]:
 
 
 def build_simulation_app_config(*, headless: bool) -> dict[str, object]:
+    extra_args = build_appframework_argv(headless=headless)
+    extra_args.extend(
+        [
+            "--/app/hangDetector/timeout=300",
+            "--/persistent/renderer/startupMessageDisplayed=true",
+        ]
+    )
     return {
         "headless": headless,
         "renderer": "MinimalRendering" if headless else "RaytracedLighting",
@@ -135,10 +142,7 @@ def build_simulation_app_config(*, headless: bool) -> dict[str, object]:
         "fast_shutdown": True,
         "create_new_stage": False,
         "disable_viewport_updates": headless,
-        "extra_args": [
-            "--/app/hangDetector/timeout=300",
-            "--/persistent/renderer/startupMessageDisplayed=true",
-        ],
+        "extra_args": extra_args,
     }
 
 
@@ -433,10 +437,12 @@ def _add_stem(stage: object, plan: ReviewScenePlan) -> None:
 def _add_tomato(stage: object, plan: ReviewScenePlan) -> None:
     from pxr import Gf, UsdGeom
 
-    tomato = UsdGeom.Sphere.Define(stage, plan.tomato_prim_path)
-    tomato.AddTranslateOp().Set(Gf.Vec3d(plan.tomato_pose.x, plan.tomato_pose.y, plan.tomato_pose.z))
-    tomato.GetRadiusAttr().Set(plan.tomato_radius_m)
-    tomato.CreateDisplayColorAttr([(0.93, 0.77, 0.17)])
+    tomato_root = UsdGeom.Xform.Define(stage, plan.tomato_prim_path)
+    tomato_root.AddTranslateOp().Set(Gf.Vec3d(plan.tomato_pose.x, plan.tomato_pose.y, plan.tomato_pose.z))
+
+    tomato_visual = UsdGeom.Sphere.Define(stage, f"{plan.tomato_prim_path}/Geometry")
+    tomato_visual.GetRadiusAttr().Set(plan.tomato_radius_m)
+    tomato_visual.CreateDisplayColorAttr([(0.93, 0.77, 0.17)])
 
 
 def _add_tray(stage: object, plan: ReviewScenePlan) -> None:
