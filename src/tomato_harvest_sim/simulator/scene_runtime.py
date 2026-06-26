@@ -54,8 +54,14 @@ class IsaacSceneRuntime:
     PLACE_POSITION_TOLERANCE_M = 0.05
     PLACED_TOMATO_OFFSET_Z_M = 0.03
 
-    def __init__(self, *, physics_grasp_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        physics_grasp_enabled: bool = False,
+        physics_soft_fallback_enabled: bool = False,
+    ) -> None:
         self._physics_grasp_enabled = physics_grasp_enabled
+        self._physics_soft_fallback_enabled = physics_soft_fallback_enabled
         self._layout = load_scene_layout_config()
         self.state = self._initial_state()
         self._grasp_constraint_offset = (0.0, 0.0, -self.GRASP_TOMATO_OFFSET_Z_M)
@@ -176,6 +182,15 @@ class IsaacSceneRuntime:
         self._clear_motion_target()
         self.state.gripper_closed = True
         if self._physics_grasp_enabled:
+            if self._physics_soft_fallback_enabled:
+                self.state.tomato_status = TomatoStatus.HELD
+                self.state.grasp_result_reason = "stable_grasp_established_soft_fallback"
+                self._grasp_constraint_offset = (
+                    self.state.tomato_pose.x - self.state.robot_tool_pose.x,
+                    self.state.tomato_pose.y - self.state.robot_tool_pose.y,
+                    self.state.tomato_pose.z - self.state.robot_tool_pose.z,
+                )
+                return self.snapshot()
             self.state.grasp_result_reason = "awaiting_physics_grasp"
             return self.snapshot()
         if self._is_stable_grasp_pose():
@@ -197,6 +212,15 @@ class IsaacSceneRuntime:
         self._clear_motion_target()
         self.state.gripper_closed = False
         if self._physics_grasp_enabled:
+            if self._physics_soft_fallback_enabled and self.state.tomato_status is TomatoStatus.DETACHED:
+                if self._is_place_release_pose():
+                    self.state.tomato_status = TomatoStatus.PLACED
+                    self.state.grasp_result_reason = "tomato_placed_in_tray_soft_fallback"
+                    self.state.tomato_pose = self._placed_tomato_pose()
+                    return self.snapshot()
+                self.state.tomato_status = TomatoStatus.FALLEN
+                self.state.grasp_result_reason = "released_outside_place_target_soft_fallback"
+                return self.snapshot()
             self.state.grasp_result_reason = "awaiting_physics_release"
             return self.snapshot()
         if self.state.tomato_status is TomatoStatus.DETACHED:
@@ -229,6 +253,11 @@ class IsaacSceneRuntime:
                 joint_trajectory=command.joint_trajectory,
             )
             if self._physics_grasp_enabled:
+                if self._physics_soft_fallback_enabled and self.state.tomato_status is TomatoStatus.HELD:
+                    self.state.tomato_attached = False
+                    self.state.tomato_status = TomatoStatus.DETACHED
+                    self.state.grasp_result_reason = "tomato_detached_from_stem_soft_fallback"
+                    return self.snapshot()
                 self.state.grasp_result_reason = "awaiting_physics_detach"
                 return snapshot
             if self.state.tomato_status is TomatoStatus.HELD:
@@ -268,9 +297,6 @@ class IsaacSceneRuntime:
             ):
                 self.state.robot_home = True
 
-        if self._physics_grasp_enabled:
-            return self.snapshot()
-
         if self.state.tomato_status in {TomatoStatus.HELD, TomatoStatus.DETACHED} and self.state.gripper_closed:
             self.state.tomato_pose = Pose3D(
                 self.state.robot_tool_pose.x + self._grasp_constraint_offset[0],
@@ -280,6 +306,9 @@ class IsaacSceneRuntime:
                 0.0,
                 0.0,
             )
+            return self.snapshot()
+
+        if self._physics_grasp_enabled:
             return self.snapshot()
 
         if self.state.tomato_status is TomatoStatus.FALLEN:

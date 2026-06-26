@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ -f /opt/ros/jazzy/setup.bash ]; then
-  # MoveIt2 / rclpy を有効化したうえで Isaac Sim Python を起動する。
-  # shellcheck disable=SC1091
+if [[ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
   set +u
-  source /opt/ros/jazzy/setup.bash
+  # shellcheck disable=SC1091
+  source "/opt/ros/${ROS_DISTRO}/setup.bash"
   set -u
 fi
 
@@ -13,4 +12,10 @@ fi
 # OmniHub from being launched and makes GUI startup appear hung.
 unset HUB__ARGS__DETECT_ONLY || true
 
-exec /isaac-sim/python.sh "$@"
+cd /workspace/tomato-harvest
+
+if [[ "$#" -eq 0 ]]; then
+  exec bash
+fi
+
+exec "$@"

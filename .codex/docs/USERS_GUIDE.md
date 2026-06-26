@@ -78,10 +78,10 @@ updated: 2026-06-20
 ## 通常の起動
 ```bash
 ./build.sh
-./run.sh
+./into.sh
 ```
 
-`./run.sh` を実行すると、Isaac Sim のネイティブウィンドウが開き、その中に `3DView` と `Tomato Harvest Controls` ウィンドウが表示される。
+`./into.sh` でデバッグコンテナに入り、その中で viewer を起動する。
 
 Linux の X11 環境では、必要に応じて先に次を実行する。
 
@@ -96,12 +96,12 @@ xhost +local:root
 
 ## コンテナ内からシミュレータを起動する
 ```bash
-/isaac-sim/python.sh scripts/run_poc.py --mode isaac
+PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2
 ```
 
 ## headless で確認する
 ```bash
-/isaac-sim/python.sh scripts/run_poc.py --mode isaac --headless --test
+PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --headless --transport ros2
 ```
 
 # 起動後に何が見えるか
@@ -123,7 +123,7 @@ xhost +local:root
 
 # 操作方法
 ## 1. 起動する
-利用者は `./run.sh` を実行する。
+利用者は `./build.sh` を実行し、続けて `./into.sh` でコンテナへ入り、`PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2` を実行する。
 
 期待する結果:
 - Isaac Sim ウィンドウが開く

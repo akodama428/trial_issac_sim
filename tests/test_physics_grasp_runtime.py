@@ -103,7 +103,7 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
 
         self.assertEqual(contacts, {"left", "right"})
 
-    def test_geometry_fallback_does_not_create_contacts_without_recent_physical_contact(self) -> None:
+    def test_geometry_fallback_can_create_contacts_without_recent_physical_contact_when_geometry_is_tight(self) -> None:
         bridge = IsaacPhysicsHarvestBridge(
             stage=object(),
             scene_paths=PhysicsHarvestScenePaths(
@@ -132,7 +132,7 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
             gripper_closed=True,
         )
 
-        self.assertEqual(bridge._latched_finger_contacts, set())
+        self.assertEqual(bridge._latched_finger_contacts, {"left", "right"})
 
     def test_geometry_fallback_can_complete_the_second_finger_after_one_real_contact(self) -> None:
         bridge = IsaacPhysicsHarvestBridge(
@@ -194,6 +194,32 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
         contacts = bridge._infer_finger_contacts_from_geometry(poses["/World/TargetTomato"])
 
         self.assertEqual(contacts, set())
+
+    def test_attached_tomato_pose_is_restored_when_physics_pose_runs_away(self) -> None:
+        bridge = IsaacPhysicsHarvestBridge(
+            stage=object(),
+            scene_paths=PhysicsHarvestScenePaths(
+                ground_prim_path="/World/GroundPlane",
+                tray_prim_path="/World/PlaceTray",
+                tomato_prim_path="/World/TargetTomato",
+                stem_anchor_prim_path="/World/TomatoStemAnchor",
+                stem_joint_prim_path="/World/TomatoStemJoint",
+                grasp_joint_prim_path="/World/TomatoGraspJoint",
+                hand_mount_prim_path="/World/FrankaPanda/panda_hand",
+            ),
+            initial_tomato_pose=Pose3D(0.62, 0.0, 0.54, 0.0, 0.0, 0.0),
+        )
+
+        class _Snapshot:
+            tomato_status = TomatoStatus.ATTACHED
+            tomato_pose = Pose3D(0.62, 0.0, 0.54, 0.0, 0.0, 0.0)
+
+        self.assertTrue(
+            bridge._should_restore_attached_tomato_pose(
+                snapshot=_Snapshot(),
+                tomato_pose=Pose3D(4.70, 0.12, -3900.0, 0.0, 0.0, 0.0),
+            )
+        )
 
     def test_physics_mode_waits_for_external_grasp_and_detach_updates(self) -> None:
         layout = load_scene_layout_config()

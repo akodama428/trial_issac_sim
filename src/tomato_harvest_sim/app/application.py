@@ -106,6 +106,7 @@ def create_tomato_harvest_application(
     *,
     grasp_mode: str = "success",
     physics_grasp_enabled: bool = False,
+    physics_soft_fallback_enabled: bool = False,
     transport: str | None = None,
     autostart_moveit_service: bool = True,
 ) -> TomatoHarvestApplication:
@@ -115,7 +116,10 @@ def create_tomato_harvest_application(
     if autostart_moveit_service and isinstance(bridge, Ros2LoopbackBridge):
         moveit_service = MoveItServiceManager.start_if_needed()
     return TomatoHarvestApplication(
-        scene_runtime=IsaacSceneRuntime(physics_grasp_enabled=physics_grasp_enabled),
+        scene_runtime=IsaacSceneRuntime(
+            physics_grasp_enabled=physics_grasp_enabled,
+            physics_soft_fallback_enabled=physics_soft_fallback_enabled,
+        ),
         robot=RobotRuntime(grasp_lateral_offset_m=grasp_lateral_offset_m),
         bridge=bridge,
         moveit_service=moveit_service,

@@ -18,13 +18,14 @@ class PhysicsHarvestScenePaths:
 
 
 class IsaacPhysicsHarvestBridge:
-    STEM_BREAK_FORCE_N = 2.0
-    STEM_BREAK_TORQUE_NM = 2.0
+    STEM_BREAK_FORCE_N = 50.0
+    STEM_BREAK_TORQUE_NM = 50.0
     TOMATO_MASS_KG = 0.03
     DETACH_DISTANCE_M = 0.02
     PLACE_DISTANCE_M = 0.06
     CONTACT_LATCH_GRACE_STEPS = 3
-    HAND_TO_TOMATO_DISTANCE_TOLERANCE_M = 0.08
+    HAND_TO_TOMATO_DISTANCE_TOLERANCE_M = 0.12
+    MAX_ATTACHED_TOMATO_DEVIATION_M = 0.15
     FINGER_MIDPOINT_TO_TOMATO_TOLERANCE_M = 0.012
     FINGER_CONTACT_POINT_OFFSET_Z_M = 0.0447
     FINGER_GAP_MIN_M = 0.015
@@ -91,6 +92,11 @@ class IsaacPhysicsHarvestBridge:
                 return
 
         tomato_pose = self._world_pose(self._scene_paths.tomato_prim_path)
+        if self._should_restore_attached_tomato_pose(snapshot=snapshot, tomato_pose=tomato_pose):
+            self._debug_log("[PhysicsHarvest] restoring unstable attached tomato pose before grasp evaluation.")
+            tomato_pose = snapshot.tomato_pose
+            self._set_world_pose(self._scene_paths.tomato_prim_path, tomato_pose)
+            self._zero_rigid_body_velocity(self._scene_paths.tomato_prim_path)
         controller.sync_tomato_physics(tomato_pose)
         self._augment_contacts_from_grasp_geometry(tomato_pose=tomato_pose, gripper_closed=snapshot.gripper_closed)
 
@@ -222,15 +228,14 @@ class IsaacPhysicsHarvestBridge:
             return
         if self._latched_finger_contacts == {"left", "right"}:
             return
-        if not (self._active_finger_contacts or self._recent_finger_contacts):
-            self._debug_log(
-                "[PhysicsHarvest] geometry fallback skipped because no physical contact "
-                "was observed in the current or recent frames."
-            )
-            return
         geometric_contacts = self._infer_finger_contacts_from_geometry(tomato_pose)
         if not geometric_contacts:
             return
+        if not (self._active_finger_contacts or self._recent_finger_contacts):
+            self._debug_log(
+                "[PhysicsHarvest] geometry fallback inferred contacts without a contact report "
+                "because the grasp geometry was tightly aligned."
+            )
         self._debug_log(
             "[PhysicsHarvest] geometry fallback inferred "
             f"contacts={sorted(geometric_contacts)}"
@@ -243,6 +248,18 @@ class IsaacPhysicsHarvestBridge:
     def _infer_finger_contacts_from_geometry(self, tomato_pose: Pose3D) -> set[str]:
         hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
         hand_to_tomato_distance = self._distance(hand_pose, tomato_pose)
+        if hand_to_tomato_distance > self.HAND_TO_TOMATO_DISTANCE_TOLERANCE_M:
+            self._debug_log_geometry_state(
+                hand_pose=hand_pose,
+                tomato_pose=tomato_pose,
+                left_finger_pose=None,
+                right_finger_pose=None,
+                hand_to_tomato_distance=hand_to_tomato_distance,
+                left_distance=None,
+                right_distance=None,
+                midpoint_distance=None,
+            )
+            return set()
         left_finger_pose = self._world_pose(self._left_finger_prim_path())
         right_finger_pose = self._world_pose(self._right_finger_prim_path())
         left_contact_pose = self._inferred_finger_contact_pose(left_finger_pose)
@@ -297,6 +314,16 @@ class IsaacPhysicsHarvestBridge:
             )
             return set()
         return {"left", "right"}
+
+    def _should_restore_attached_tomato_pose(self, *, snapshot: object, tomato_pose: Pose3D) -> bool:
+        if getattr(snapshot, "tomato_status", None) != TomatoStatus.ATTACHED:
+            return False
+        if self._grasp_joint_active:
+            return False
+        reference_pose = getattr(snapshot, "tomato_pose", None)
+        if reference_pose is None:
+            return False
+        return self._distance(reference_pose, tomato_pose) > self.MAX_ATTACHED_TOMATO_DEVIATION_M
 
     def _inferred_finger_contact_pose(self, finger_pose: Pose3D) -> Pose3D:
         # The finger prim pose is near the finger root, while the actual grasp contact

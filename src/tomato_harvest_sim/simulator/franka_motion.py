@@ -21,6 +21,11 @@ class FrankaMotionProgress:
     distance_m: float | None
 
 
+@dataclass(frozen=True)
+class _FallbackArticulationAction:
+    joint_positions: np.ndarray
+
+
 def step_toward_joint_positions(
     current_positions: np.ndarray,
     target_positions: np.ndarray,
@@ -130,6 +135,7 @@ class IsaacFrankaMotionExecutor:
     )
     GRASP_TARGET_OFFSET_FROM_HAND_M = (0.0, 0.0, 0.0584)
     DEBUG_TRAJECTORY_ENV = "TOMATO_HARVEST_DEBUG_TRAJECTORY"
+    USE_JOINT_TRAJECTORY_EXECUTION_ENV = "TOMATO_HARVEST_USE_JOINT_TRAJECTORY_EXECUTION"
 
     def __init__(
         self,
@@ -138,7 +144,7 @@ class IsaacFrankaMotionExecutor:
         position_tolerance_m: float = 0.03,
         max_joint_step_rad: float = 0.05,
         max_gripper_step_rad: float = 0.01,
-        joint_tolerance_rad: float = 0.01,
+        joint_tolerance_rad: float = 0.03,
     ) -> None:
         self._robot_prim_path = robot_prim_path
         self._position_tolerance_m = position_tolerance_m
@@ -155,6 +161,9 @@ class IsaacFrankaMotionExecutor:
         self._joint_trajectory_targets: tuple[np.ndarray, ...] = ()
         self._active_trajectory_point_index: int = 0
         self._trajectory_debug_enabled = os.environ.get(self.DEBUG_TRAJECTORY_ENV, "").strip() not in {"", "0", "false", "False"}
+        self._joint_trajectory_execution_enabled = (
+            os.environ.get(self.USE_JOINT_TRAJECTORY_EXECUTION_ENV, "0").strip() not in {"", "0", "false", "False"}
+        )
         self._last_debug_joint_positions: np.ndarray | None = None
         self._last_debug_target_positions: np.ndarray | None = None
         self._last_snapshot_cycle_id: int | None = None
@@ -178,13 +187,19 @@ class IsaacFrankaMotionExecutor:
                 self._target_pose = snapshot.target_tool_pose
                 self._target_announced = False
                 self._reached_announced = False
-            self._sync_joint_trajectory(snapshot)
-            if self._joint_trajectory_targets:
-                self._motion_waypoints = ()
-                self._joint_waypoint_targets = ()
-                self._waypoint_signature = None
+            if self._joint_trajectory_execution_enabled:
+                self._sync_joint_trajectory(snapshot)
+                if self._joint_trajectory_targets:
+                    self._motion_waypoints = ()
+                    self._joint_waypoint_targets = ()
+                    self._waypoint_signature = None
+                else:
+                    self._sync_motion_waypoints(snapshot)
             else:
                 self._sync_motion_waypoints(snapshot)
+                self._joint_trajectory = None
+                self._joint_trajectory_targets = ()
+                self._active_trajectory_point_index = 0
             self._home_command_pending = False
             return
 
@@ -214,9 +229,8 @@ class IsaacFrankaMotionExecutor:
         if self._home_command_pending:
             return self._step_home_motion()
 
-        self._apply_gripper_state()
-
         if self._target_pose is None:
+            self._apply_gripper_state()
             return None
 
         if self._joint_trajectory_targets:
@@ -351,6 +365,10 @@ class IsaacFrankaMotionExecutor:
             target_positions,
             max_step_rad=self._max_joint_step_rad,
         )
+        next_positions = self._merge_gripper_targets_into_positions(
+            next_positions,
+            current_positions=current_positions,
+        )
         self._set_joint_positions_with_debug(next_positions, context="home_step")
 
     def _apply_gripper_state(self) -> None:
@@ -392,6 +410,10 @@ class IsaacFrankaMotionExecutor:
             joint_targets,
             max_step_rad=self._max_joint_step_rad,
         )
+        next_positions = self._merge_gripper_targets_into_positions(
+            next_positions,
+            current_positions=current_positions,
+        )
         self._set_joint_positions_with_debug(next_positions, context="ik_step")
 
     def _get_end_effector_pose(self) -> Pose3D | None:
@@ -432,7 +454,6 @@ class IsaacFrankaMotionExecutor:
         if current_positions is None or self._home_joint_positions is None:
             return None
 
-        self._apply_gripper_state()
         if joint_positions_reached(
             current_positions[:7],
             self._home_joint_positions[:7],
@@ -554,8 +575,8 @@ class IsaacFrankaMotionExecutor:
 
         active_joint_target = self._joint_waypoint_targets[self._active_waypoint_index]
         if joint_positions_reached(
-            current_positions,
-            active_joint_target,
+            current_positions[:7],
+            active_joint_target[:7],
             tolerance_rad=self._joint_tolerance_rad,
         ):
             if self._active_waypoint_index < len(self._joint_waypoint_targets) - 1:
@@ -583,6 +604,10 @@ class IsaacFrankaMotionExecutor:
             active_joint_target,
             max_step_rad=self._max_joint_step_rad,
         )
+        next_positions = self._merge_gripper_targets_into_positions(
+            next_positions,
+            current_positions=current_positions,
+        )
         self._set_joint_positions_with_debug(next_positions, context="waypoint_step")
         if self._target_announced:
             return None
@@ -606,8 +631,8 @@ class IsaacFrankaMotionExecutor:
 
         active_joint_target = self._joint_trajectory_targets[self._active_trajectory_point_index]
         if joint_positions_reached(
-            current_positions,
-            active_joint_target,
+            current_positions[:7],
+            active_joint_target[:7],
             tolerance_rad=self._joint_tolerance_rad,
         ):
             if self._active_trajectory_point_index < len(self._joint_trajectory_targets) - 1:
@@ -644,6 +669,10 @@ class IsaacFrankaMotionExecutor:
             next_positions=next_positions,
             current_pose=current_pose,
             current_error_m=current_error_m,
+        )
+        next_positions = self._merge_gripper_targets_into_positions(
+            next_positions,
+            current_positions=current_positions,
         )
         self._set_joint_positions_with_debug(next_positions, context="trajectory_step")
         if self._target_announced:
@@ -731,16 +760,50 @@ class IsaacFrankaMotionExecutor:
     def _set_joint_positions_with_debug(self, positions: np.ndarray, *, context: str) -> None:
         if self._articulation is None:
             return
-        self._articulation.set_joint_positions(positions)
+        if hasattr(self._articulation, "apply_action"):
+            self._articulation.apply_action(self._create_articulation_action(positions))
+            method = "apply_action"
+        else:
+            self._articulation.set_joint_positions(positions)
+            method = "set_joint_positions"
         if not self._trajectory_debug_enabled:
             return
         readback = self._current_joint_positions()
         self._debug_log(
             "[Simulator][TrajectoryDebug][set_joint_positions] "
+            f"method={method} "
             f"context={context} "
             f"command_q={self._format_joint_positions(positions[:7])} "
             f"readback_q={self._format_joint_positions(readback[:7]) if readback is not None else 'n/a'}"
         )
+
+    def _merge_gripper_targets_into_positions(
+        self,
+        positions: np.ndarray,
+        *,
+        current_positions: np.ndarray,
+    ) -> np.ndarray:
+        merged_positions = np.asarray(positions, dtype=float).copy()
+        if merged_positions.shape[0] < 9 or current_positions.shape[0] < 9:
+            return merged_positions
+        desired_finger_position = 0.0 if self._gripper_closed else 0.04
+        finger_targets = np.array([desired_finger_position, desired_finger_position], dtype=float)
+        next_fingers = step_toward_joint_positions(
+            np.asarray(current_positions[7:9], dtype=float).copy(),
+            finger_targets,
+            max_step_rad=self._max_gripper_step_rad,
+        )
+        merged_positions[7] = next_fingers[0]
+        merged_positions[8] = next_fingers[1]
+        return merged_positions
+
+    def _create_articulation_action(self, positions: np.ndarray) -> object:
+        try:
+            from isaacsim.core.utils.types import ArticulationAction
+
+            return ArticulationAction(joint_positions=np.asarray(positions, dtype=float))
+        except Exception:
+            return _FallbackArticulationAction(joint_positions=np.asarray(positions, dtype=float))
 
     @staticmethod
     def _format_joint_positions(values: tuple[float, ...] | np.ndarray) -> str:

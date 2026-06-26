@@ -16,6 +16,310 @@ from tomato_harvest_sim.simulator.franka_motion import (
 
 
 class FrankaMotionExecutorTest(unittest.TestCase):
+    def test_executor_prefers_apply_action_when_articulation_supports_it(self) -> None:
+        class _ActionCapableFakeArticulation:
+            def __init__(self) -> None:
+                self.positions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04], dtype=float)
+                self.apply_action_calls = 0
+                self.set_joint_positions_calls = 0
+
+            def get_joint_positions(self) -> np.ndarray:
+                return self.positions.copy()
+
+            def set_joint_positions(self, positions: np.ndarray) -> None:
+                self.set_joint_positions_calls += 1
+                self.positions = np.asarray(positions, dtype=float).copy()
+
+            def apply_action(self, action: object) -> None:
+                self.apply_action_calls += 1
+                self.positions = np.asarray(getattr(action, "joint_positions"), dtype=float).copy()
+
+        class _TrajectoryExecutor(IsaacFrankaMotionExecutor):
+            def __init__(self) -> None:
+                super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0)
+                self._initialized = True
+                self._articulation = _ActionCapableFakeArticulation()
+                self._joint_trajectory_execution_enabled = True
+
+            def _initialize_if_needed(self) -> bool:
+                return True
+
+        pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        snapshot = SceneSnapshot(
+            phase=ScenePhase.RUNNING,
+            active_camera="fixed_camera",
+            tomato_attached=True,
+            tomato_status=TomatoStatus.ATTACHED,
+            gripper_closed=True,
+            robot_home=False,
+            cycle_id=1,
+            robot_model="Franka Panda",
+            robot_base_pose=pose,
+            fixed_camera_pose=pose,
+            hand_camera_pose=pose,
+            branch_pose=pose,
+            stem_pose=pose,
+            tomato_pose=pose,
+            tray_pose=pose,
+            robot_tool_pose=pose,
+            target_tool_pose=Pose3D(0.30, 0.00, 0.57, 180.0, 0.0, 0.0),
+            pregrasp_pose=None,
+            grasp_pose=None,
+            pull_pose=None,
+            place_pose=None,
+            grasp_result_reason=None,
+            motion_waypoints=(),
+            active_waypoint_index=None,
+            motion_joint_trajectory=JointTrajectory(
+                joint_names=(
+                    "panda_joint1",
+                    "panda_joint2",
+                    "panda_joint3",
+                    "panda_joint4",
+                    "panda_joint5",
+                    "panda_joint6",
+                    "panda_joint7",
+                ),
+                points=(JointTrajectoryPoint((0.2, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9), 1.0),),
+            ),
+        )
+
+        executor = _TrajectoryExecutor()
+        executor.sync_with_snapshot(snapshot)
+        executor.step()
+
+        self.assertEqual(executor._articulation.apply_action_calls, 1)
+        self.assertEqual(executor._articulation.set_joint_positions_calls, 0)
+
+    def test_executor_merges_gripper_and_arm_command_during_joint_trajectory(self) -> None:
+        class _ActionCapableFakeArticulation:
+            def __init__(self) -> None:
+                self.positions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04], dtype=float)
+                self.apply_action_calls = 0
+                self.last_joint_positions: np.ndarray | None = None
+
+            def get_joint_positions(self) -> np.ndarray:
+                return self.positions.copy()
+
+            def apply_action(self, action: object) -> None:
+                self.apply_action_calls += 1
+                self.last_joint_positions = np.asarray(getattr(action, "joint_positions"), dtype=float).copy()
+                self.positions = self.last_joint_positions.copy()
+
+        class _TrajectoryExecutor(IsaacFrankaMotionExecutor):
+            def __init__(self) -> None:
+                super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0, max_gripper_step_rad=0.01)
+                self._initialized = True
+                self._articulation = _ActionCapableFakeArticulation()
+                self._joint_trajectory_execution_enabled = True
+
+            def _initialize_if_needed(self) -> bool:
+                return True
+
+        pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        snapshot = SceneSnapshot(
+            phase=ScenePhase.RUNNING,
+            active_camera="fixed_camera",
+            tomato_attached=True,
+            tomato_status=TomatoStatus.ATTACHED,
+            gripper_closed=True,
+            robot_home=False,
+            cycle_id=1,
+            robot_model="Franka Panda",
+            robot_base_pose=pose,
+            fixed_camera_pose=pose,
+            hand_camera_pose=pose,
+            branch_pose=pose,
+            stem_pose=pose,
+            tomato_pose=pose,
+            tray_pose=pose,
+            robot_tool_pose=pose,
+            target_tool_pose=Pose3D(0.30, 0.00, 0.57, 180.0, 0.0, 0.0),
+            pregrasp_pose=None,
+            grasp_pose=None,
+            pull_pose=None,
+            place_pose=None,
+            grasp_result_reason=None,
+            motion_waypoints=(),
+            active_waypoint_index=None,
+            motion_joint_trajectory=JointTrajectory(
+                joint_names=(
+                    "panda_joint1",
+                    "panda_joint2",
+                    "panda_joint3",
+                    "panda_joint4",
+                    "panda_joint5",
+                    "panda_joint6",
+                    "panda_joint7",
+                ),
+                points=(JointTrajectoryPoint((0.2, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9), 1.0),),
+            ),
+        )
+
+        executor = _TrajectoryExecutor()
+        executor.sync_with_snapshot(snapshot)
+        executor.step()
+
+        self.assertEqual(executor._articulation.apply_action_calls, 1)
+        self.assertIsNotNone(executor._articulation.last_joint_positions)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[0]), 0.2, places=6)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[7]), 0.03, places=6)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[8]), 0.03, places=6)
+
+    def test_executor_advances_trajectory_when_only_fingers_differ(self) -> None:
+        class _ActionCapableFakeArticulation:
+            def __init__(self) -> None:
+                self.positions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04], dtype=float)
+                self.apply_action_calls = 0
+
+            def get_joint_positions(self) -> np.ndarray:
+                return self.positions.copy()
+
+            def apply_action(self, action: object) -> None:
+                self.apply_action_calls += 1
+                self.positions = np.asarray(getattr(action, "joint_positions"), dtype=float).copy()
+
+        class _TrajectoryExecutor(IsaacFrankaMotionExecutor):
+            def __init__(self) -> None:
+                super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0, max_gripper_step_rad=0.01)
+                self._initialized = True
+                self._articulation = _ActionCapableFakeArticulation()
+                self._joint_trajectory_execution_enabled = True
+
+            def _initialize_if_needed(self) -> bool:
+                return True
+
+        pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        point_one = (0.2, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9)
+        point_two = (0.3, -0.1, 0.2, -1.8, 0.3, 1.7, 1.0)
+        snapshot = SceneSnapshot(
+            phase=ScenePhase.RUNNING,
+            active_camera="fixed_camera",
+            tomato_attached=True,
+            tomato_status=TomatoStatus.ATTACHED,
+            gripper_closed=True,
+            robot_home=False,
+            cycle_id=1,
+            robot_model="Franka Panda",
+            robot_base_pose=pose,
+            fixed_camera_pose=pose,
+            hand_camera_pose=pose,
+            branch_pose=pose,
+            stem_pose=pose,
+            tomato_pose=pose,
+            tray_pose=pose,
+            robot_tool_pose=pose,
+            target_tool_pose=Pose3D(0.30, 0.00, 0.57, 180.0, 0.0, 0.0),
+            pregrasp_pose=None,
+            grasp_pose=None,
+            pull_pose=None,
+            place_pose=None,
+            grasp_result_reason=None,
+            motion_waypoints=(),
+            active_waypoint_index=None,
+            motion_joint_trajectory=JointTrajectory(
+                joint_names=(
+                    "panda_joint1",
+                    "panda_joint2",
+                    "panda_joint3",
+                    "panda_joint4",
+                    "panda_joint5",
+                    "panda_joint6",
+                    "panda_joint7",
+                ),
+                points=(
+                    JointTrajectoryPoint(point_one, 0.5),
+                    JointTrajectoryPoint(point_two, 1.0),
+                ),
+            ),
+        )
+
+        executor = _TrajectoryExecutor()
+        executor.sync_with_snapshot(snapshot)
+        executor._articulation.positions[:7] = np.array(point_one, dtype=float)
+        executor._articulation.positions[7:9] = np.array([0.03, 0.03], dtype=float)
+
+        executor.step()
+
+        self.assertEqual(executor._active_trajectory_point_index, 1)
+        self.assertEqual(executor._articulation.apply_action_calls, 1)
+
+    def test_executor_advances_trajectory_when_arm_error_is_within_default_tolerance(self) -> None:
+        class _ActionCapableFakeArticulation:
+            def __init__(self) -> None:
+                self.positions = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04], dtype=float)
+                self.apply_action_calls = 0
+
+            def get_joint_positions(self) -> np.ndarray:
+                return self.positions.copy()
+
+            def apply_action(self, action: object) -> None:
+                self.apply_action_calls += 1
+                self.positions = np.asarray(getattr(action, "joint_positions"), dtype=float).copy()
+
+        class _TrajectoryExecutor(IsaacFrankaMotionExecutor):
+            def __init__(self) -> None:
+                super().__init__(robot_prim_path="/World/Franka")
+                self._initialized = True
+                self._articulation = _ActionCapableFakeArticulation()
+                self._joint_trajectory_execution_enabled = True
+
+            def _initialize_if_needed(self) -> bool:
+                return True
+
+        pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        point_one = (0.20, -0.20, 0.10, -1.90, 0.20, 1.80, 0.90)
+        point_two = (0.30, -0.10, 0.20, -1.80, 0.30, 1.70, 1.00)
+        snapshot = SceneSnapshot(
+            phase=ScenePhase.RUNNING,
+            active_camera="fixed_camera",
+            tomato_attached=True,
+            tomato_status=TomatoStatus.ATTACHED,
+            gripper_closed=False,
+            robot_home=False,
+            cycle_id=1,
+            robot_model="Franka Panda",
+            robot_base_pose=pose,
+            fixed_camera_pose=pose,
+            hand_camera_pose=pose,
+            branch_pose=pose,
+            stem_pose=pose,
+            tomato_pose=pose,
+            tray_pose=pose,
+            robot_tool_pose=pose,
+            target_tool_pose=Pose3D(0.30, 0.00, 0.57, 180.0, 0.0, 0.0),
+            pregrasp_pose=None,
+            grasp_pose=None,
+            pull_pose=None,
+            place_pose=None,
+            grasp_result_reason=None,
+            motion_waypoints=(),
+            active_waypoint_index=None,
+            motion_joint_trajectory=JointTrajectory(
+                joint_names=(
+                    "panda_joint1",
+                    "panda_joint2",
+                    "panda_joint3",
+                    "panda_joint4",
+                    "panda_joint5",
+                    "panda_joint6",
+                    "panda_joint7",
+                ),
+                points=(
+                    JointTrajectoryPoint(point_one, 0.5),
+                    JointTrajectoryPoint(point_two, 1.0),
+                ),
+            ),
+        )
+
+        executor = _TrajectoryExecutor()
+        executor.sync_with_snapshot(snapshot)
+        executor._articulation.positions[:7] = np.array((0.221, -0.20, 0.10, -1.90, 0.20, 1.80, 0.90), dtype=float)
+
+        executor.step()
+
+        self.assertEqual(executor._active_trajectory_point_index, 1)
+
     def test_hand_pose_is_shifted_back_from_grasp_center(self) -> None:
         grasp_center_pose = Pose3D(0.42, 0.0, 0.54, 180.0, 0.0, 0.0)
 
@@ -227,6 +531,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 self._initialized = True
                 self._articulation = _FakeArticulation()
                 self.ik_calls = 0
+                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -305,6 +610,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 self._initialized = True
                 self._articulation = _FakeArticulation()
                 self._trajectory_debug_enabled = True
+                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -422,6 +728,80 @@ class FrankaMotionExecutorTest(unittest.TestCase):
 
         self.assertEqual(log, "[Simulator] Returning Franka to the home joint pose.")
         self.assertLess(abs(executor._articulation.positions[0]), 1e-6)
+
+    def test_executor_uses_waypoint_ik_by_default_even_when_joint_trajectory_exists(self) -> None:
+        class _FakeArticulation:
+            def __init__(self) -> None:
+                self.positions = np.zeros(9, dtype=float)
+
+            def get_joint_positions(self) -> np.ndarray:
+                return self.positions.copy()
+
+            def set_joint_positions(self, positions: np.ndarray) -> None:
+                self.positions = np.asarray(positions, dtype=float).copy()
+
+        class _WaypointFirstExecutor(IsaacFrankaMotionExecutor):
+            def __init__(self) -> None:
+                super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0)
+                self._initialized = True
+                self._articulation = _FakeArticulation()
+                self.solve_calls = 0
+
+            def _initialize_if_needed(self) -> bool:
+                return True
+
+            def _solve_joint_targets_for_waypoints(self, waypoints: tuple[Pose3D, ...]) -> tuple[np.ndarray, ...]:
+                self.solve_calls += 1
+                return (np.array([0.3, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9, 0.04, 0.04], dtype=float),)
+
+        pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        waypoint = Pose3D(0.30, 0.00, 0.57, 180.0, 0.0, 0.0)
+        snapshot = SceneSnapshot(
+            phase=ScenePhase.RUNNING,
+            active_camera="fixed_camera",
+            tomato_attached=True,
+            tomato_status=TomatoStatus.ATTACHED,
+            gripper_closed=False,
+            robot_home=False,
+            cycle_id=1,
+            robot_model="Franka Panda",
+            robot_base_pose=pose,
+            fixed_camera_pose=pose,
+            hand_camera_pose=pose,
+            branch_pose=pose,
+            stem_pose=pose,
+            tomato_pose=pose,
+            tray_pose=pose,
+            robot_tool_pose=pose,
+            target_tool_pose=waypoint,
+            pregrasp_pose=None,
+            grasp_pose=None,
+            pull_pose=None,
+            place_pose=None,
+            grasp_result_reason=None,
+            motion_waypoints=(waypoint,),
+            active_waypoint_index=0,
+            motion_joint_trajectory=JointTrajectory(
+                joint_names=(
+                    "panda_joint1",
+                    "panda_joint2",
+                    "panda_joint3",
+                    "panda_joint4",
+                    "panda_joint5",
+                    "panda_joint6",
+                    "panda_joint7",
+                ),
+                points=(JointTrajectoryPoint((0.1, -0.3, 0.05, -2.0, 0.1, 1.75, 0.85), 0.5),),
+            ),
+        )
+
+        executor = _WaypointFirstExecutor()
+        executor.sync_with_snapshot(snapshot)
+        log = executor.step()
+
+        self.assertEqual(executor.solve_calls, 1)
+        self.assertIn("waypoint path", log)
+        self.assertEqual(executor._joint_trajectory_targets, ())
 
 
 if __name__ == "__main__":

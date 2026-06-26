@@ -558,6 +558,7 @@ def _build_control_panel_controller(
     system = create_tomato_harvest_application(
         grasp_mode=grasp_mode,
         physics_grasp_enabled=physics_grasp_enabled,
+        physics_soft_fallback_enabled=False,
         transport=transport,
     )
     controller = ControlPanelController(
