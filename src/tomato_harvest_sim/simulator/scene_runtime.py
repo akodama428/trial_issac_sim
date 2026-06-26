@@ -179,7 +179,6 @@ class IsaacSceneRuntime:
         )
 
     def close_gripper(self) -> SceneSnapshot:
-        self._clear_motion_target()
         self.state.gripper_closed = True
         if self._physics_grasp_enabled:
             if self._physics_soft_fallback_enabled:
@@ -209,7 +208,6 @@ class IsaacSceneRuntime:
         return self.snapshot()
 
     def open_gripper(self) -> SceneSnapshot:
-        self._clear_motion_target()
         self.state.gripper_closed = False
         if self._physics_grasp_enabled:
             if self._physics_soft_fallback_enabled and self.state.tomato_status is TomatoStatus.DETACHED:

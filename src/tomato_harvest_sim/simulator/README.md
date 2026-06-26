@@ -1,7 +1,7 @@
 # Simulator README
 
 このディレクトリは、Isaac Sim 上でトマト収穫シミュレータを構成する simulator side の実装をまとめたものである。  
-役割は、3D scene の構築、Start / Stop / Reset の UI、scene 状態の正本管理、Franka への動作反映、物理把持と detach の再現である。
+役割は、3D scene の構築、Start / Stop / Reset の UI、scene 状態の正本管理、Isaac Sim API への command 適用、物理把持と detach の再現である。
 
 ## 用語
 
@@ -32,14 +32,14 @@ flowchart TD
   Runtime[scene_runtime.py]
   Display[scene_runtime_view.py]
   Physics[physics_harvest.py]
-  Motion[franka_motion.py]
+  Driver[isaac_franka_driver.py]
   Panel[control_panel.py]
 
   Viewer --> Plan
   Viewer --> Runtime
   Viewer --> Display
   Viewer --> Physics
-  Viewer --> Motion
+  Viewer --> Driver
   Viewer --> Panel
 ```
 
@@ -55,8 +55,8 @@ flowchart TD
   - runtime 状態を 3D scene 表示に反映する
 - `physics_harvest.py`
   - PhysX ベースの把持、detach、落下、reset を扱う
-- `franka_motion.py`
-  - Franka articulation に joint trajectory / IK を反映する
+- `isaac_franka_driver.py`
+  - Franka articulation の joint state readback と Isaac Sim API への command 適用を担当する
 - `control_panel.py`
   - Start / Stop / Reset / camera 切替 UI とその制御を担当する
 
@@ -256,20 +256,20 @@ flowchart TD
 flowchart LR
   UI[ControlPanel]
   Scene[IsaacSceneRuntime]
-  Motion[IsaacFrankaMotionExecutor]
+  Driver[IsaacFrankaDriver]
   Physics[IsaacPhysicsHarvestBridge]
   Robot[robot side]
 
   UI --> Scene
   Robot --> Scene
-  Motion --> Scene
+  Driver --> Scene
   Physics --> Scene
 ```
 
 - `scene_runtime.py`
   - simulator の論理状態を持つ
-- `franka_motion.py`
-  - articulation を実際に動かす
+- `isaac_franka_driver.py`
+  - articulation readback と command apply を担当する
 - `physics_harvest.py`
   - PhysX 接触 / joint / detach / place を扱う
 - `control_panel.py`
@@ -293,4 +293,4 @@ flowchart LR
 3. `scene_runtime.py`
 4. `control_panel.py`
 5. `physics_harvest.py`
-6. `franka_motion.py`
+6. `isaac_franka_driver.py`

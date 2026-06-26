@@ -15,9 +15,9 @@ class MoveItStylePreGraspPlanner:
         self,
         *,
         approach_offset_m: float = 0.12,
-        vertical_offset_m: float = 0.03,
-        grasp_entry_offset_x_m: float = 0.04,
-        grasp_entry_offset_z_m: float = 0.045,
+        vertical_offset_m: float = 0.09,
+        grasp_hover_offset_z_m: float = 0.11,
+        grasp_entry_offset_z_m: float = 0.07,
         grasp_target_offset_z_m: float = 0.045,
         pull_offset_x_m: float = 0.08,
         pull_offset_z_m: float = 0.08,
@@ -29,7 +29,7 @@ class MoveItStylePreGraspPlanner:
     ) -> None:
         self._approach_offset_m = approach_offset_m
         self._vertical_offset_m = vertical_offset_m
-        self._grasp_entry_offset_x_m = grasp_entry_offset_x_m
+        self._grasp_hover_offset_z_m = grasp_hover_offset_z_m
         self._grasp_entry_offset_z_m = grasp_entry_offset_z_m
         self._grasp_target_offset_z_m = grasp_target_offset_z_m
         self._pull_offset_x_m = pull_offset_x_m
@@ -58,8 +58,16 @@ class MoveItStylePreGraspPlanner:
             0.0,
             0.0,
         )
+        grasp_hover_pose = Pose3D(
+            round(target_pose.x, 6),
+            round(target_pose.y + self._grasp_lateral_offset_m, 6),
+            round(target_pose.z + self._grasp_hover_offset_z_m, 6),
+            180.0,
+            0.0,
+            0.0,
+        )
         grasp_entry_pose = Pose3D(
-            round(target_pose.x - self._grasp_entry_offset_x_m, 6),
+            round(target_pose.x, 6),
             round(target_pose.y + self._grasp_lateral_offset_m, 6),
             round(target_pose.z + self._grasp_entry_offset_z_m, 6),
             180.0,
@@ -114,7 +122,7 @@ class MoveItStylePreGraspPlanner:
             pull_pose=pull_pose,
             place_pose=place_pose,
             pregrasp_waypoints=(pregrasp_pose,),
-            grasp_waypoints=(grasp_entry_pose, grasp_pose),
+            grasp_waypoints=(grasp_hover_pose, grasp_entry_pose, grasp_pose),
             pull_waypoints=(pull_lift_pose, pull_pose),
             place_waypoints=(pre_place_pose, place_pose),
         )

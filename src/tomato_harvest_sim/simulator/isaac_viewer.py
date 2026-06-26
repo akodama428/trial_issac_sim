@@ -10,7 +10,8 @@ from typing import Sequence
 
 from tomato_harvest_sim.app.application import create_tomato_harvest_application
 from tomato_harvest_sim.simulator.control_panel import ControlPanelController, IsaacControlPanelWindow
-from tomato_harvest_sim.simulator.franka_motion import IsaacFrankaMotionExecutor
+from tomato_harvest_sim.robot.trajectory_execution import FrankaTrajectoryExecutionManager
+from tomato_harvest_sim.simulator.isaac_franka_driver import IsaacFrankaDriver
 from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBridge, PhysicsHarvestScenePaths
 from tomato_harvest_sim.simulator.scene_plan import ReviewScenePlan, build_review_scene_plan
 from tomato_harvest_sim.simulator.scene_runtime_view import (
@@ -181,7 +182,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         _start_timeline_playback()
         _pump_updates(simulation_app.update, frame_count=4)
         _wait_for_first_frame(simulation_app=simulation_app, max_frames=240)
-        franka_executor = IsaacFrankaMotionExecutor(robot_prim_path=plan.robot_prim_path)
+        franka_executor = FrankaTrajectoryExecutionManager(
+            driver=IsaacFrankaDriver(
+                robot_prim_path=plan.robot_prim_path,
+                trajectory_debug_enabled=(
+                    os.environ.get(FrankaTrajectoryExecutionManager.DEBUG_TRAJECTORY_ENV, "").strip()
+                    not in {"", "0", "false", "False"}
+                ),
+            )
+        )
         control_controller = _build_control_panel_controller(
             artifacts.camera_paths,
             initial_camera_view=args.camera_view,
@@ -589,7 +598,7 @@ def _sync_runtime_visuals(runtime_display: SceneRuntimeDisplay, controller: Cont
 
 
 def _step_franka_executor(
-    executor: IsaacFrankaMotionExecutor,
+    executor: FrankaTrajectoryExecutionManager,
     controller: ControlPanelController,
 ) -> str | None:
     try:
@@ -600,7 +609,7 @@ def _step_franka_executor(
 
 
 def _sync_executor_pose_to_runtime(
-    executor: IsaacFrankaMotionExecutor,
+    executor: FrankaTrajectoryExecutionManager,
     controller: ControlPanelController,
 ) -> None:
     pose = executor.current_end_effector_pose()
@@ -610,7 +619,7 @@ def _sync_executor_pose_to_runtime(
 
 
 def _sync_executor_joint_state_to_runtime(
-    executor: IsaacFrankaMotionExecutor,
+    executor: FrankaTrajectoryExecutionManager,
     controller: ControlPanelController,
 ) -> None:
     joint_state = executor.current_joint_state_snapshot()
@@ -619,7 +628,7 @@ def _sync_executor_joint_state_to_runtime(
     controller.sync_robot_joint_state(joint_state)
 
 
-def _log_executor_post_update_debug(executor: IsaacFrankaMotionExecutor) -> None:
+def _log_executor_post_update_debug(executor: FrankaTrajectoryExecutionManager) -> None:
     executor.log_post_update_debug_snapshot()
 
 

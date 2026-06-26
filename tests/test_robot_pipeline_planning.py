@@ -72,15 +72,23 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         expected_pregrasp = Pose3D(
             round(layout.tomato_pose.x - 0.12, 6),
             round(layout.tomato_pose.y, 6),
-            round(layout.tomato_pose.z + 0.03, 6),
+            round(layout.tomato_pose.z + 0.09, 6),
+            180.0,
+            0.0,
+            0.0,
+        )
+        expected_grasp_hover = Pose3D(
+            round(layout.tomato_pose.x, 6),
+            round(layout.tomato_pose.y, 6),
+            round(layout.tomato_pose.z + 0.11, 6),
             180.0,
             0.0,
             0.0,
         )
         expected_grasp_entry = Pose3D(
-            round(layout.tomato_pose.x - 0.04, 6),
+            round(layout.tomato_pose.x, 6),
             round(layout.tomato_pose.y, 6),
-            round(layout.tomato_pose.z + 0.045, 6),
+            round(layout.tomato_pose.z + 0.07, 6),
             180.0,
             0.0,
             0.0,
@@ -118,7 +126,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         self.assertEqual(plan.pull_pose, expected_pull)
         self.assertEqual(plan.place_pose, expected_place)
         self.assertEqual(plan.pregrasp_waypoints, (expected_pregrasp,))
-        self.assertEqual(plan.grasp_waypoints, (expected_grasp_entry, expected_grasp))
+        self.assertEqual(plan.grasp_waypoints, (expected_grasp_hover, expected_grasp_entry, expected_grasp))
         self.assertEqual(plan.pull_waypoints, (expected_pull_lift, expected_pull))
         self.assertEqual(plan.place_waypoints, (expected_pre_place, expected_place))
         self.assertEqual(command.command_name, "move_to_pregrasp")
@@ -189,7 +197,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         expected_pregrasp = Pose3D(
             round(layout.tomato_pose.x - 0.12, 6),
             round(layout.tomato_pose.y, 6),
-            round(layout.tomato_pose.z + 0.03, 6),
+            round(layout.tomato_pose.z + 0.09, 6),
             180.0,
             0.0,
             0.0,
@@ -230,10 +238,18 @@ class RobotPipelinePlanningTest(unittest.TestCase):
 
         self.assertEqual(system.robot.state.task_phase, HarvestTaskPhase.MOVING_TO_GRASP)
         self.assertIsNotNone(system.robot.state.last_pregrasp_plan)
-        expected_grasp_entry = Pose3D(
-            round(layout.tomato_pose.x - 0.04, 6),
+        expected_grasp_hover = Pose3D(
+            round(layout.tomato_pose.x, 6),
             round(layout.tomato_pose.y, 6),
-            round(layout.tomato_pose.z + 0.045, 6),
+            round(layout.tomato_pose.z + 0.11, 6),
+            180.0,
+            0.0,
+            0.0,
+        )
+        expected_grasp_entry = Pose3D(
+            round(layout.tomato_pose.x, 6),
+            round(layout.tomato_pose.y, 6),
+            round(layout.tomato_pose.z + 0.07, 6),
             180.0,
             0.0,
             0.0,
@@ -256,7 +272,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
                 command_name="move_to_grasp",
                 planner_name=system.robot.state.planner_backend_name,
                 target_pose=expected_grasp,
-                waypoint_poses=(expected_grasp_entry, expected_grasp),
+                waypoint_poses=(expected_grasp_hover, expected_grasp_entry, expected_grasp),
             ),
         )
         self.assertEqual(system.simulator.state.grasp_pose, expected_grasp)

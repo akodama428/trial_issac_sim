@@ -52,7 +52,7 @@ class SceneRuntimeLayoutTest(unittest.TestCase):
         self.assertEqual(snapshot.stem_pose, layout.stem_pose)
         self.assertEqual(snapshot.tomato_pose, layout.tomato_pose)
 
-    def test_close_gripper_clears_active_motion_target(self) -> None:
+    def test_close_gripper_keeps_active_motion_target_to_hold_grasp_pose(self) -> None:
         runtime = IsaacSceneRuntime(physics_grasp_enabled=True)
         runtime.boot()
         target_pose = Pose3D(0.62, 0.0, 0.585, 180.0, 0.0, 0.0)
@@ -60,10 +60,9 @@ class SceneRuntimeLayoutTest(unittest.TestCase):
         runtime.set_grasp_pose(target_pose, waypoint_poses=(target_pose,))
         snapshot = runtime.close_gripper()
 
-        self.assertIsNone(snapshot.target_tool_pose)
-        self.assertEqual(snapshot.motion_waypoints, ())
-        self.assertIsNone(snapshot.active_waypoint_index)
-        self.assertIsNone(snapshot.motion_joint_trajectory)
+        self.assertEqual(snapshot.target_tool_pose, target_pose)
+        self.assertEqual(snapshot.motion_waypoints, (target_pose,))
+        self.assertEqual(snapshot.active_waypoint_index, 0)
 
     def test_simulator_runtime_runs_without_robot_runtime(self) -> None:
         runtime = IsaacSceneRuntime()

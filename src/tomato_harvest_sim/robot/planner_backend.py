@@ -274,7 +274,6 @@ class Ros2MoveIt2PlannerBridge:
         if not clients.apply_planning_scene(apply_request, timeout_sec=self._planning_timeout_sec):
             return None
         self._planning_scene_has_attached_tomato = attach_tomato
-
         request = self._build_motion_plan_request(
             joint_state=joint_state,
             base_frame_id=base_frame_id,

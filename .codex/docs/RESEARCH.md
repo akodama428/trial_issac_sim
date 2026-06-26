@@ -4,7 +4,7 @@ version: 0.1.0
 status: draft
 owner: atsushi
 created: 2026-06-17
-updated: 2026-06-18
+updated: 2026-06-26
 ---
 
 # 調査目的
@@ -251,6 +251,36 @@ Custom Docker Container
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
 
+## 15. MoveIt の joint trajectory 実行で最も一般的なのは `FollowJointTrajectory` + `ros2_control` `joint_trajectory_controller`
+- 調査日: 2026-06-26
+- 確認できた事実:
+  - MoveIt の公式 `Low Level Controllers` では、MoveIt は通常 `JointTrajectoryController` へマニピュレータの motion command を publish すると説明している。
+  - 同ページでは、MoveIt 側で controller interface type として `FollowJointTrajectory` を設定し、別途 `ros2_control` の `JointTrajectoryController` を起動すると、MoveIt がその action interface に自動接続すると説明している。
+  - 同ページでは、実運用では `99% of users choose ros2_control` と明記されている。
+- 推論ではなく確認済みの解釈:
+  - MoveIt 自身が独自の速度比例制御を毎周期回すのが一般形ではない。
+  - 一般形は、MoveIt が時間付き `JointTrajectory` を作り、実行は low-level controller に委譲する構成である。
+
+## 16. `joint_trajectory_controller` は waypoint 直狙いではなく、時間補間した目標状態を追従する
+- 調査日: 2026-06-26
+- 確認できた事実:
+  - `joint_trajectory_controller` は、trajectory point 間を時間補間して実行する controller であり、waypoint 間隔は疎でもよい。
+  - trajectory は「特定時刻に到達すべき waypoint 群」として扱われ、controller は機構が許す範囲でそれを実行しようとする。
+  - `MoveIt` の trajectory processing では、planner は通常 path だけを出し、その後に time parameterization を行う。MoveIt 公式 docs では `TimeOptimalTrajectoryGeneration (TOTG)` が推奨され、joint の velocity / acceleration limit は `joint_limits.yaml` から読む。
+- 推論ではなく確認済みの解釈:
+  - 現在の executor のように「次 waypoint だけを残り時間で割って直接速度化する」方式は、MoveIt 標準系より単純化された独自実装である。
+  - MoveIt の時間情報を活かすには、絶対時刻に対する参照状態 `q_ref(t), qd_ref(t)` を使う設計へ寄せる方が自然である。
+
+## 17. velocity command を使う場合の一般形は、trajectory tracking error を PID で速度へ写像する方式である
+- 調査日: 2026-06-26
+- 確認できた事実:
+  - `joint_trajectory_controller` は `position`、`velocity`、`acceleration`、`effort` の各 command interface をサポートする。
+  - `velocity` command interface の場合、position と velocity の trajectory following error を PID loop で velocity command へ写像すると公式 docs に記載されている。
+  - `velocity` command interface を使う場合、state interface には少なくとも `position` と `velocity` が必要である。
+- 推論ではなく確認済みの解釈:
+  - 速度指令ベースにしたい場合でも、一般的な方式は単純な `qdot = (q_target - q_now) / remaining_time` だけではなく、参照速度と追従誤差を使う PID 型の追従制御である。
+  - 今回の simulator executor を改善するなら、最終的には `joint_trajectory_controller` 相当の時間基準追従へ寄せるのが最も一般的である。
+
 # ソース
 - NVIDIA Isaac Sim Container Installation
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html
@@ -258,6 +288,12 @@ Custom Docker Container
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_ros.html
 - NVIDIA Isaac Sim MoveIt 2
   - https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_moveit.html
+- MoveIt Documentation: Low Level Controllers
+  - https://moveit.picknik.ai/main/doc/examples/controller_configuration/controller_configuration_tutorial.html
+- MoveIt Documentation: Trajectory Processing
+  - https://moveit.picknik.ai/main/doc/concepts/trajectory_processing.html
+- ROS 2 Control Documentation: joint_trajectory_controller
+  - https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html
 - NVIDIA Isaac Sim ROS 2 Cameras
   - https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_camera.html
 - NVIDIA Isaac Sim ROS2 Joint Control: Extension Python Scripting

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from tomato_harvest_sim.simulator.franka_motion import joint_positions_reached, step_toward_joint_positions
+from tomato_harvest_sim.robot.trajectory_tracking import joint_positions_reached, step_toward_joint_positions
 
 
 class FrankaMotionHelperTest(unittest.TestCase):

@@ -30,6 +30,7 @@ class IsaacPhysicsHarvestBridge:
     FINGER_CONTACT_POINT_OFFSET_Z_M = 0.0447
     FINGER_GAP_MIN_M = 0.015
     FINGER_GAP_MAX_M = 0.065
+    TOMATO_COLLISION_PRIM_SUFFIX = "/Geometry"
 
     def __init__(
         self,
@@ -167,7 +168,7 @@ class IsaacPhysicsHarvestBridge:
         from omni.physx import get_physx_simulation_interface
         from pxr import PhysxSchema
 
-        tomato_prim = self._stage.GetPrimAtPath(self._scene_paths.tomato_prim_path)
+        tomato_prim = self._stage.GetPrimAtPath(self._tomato_collision_prim_path())
         contact_api = PhysxSchema.PhysxContactReportAPI.Apply(tomato_prim)
         contact_api.CreateThresholdAttr().Set(0.0)
         self._contact_subscription = get_physx_simulation_interface().subscribe_contact_report_events(
@@ -214,9 +215,9 @@ class IsaacPhysicsHarvestBridge:
 
     def _match_finger_contact(self, actor0: str, actor1: str) -> str | None:
         pair = (actor0, actor1)
-        if self._scene_paths.tomato_prim_path not in pair:
+        if not any(self._is_tomato_actor(actor_path) for actor_path in pair):
             return None
-        other_actor = actor1 if actor0 == self._scene_paths.tomato_prim_path else actor0
+        other_actor = actor1 if self._is_tomato_actor(actor0) else actor0
         if "panda_leftfinger" in other_actor:
             return "left"
         if "panda_rightfinger" in other_actor:
@@ -386,49 +387,52 @@ class IsaacPhysicsHarvestBridge:
         return self._scene_paths.hand_mount_prim_path.replace("panda_hand", "panda_rightfinger")
 
     def _define_stem_anchor(self) -> None:
-        from pxr import Gf, UsdGeom, UsdPhysics
+        from pxr import Gf, UsdGeom
 
-        anchor = UsdGeom.Cube.Define(self._stage, self._scene_paths.stem_anchor_prim_path)
+        anchor = UsdGeom.Xform.Define(self._stage, self._scene_paths.stem_anchor_prim_path)
         anchor.AddTranslateOp().Set(
             Gf.Vec3d(self._initial_tomato_pose.x, self._initial_tomato_pose.y, self._initial_tomato_pose.z)
         )
-        anchor.AddScaleOp().Set(Gf.Vec3f(0.006, 0.006, 0.006))
         UsdGeom.Imageable(anchor).MakeInvisible()
-
-        anchor_prim = anchor.GetPrim()
-        UsdPhysics.CollisionAPI.Apply(anchor_prim)
-        rigid_api = UsdPhysics.RigidBodyAPI.Apply(anchor_prim)
-        rigid_api.CreateKinematicEnabledAttr(True)
 
     def _define_tomato_physics(self) -> None:
         from pxr import UsdPhysics
 
         tomato_prim = self._stage.GetPrimAtPath(self._scene_paths.tomato_prim_path)
-        UsdPhysics.CollisionAPI.Apply(tomato_prim)
         UsdPhysics.RigidBodyAPI.Apply(tomato_prim)
         mass_api = UsdPhysics.MassAPI.Apply(tomato_prim)
         mass_api.CreateMassAttr(self.TOMATO_MASS_KG)
+        collision_prim = self._stage.GetPrimAtPath(self._tomato_collision_prim_path())
+        if collision_prim.IsValid():
+            UsdPhysics.CollisionAPI.Apply(collision_prim)
 
     def _create_stem_joint(self) -> None:
-        from pxr import UsdPhysics
+        from pxr import Gf, Sdf, UsdPhysics
 
         self._remove_joint(self._scene_paths.stem_joint_prim_path)
         joint = UsdPhysics.FixedJoint.Define(self._stage, self._scene_paths.stem_joint_prim_path)
-        joint.CreateBody0Rel().SetTargets([self._scene_paths.stem_anchor_prim_path])
-        joint.CreateBody1Rel().SetTargets([self._scene_paths.tomato_prim_path])
-        joint.CreateLocalPos0Attr().Set((0.0, 0.0, 0.0))
-        joint.CreateLocalPos1Attr().Set((0.0, 0.0, 0.0))
+        joint.CreateBody0Rel().SetTargets([Sdf.Path(self._scene_paths.tomato_prim_path)])
+        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
+        joint.CreateLocalPos1Attr().Set(
+            Gf.Vec3f(
+                float(self._initial_tomato_pose.x),
+                float(self._initial_tomato_pose.y),
+                float(self._initial_tomato_pose.z),
+            )
+        )
+        joint.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+        joint.CreateLocalRot1Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
         joint.CreateBreakForceAttr(self.STEM_BREAK_FORCE_N)
         joint.CreateBreakTorqueAttr(self.STEM_BREAK_TORQUE_NM)
         self._detach_reported = False
 
     def _create_grasp_joint(self, tomato_pose: Pose3D) -> None:
-        from pxr import Gf, Gf as _Gf, UsdPhysics
+        from pxr import Gf, Gf as _Gf, Sdf, UsdPhysics
 
         self._remove_grasp_joint()
         joint = UsdPhysics.FixedJoint.Define(self._stage, self._scene_paths.grasp_joint_prim_path)
-        joint.CreateBody0Rel().SetTargets([self._scene_paths.hand_mount_prim_path])
-        joint.CreateBody1Rel().SetTargets([self._scene_paths.tomato_prim_path])
+        joint.CreateBody0Rel().SetTargets([Sdf.Path(self._scene_paths.hand_mount_prim_path)])
+        joint.CreateBody1Rel().SetTargets([Sdf.Path(self._scene_paths.tomato_prim_path)])
         world_point = Gf.Vec3d(tomato_pose.x, tomato_pose.y, tomato_pose.z)
         hand_local = self._world_point_to_local(self._scene_paths.hand_mount_prim_path, world_point)
         tomato_local = self._world_point_to_local(self._scene_paths.tomato_prim_path, world_point)
@@ -495,6 +499,13 @@ class IsaacPhysicsHarvestBridge:
         world_transform = UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0.0)
         local_point = world_transform.GetInverse().Transform(point)
         return float(local_point[0]), float(local_point[1]), float(local_point[2])
+
+    def _tomato_collision_prim_path(self) -> str:
+        return f"{self._scene_paths.tomato_prim_path}{self.TOMATO_COLLISION_PRIM_SUFFIX}"
+
+    def _is_tomato_actor(self, actor_path: str) -> bool:
+        tomato_root = self._scene_paths.tomato_prim_path
+        return actor_path == tomato_root or actor_path.startswith(f"{tomato_root}/")
 
     @staticmethod
     def _distance(left: Pose3D, right: Pose3D) -> float:
