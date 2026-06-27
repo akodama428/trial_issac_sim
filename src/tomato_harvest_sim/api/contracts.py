@@ -109,7 +109,7 @@ class SceneSnapshot:
     motion_waypoints: tuple[Pose3D, ...] = ()
     active_waypoint_index: int | None = None
     motion_joint_trajectory: "JointTrajectory" | None = None
-    execution_phase_spec: "ExecutionPhaseSpec | None" = None
+    active_phase_motion_plan: "PhaseMotionPlan | None" = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +167,7 @@ class PhaseExecutionIntent:
 
 @dataclass(frozen=True)
 class PhaseMotionPlan:
+    phase_id: "PhaseId"
     phase_goal_pose: Pose3D | None
     active_waypoints: tuple[Pose3D, ...]
     joint_trajectory: JointTrajectory | None = None
@@ -224,7 +225,7 @@ class MotionCommand:
     gripper_closed: bool | None = None
     waypoint_poses: tuple[Pose3D, ...] = ()
     joint_trajectory: JointTrajectory | None = None
-    execution_phase_spec: ExecutionPhaseSpec | None = None
+    phase_motion_plan: PhaseMotionPlan | None = None
 
 
 @dataclass(frozen=True)

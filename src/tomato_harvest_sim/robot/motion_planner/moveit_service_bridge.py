@@ -15,8 +15,8 @@ from tomato_harvest_sim.api.contracts import (
     TfTreeSnapshot,
 )
 from tomato_harvest_sim.robot.api.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
-from tomato_harvest_sim.robot.planner.pregrasp_planner import MoveItStylePreGraspPlanner
-from tomato_harvest_sim.robot.planner.ros_python import ensure_ros_python_modules_available
+from tomato_harvest_sim.robot.motion_planner.pregrasp_planner import MoveItStylePreGraspPlanner
+from tomato_harvest_sim.robot.motion_planner.ros_python import ensure_ros_python_modules_available
 
 
 def _moveit2_python_available() -> bool:

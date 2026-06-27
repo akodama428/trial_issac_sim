@@ -1,12 +1,21 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.contracts import ExecutionPhaseSpec, JointTrajectory, Pose3D, ScenePhase, SceneSnapshot
+from tomato_harvest_sim.api.contracts import (
+    ExecutionPhaseSpec,
+    JointTrajectory,
+    PhaseMotionPlan,
+    Pose3D,
+    ScenePhase,
+    SceneSnapshot,
+)
 from tomato_harvest_sim.robot.api.trajectory_tracking import TrajectoryTrackingState
+from tomato_harvest_sim.robot.trajectory_tracking.phase_spec_loader import PhaseSpecLoader
 
 
-class TrajectoryTrackingStateStore:
-    def __init__(self) -> None:
+class ExecutionStateStore:
+    def __init__(self, *, phase_spec_loader: PhaseSpecLoader | None = None) -> None:
         self._state = TrajectoryTrackingState()
+        self._phase_spec_loader = phase_spec_loader or PhaseSpecLoader()
 
     @property
     def state(self) -> TrajectoryTrackingState:
@@ -18,7 +27,8 @@ class TrajectoryTrackingStateStore:
         cycle_changed = state.last_snapshot_cycle_id != snapshot.cycle_id
         state.last_snapshot_cycle_id = snapshot.cycle_id
         motion_signature = self.motion_signature_from_snapshot(snapshot)
-        active_spec = snapshot.execution_phase_spec
+        active_phase_motion_plan = snapshot.active_phase_motion_plan
+        active_spec = self._build_execution_phase_spec(active_phase_motion_plan)
         active_target_pose = snapshot.target_tool_pose
         active_waypoints = snapshot.motion_waypoints
         active_joint_trajectory = snapshot.motion_joint_trajectory
@@ -32,6 +42,7 @@ class TrajectoryTrackingStateStore:
                 self.clear_replan_block()
             elif active_target_pose is not None:
                 state.target_pose = active_target_pose
+                state.active_phase_motion_plan = active_phase_motion_plan
                 state.execution_phase_spec = active_spec
                 state.position_tolerance_m = (
                     None if active_spec is None else active_spec.intent.success.position_tolerance_m
@@ -53,6 +64,7 @@ class TrajectoryTrackingStateStore:
             state.motion_waypoints = active_waypoints
             state.snapshot_active_waypoint_index = snapshot.active_waypoint_index
             state.joint_trajectory = active_joint_trajectory
+            state.active_phase_motion_plan = active_phase_motion_plan
             state.execution_phase_spec = active_spec
             state.position_tolerance_m = None if active_spec is None else active_spec.intent.success.position_tolerance_m
             state.home_command_pending = False
@@ -69,6 +81,7 @@ class TrajectoryTrackingStateStore:
         state.motion_waypoints = ()
         state.snapshot_active_waypoint_index = None
         state.joint_trajectory = None
+        state.active_phase_motion_plan = None
         state.execution_phase_spec = None
         state.position_tolerance_m = None
         self.clear_joint_trajectory_state(clear_raw=False)
@@ -111,20 +124,27 @@ class TrajectoryTrackingStateStore:
         state.blocked_motion_signature = None
         state.replan_status_announced = False
 
-    def current_motion_signature(self) -> tuple[Pose3D | None, tuple[Pose3D, ...], JointTrajectory | None, ExecutionPhaseSpec | None]:
+    def current_motion_signature(
+        self,
+    ) -> tuple[Pose3D | None, tuple[Pose3D, ...], JointTrajectory | None, PhaseMotionPlan | None]:
         state = self._state
-        return (state.target_pose, state.motion_waypoints, state.joint_trajectory, state.execution_phase_spec)
+        return (state.target_pose, state.motion_waypoints, state.joint_trajectory, state.active_phase_motion_plan)
 
     @staticmethod
     def motion_signature_from_snapshot(
         snapshot: SceneSnapshot,
-    ) -> tuple[Pose3D | None, tuple[Pose3D, ...], JointTrajectory | None, ExecutionPhaseSpec | None]:
-        if snapshot.execution_phase_spec is not None:
-            motion = snapshot.execution_phase_spec.motion
+    ) -> tuple[Pose3D | None, tuple[Pose3D, ...], JointTrajectory | None, PhaseMotionPlan | None]:
+        plan = snapshot.active_phase_motion_plan
+        if plan is not None:
             return (
-                motion.phase_goal_pose,
-                motion.active_waypoints,
-                motion.joint_trajectory,
-                snapshot.execution_phase_spec,
+                plan.phase_goal_pose,
+                plan.active_waypoints,
+                plan.joint_trajectory,
+                plan,
             )
         return (snapshot.target_tool_pose, snapshot.motion_waypoints, snapshot.motion_joint_trajectory, None)
+
+    def _build_execution_phase_spec(self, plan: PhaseMotionPlan | None) -> ExecutionPhaseSpec | None:
+        if plan is None:
+            return None
+        return self._phase_spec_loader.build_spec(plan)

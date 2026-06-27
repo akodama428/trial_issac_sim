@@ -11,7 +11,7 @@ from tomato_harvest_sim.api.contracts import (
     SceneSnapshot,
     TomatoStatus,
 )
-from tomato_harvest_sim.robot.planner import MoveItServiceManager
+from tomato_harvest_sim.robot.motion_planner import MoveItServiceManager
 from tomato_harvest_sim.robot.runtime import RobotRuntime
 from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
 

@@ -10,8 +10,8 @@ from tomato_harvest_sim.api.bridge import (
     create_bridge,
 )
 from tomato_harvest_sim.api.contracts import ControlCommand, JointStateSnapshot
-from tomato_harvest_sim.robot.planner import ISAAC_PANDA_URDF, build_move_group_parameters
-from tomato_harvest_sim.robot.planner import write_move_group_parameters_file
+from tomato_harvest_sim.robot.motion_planner import ISAAC_PANDA_URDF, build_move_group_parameters
+from tomato_harvest_sim.robot.motion_planner import write_move_group_parameters_file
 from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
 
 

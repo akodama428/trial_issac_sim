@@ -64,7 +64,7 @@ class SceneRuntimeLayoutTest(unittest.TestCase):
         self.assertEqual(snapshot.motion_waypoints, ())
         self.assertIsNone(snapshot.active_waypoint_index)
         self.assertIsNone(snapshot.motion_joint_trajectory)
-        self.assertIsNone(snapshot.execution_phase_spec)
+        self.assertIsNone(snapshot.active_phase_motion_plan)
 
     def test_open_gripper_clears_active_motion_target_for_gripper_phase(self) -> None:
         runtime = IsaacSceneRuntime(physics_grasp_enabled=True)
@@ -78,7 +78,7 @@ class SceneRuntimeLayoutTest(unittest.TestCase):
         self.assertEqual(snapshot.motion_waypoints, ())
         self.assertIsNone(snapshot.active_waypoint_index)
         self.assertIsNone(snapshot.motion_joint_trajectory)
-        self.assertIsNone(snapshot.execution_phase_spec)
+        self.assertIsNone(snapshot.active_phase_motion_plan)
 
     def test_simulator_runtime_runs_without_robot_runtime(self) -> None:
         runtime = IsaacSceneRuntime()

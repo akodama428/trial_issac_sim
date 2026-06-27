@@ -15,7 +15,7 @@ from tomato_harvest_sim.robot.trajectory_tracking.reference_tracking import (
     joint_positions_reached,
     step_toward_joint_positions,
 )
-from tomato_harvest_sim.robot.trajectory_tracking.state_store import TrajectoryTrackingStateStore
+from tomato_harvest_sim.robot.trajectory_tracking.state_store import ExecutionStateStore
 
 
 def pose_distance_m(current_pose: Pose3D, target_pose: Pose3D) -> float:
@@ -112,7 +112,7 @@ class TrajectoryTracker:
     def prepare_tracking_state(
         self,
         *,
-        store: TrajectoryTrackingStateStore,
+        store: ExecutionStateStore,
         observation: ObservationData,
         solve_joint_targets_for_waypoints: Callable[[tuple[Pose3D, ...]], tuple[np.ndarray, ...]],
     ) -> TrackingStepResult | None:
@@ -131,7 +131,7 @@ class TrajectoryTracker:
     def compute_step(
         self,
         *,
-        store: TrajectoryTrackingStateStore,
+        store: ExecutionStateStore,
         observation: ObservationData,
         home_joint_positions: np.ndarray | None,
         solve_joint_targets_for_pose: Callable[[Pose3D], np.ndarray | None],
@@ -204,7 +204,7 @@ class TrajectoryTracker:
     def _sync_motion_waypoints(
         self,
         *,
-        store: TrajectoryTrackingStateStore,
+        store: ExecutionStateStore,
         allow_target_fallback: bool,
         solve_joint_targets_for_waypoints: Callable[[tuple[Pose3D, ...]], tuple[np.ndarray, ...]],
     ) -> None:
@@ -233,7 +233,7 @@ class TrajectoryTracker:
     def _step_home_motion(
         self,
         *,
-        store: TrajectoryTrackingStateStore,
+        store: ExecutionStateStore,
         current_positions: np.ndarray | None,
         home_joint_positions: np.ndarray | None,
     ) -> TrackingStepResult:
@@ -275,7 +275,7 @@ class TrajectoryTracker:
     def _step_joint_waypoint_path(
         self,
         *,
-        store: TrajectoryTrackingStateStore,
+        store: ExecutionStateStore,
         current_positions: np.ndarray | None,
         current_pose: Pose3D | None,
     ) -> TrackingStepResult:

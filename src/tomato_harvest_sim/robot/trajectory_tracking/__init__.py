@@ -4,11 +4,13 @@ from typing import TYPE_CHECKING
 
 __all__ = [
     "ExecutionMonitor",
+    "ExecutionStateStore",
     "FollowJointTrajectoryActionClient",
     "FrankaExecutionDriverProtocol",
     "FrankaMotionProgress",
     "FrankaTrajectoryExecutionManager",
     "ObservationData",
+    "PhaseSpecLoader",
     "TrackingCommand",
     "TrackingStepResult",
     "TrajectoryReferenceState",
@@ -16,7 +18,6 @@ __all__ = [
     "TrajectoryTracker",
     "TrajectoryTrackingCoordinator",
     "TrajectoryTrackingState",
-    "TrajectoryTrackingStateStore",
     "build_joint_trajectory_segments",
     "compute_trajectory_reference_state",
     "is_pose_reached",
@@ -42,13 +43,14 @@ if TYPE_CHECKING:
         TrajectoryTrackingCoordinator,
     )
     from tomato_harvest_sim.robot.trajectory_tracking.execution_monitor import ExecutionMonitor
+    from tomato_harvest_sim.robot.trajectory_tracking.phase_spec_loader import PhaseSpecLoader
     from tomato_harvest_sim.robot.trajectory_tracking.reference_tracking import (
         build_joint_trajectory_segments,
         compute_trajectory_reference_state,
         joint_positions_reached,
         step_toward_joint_positions,
     )
-    from tomato_harvest_sim.robot.trajectory_tracking.state_store import TrajectoryTrackingStateStore
+    from tomato_harvest_sim.robot.trajectory_tracking.state_store import ExecutionStateStore
     from tomato_harvest_sim.robot.trajectory_tracking.tracker import TrajectoryTracker, is_pose_reached, pose_distance_m
 
 
@@ -92,8 +94,13 @@ def __getattr__(name: str):
 
         return getattr(module, name)
 
-    if name in {"TrajectoryTrackingStateStore"}:
+    if name in {"ExecutionStateStore"}:
         from tomato_harvest_sim.robot.trajectory_tracking import state_store as module
+
+        return getattr(module, name)
+
+    if name in {"PhaseSpecLoader"}:
+        from tomato_harvest_sim.robot.trajectory_tracking import phase_spec_loader as module
 
         return getattr(module, name)
 

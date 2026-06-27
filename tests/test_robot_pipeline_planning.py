@@ -16,9 +16,9 @@ from tomato_harvest_sim.api.contracts import (
     TargetEstimate,
 )
 from tomato_harvest_sim.app.application import create_tomato_harvest_application
-from tomato_harvest_sim.robot.motion import MoveItStyleMotionPublisher
+from tomato_harvest_sim.robot.motion import MoveItStyleMotionPublisher, phase_motion_from_harvest_plan
 from tomato_harvest_sim.robot.perception import TomatoTargetEstimator
-from tomato_harvest_sim.robot.planner import MoveItStylePreGraspPlanner
+from tomato_harvest_sim.robot.motion_planner import MoveItStylePreGraspPlanner
 from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
 
 
@@ -70,9 +70,9 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             system.bridge.read_tf_tree(),
             system.simulator.snapshot(),
         )
-        command = motion.build_pregrasp_command(plan)
-        grasp_command = motion.build_grasp_command(plan)
-        pull_command = motion.build_pull_command(plan)
+        command = motion.build_phase_command(planner_name=plan.planner_name, phase_motion_plan=phase_motion_from_harvest_plan(plan, PhaseId.MOVING_TO_PREGRASP))
+        grasp_command = motion.build_phase_command(planner_name=plan.planner_name, phase_motion_plan=phase_motion_from_harvest_plan(plan, PhaseId.MOVING_TO_GRASP))
+        pull_command = motion.build_phase_command(planner_name=plan.planner_name, phase_motion_plan=phase_motion_from_harvest_plan(plan, PhaseId.PULL_TO_DETACH))
         expected_pregrasp = Pose3D(
             round(layout.tomato_pose.x - 0.12, 6),
             round(layout.tomato_pose.y, 6),
@@ -181,7 +181,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             planning_scene_object_ids=(),
         )
 
-        command = motion.build_pregrasp_command(plan)
+        command = motion.build_phase_command(planner_name=plan.planner_name, phase_motion_plan=phase_motion_from_harvest_plan(plan, PhaseId.MOVING_TO_PREGRASP))
 
         self.assertEqual(command.joint_trajectory, trajectory)
 
@@ -214,9 +214,9 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         self.assertEqual(system.bridge.state.last_motion_command.planner_name, "moveit2_pregrasp_demo")
         self.assertEqual(system.bridge.state.last_motion_command.target_pose, expected_pregrasp)
         self.assertEqual(system.bridge.state.last_motion_command.waypoint_poses, (expected_pregrasp,))
-        self.assertIsNotNone(system.bridge.state.last_motion_command.execution_phase_spec)
+        self.assertIsNotNone(system.bridge.state.last_motion_command.phase_motion_plan)
         self.assertEqual(
-            system.bridge.state.last_motion_command.execution_phase_spec.phase_id,
+            system.bridge.state.last_motion_command.phase_motion_plan.phase_id,
             PhaseId.MOVING_TO_PREGRASP,
         )
         self.assertEqual(system.simulator.state.pregrasp_pose, expected_pregrasp)
@@ -280,9 +280,9 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             system.bridge.state.last_motion_command.waypoint_poses,
             (expected_grasp_hover, expected_grasp_entry, expected_grasp),
         )
-        self.assertIsNotNone(system.bridge.state.last_motion_command.execution_phase_spec)
+        self.assertIsNotNone(system.bridge.state.last_motion_command.phase_motion_plan)
         self.assertEqual(
-            system.bridge.state.last_motion_command.execution_phase_spec.phase_id,
+            system.bridge.state.last_motion_command.phase_motion_plan.phase_id,
             PhaseId.MOVING_TO_GRASP,
         )
         self.assertEqual(system.simulator.state.grasp_pose, expected_grasp)
@@ -367,7 +367,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             place_waypoints=(Pose3D(layout.tray_pose.x, layout.tray_pose.y, layout.tray_pose.z + 0.12, 180.0, 0.0, 0.0),),
         )
         planner = _RecordingPlanner(replanned_plan)
-        system.robot._planner = planner
+        system.robot._behavior_planner._planner = planner
         system.robot.state.runtime_state = RobotRuntimeState.RUNNING
         system.robot.state.task_phase = HarvestTaskPhase.MOVING_TO_GRASP
         system.robot.state.last_target_estimate = estimate
@@ -388,9 +388,9 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         self.assertEqual(system.robot.state.last_motion_command.planner_name, "recording_replan")
         self.assertEqual(system.robot.state.last_motion_command.target_pose, replanned_grasp)
         self.assertEqual(system.robot.state.last_motion_command.waypoint_poses, (replanned_grasp,))
-        self.assertIsNotNone(system.robot.state.last_motion_command.execution_phase_spec)
+        self.assertIsNotNone(system.robot.state.last_motion_command.phase_motion_plan)
         self.assertEqual(
-            system.robot.state.last_motion_command.execution_phase_spec.phase_id,
+            system.robot.state.last_motion_command.phase_motion_plan.phase_id,
             PhaseId.MOVING_TO_GRASP,
         )
         self.assertEqual(system.simulator.state.grasp_pose, replanned_grasp)

@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from tomato_harvest_sim.robot.planner.ros_python import ensure_ros_python_modules_available
+from tomato_harvest_sim.robot.motion_planner.ros_python import ensure_ros_python_modules_available
 
 
 MOVE_GROUP_EXECUTABLE = "/opt/ros/jazzy/lib/moveit_ros_move_group/move_group"

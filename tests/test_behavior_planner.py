@@ -14,7 +14,7 @@ class BehaviorPlannerTest(unittest.TestCase):
 
         self.assertEqual(intent.phase_id, PhaseId.MOVING_TO_GRASP)
         self.assertEqual(intent.success.judge, SuccessJudge.END_EFFECTOR_POSE)
-        self.assertEqual(intent.success.position_tolerance_m, 0.015)
+        self.assertEqual(intent.success.position_tolerance_m, 0.010)
         self.assertEqual(intent.success.stable_steps, 2)
         self.assertEqual(intent.abort.stall_timeout_sec, 0.5)
 

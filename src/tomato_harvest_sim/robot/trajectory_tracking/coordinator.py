@@ -28,7 +28,7 @@ from tomato_harvest_sim.robot.trajectory_tracking.tracker import (
     is_pose_reached,
     pose_distance_m,
 )
-from tomato_harvest_sim.robot.trajectory_tracking.state_store import TrajectoryTrackingStateStore
+from tomato_harvest_sim.robot.trajectory_tracking.state_store import ExecutionStateStore
 
 
 def _joint_limits_path() -> Path:
@@ -90,7 +90,7 @@ class TrajectoryTrackingCoordinator:
         self._position_tolerance_m = position_tolerance_m
         self._joint_tolerance_rad = joint_tolerance_rad
         self._trajectory_debug_enabled = os.environ.get(self.DEBUG_TRAJECTORY_ENV, "").strip() not in {"", "0", "false", "False"}
-        self._state_store = TrajectoryTrackingStateStore()
+        self._state_store = ExecutionStateStore()
         self._pending_snapshot: SceneSnapshot | None = None
         self._pending_snapshot_prepared = False
         self._arm_joint_velocity_limits_rad_s = _load_arm_joint_velocity_limits_rad_s(self.ARM_JOINT_NAMES)

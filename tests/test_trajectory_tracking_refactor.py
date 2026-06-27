@@ -5,20 +5,14 @@ import unittest
 import numpy as np
 
 from tomato_harvest_sim.api.contracts import (
-    AbortPolicy,
-    ExecutionPhaseSpec,
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
-    PhaseExecutionIntent,
     PhaseId,
     PhaseMotionPlan,
     Pose3D,
-    PoseSemantics,
     ScenePhase,
     SceneSnapshot,
-    SuccessJudge,
-    SuccessPolicy,
     TomatoStatus,
 )
 from tomato_harvest_sim.api.hardware_control import HardwareControlPort, HardwareStateSample
@@ -42,7 +36,7 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
         motion_joint_trajectory: JointTrajectory | None = None,
         gripper_closed: bool = False,
         active_waypoint_index: int | None = None,
-        execution_phase_spec: ExecutionPhaseSpec | None = None,
+        active_phase_motion_plan: PhaseMotionPlan | None = None,
     ) -> SceneSnapshot:
         pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
         return SceneSnapshot(
@@ -71,13 +65,13 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
             motion_waypoints=motion_waypoints,
             active_waypoint_index=active_waypoint_index,
             motion_joint_trajectory=motion_joint_trajectory,
-            execution_phase_spec=execution_phase_spec,
+            active_phase_motion_plan=active_phase_motion_plan,
         )
 
     def test_state_store_marks_home_pending_on_ready_cycle_change(self) -> None:
-        from tomato_harvest_sim.robot.trajectory_tracking.state_store import TrajectoryTrackingStateStore
+        from tomato_harvest_sim.robot.trajectory_tracking.state_store import ExecutionStateStore
 
-        store = TrajectoryTrackingStateStore()
+        store = ExecutionStateStore()
 
         running_snapshot = self._build_snapshot(
             cycle_id=1,
@@ -230,25 +224,17 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
             joint_names=TrajectoryTrackingCoordinator.ARM_JOINT_NAMES,
             points=(JointTrajectoryPoint((0.2, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9), 1.0),),
         )
-        execution_phase_spec = ExecutionPhaseSpec(
+        goal_pose = Pose3D(0.3, 0.0, 0.57, 180.0, 0.0, 0.0)
+        phase_motion_plan = PhaseMotionPlan(
             phase_id=PhaseId.MOVING_TO_PREGRASP,
-            intent=PhaseExecutionIntent(
-                phase_id=PhaseId.MOVING_TO_PREGRASP,
-                phase_goal_pose=Pose3D(0.3, 0.0, 0.57, 180.0, 0.0, 0.0),
-                pose_semantics=PoseSemantics.TOOL_CENTER,
-                success=SuccessPolicy(judge=SuccessJudge.END_EFFECTOR_POSE, position_tolerance_m=0.03),
-                abort=AbortPolicy(nominal_timeout_sec=3.0, stall_timeout_sec=0.5),
-            ),
-            motion=PhaseMotionPlan(
-                phase_goal_pose=Pose3D(0.3, 0.0, 0.57, 180.0, 0.0, 0.0),
-                active_waypoints=(Pose3D(0.3, 0.0, 0.57, 180.0, 0.0, 0.0),),
-                joint_trajectory=trajectory,
-            ),
+            phase_goal_pose=goal_pose,
+            active_waypoints=(goal_pose,),
+            joint_trajectory=trajectory,
         )
         snapshot = self._build_snapshot(
-            target_tool_pose=Pose3D(0.3, 0.0, 0.57, 180.0, 0.0, 0.0),
+            target_tool_pose=goal_pose,
             motion_joint_trajectory=trajectory,
-            execution_phase_spec=execution_phase_spec,
+            active_phase_motion_plan=phase_motion_plan,
         )
         driver = _Driver()
         execution_port = _ExecutionPort()
@@ -261,9 +247,9 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
         log = coordinator.run_cycle(snapshot)
 
         self.assertEqual(execution_port.request.trajectory, trajectory)
-        self.assertEqual(execution_port.request.target_pose, execution_phase_spec.motion.phase_goal_pose)
-        self.assertEqual(execution_port.request.position_tolerance_m, execution_phase_spec.intent.success.position_tolerance_m)
-        self.assertEqual(execution_port.request.execution_phase_spec, execution_phase_spec)
+        self.assertEqual(execution_port.request.target_pose, phase_motion_plan.phase_goal_pose)
+        self.assertIsNotNone(execution_port.request.execution_phase_spec)
+        self.assertEqual(execution_port.request.execution_phase_spec.phase_id, PhaseId.MOVING_TO_PREGRASP)
         self.assertEqual(execution_port.step_count, 1)
         self.assertIn("accepted joint trajectory", log or "")
 
