@@ -3,42 +3,24 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass, replace
-from typing import Protocol
 
 from tomato_harvest_sim.api.contracts import (
+    HarvestMotionPlan,
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
     Pose3D,
-    PreGraspPlan,
     SceneSnapshot,
     TargetEstimate,
     TfTreeSnapshot,
 )
-from tomato_harvest_sim.robot.planner import MoveItStylePreGraspPlanner
-from tomato_harvest_sim.robot.ros_python import ensure_ros_python_modules_available
+from tomato_harvest_sim.robot.api.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
+from tomato_harvest_sim.robot.planner.pregrasp_planner import MoveItStylePreGraspPlanner
+from tomato_harvest_sim.robot.planner.ros_python import ensure_ros_python_modules_available
 
 
 def _moveit2_python_available() -> bool:
     return ensure_ros_python_modules_available("rclpy", "moveit_msgs")
-
-
-@dataclass(frozen=True)
-class PlannerBackendInfo:
-    name: str
-    moveit2_enabled: bool
-
-
-@dataclass(frozen=True)
-class MoveIt2PlanningResult:
-    success: bool
-    backend_name: str
-    reason: str
-    pregrasp_joint_trajectory: JointTrajectory | None = None
-    grasp_joint_trajectory: JointTrajectory | None = None
-    pull_joint_trajectory: JointTrajectory | None = None
-    place_joint_trajectory: JointTrajectory | None = None
-    planning_scene_object_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -48,19 +30,7 @@ class _TomatoPlanningSceneOps:
     add_attached_tomato: bool
     remove_attached_tomato: bool
 
-
-class MoveIt2PlannerBridge(Protocol):
-    def plan_phase_trajectories(
-        self,
-        *,
-        joint_state: JointStateSnapshot,
-        tf_tree: TfTreeSnapshot,
-        scene_snapshot: SceneSnapshot,
-        plan: PreGraspPlan,
-    ) -> MoveIt2PlanningResult: ...
-
-
-class MoveIt2ServiceBridgePlanner:
+class MoveIt2ServiceBridgePlanner(MotionPlanner):
     """MoveIt2-aware planner that applies a planning scene and returns joint trajectories."""
 
     def __init__(
@@ -78,7 +48,7 @@ class MoveIt2ServiceBridgePlanner:
         joint_state: JointStateSnapshot,
         tf_tree: TfTreeSnapshot,
         scene_snapshot: SceneSnapshot,
-    ) -> PreGraspPlan:
+    ) -> HarvestMotionPlan:
         fallback_plan = self._fallback.plan(target_estimate, joint_state, tf_tree, scene_snapshot)
         result = self._bridge.plan_phase_trajectories(
             joint_state=joint_state,
@@ -153,7 +123,7 @@ class Ros2MoveIt2PlannerBridge:
         joint_state: JointStateSnapshot,
         tf_tree: TfTreeSnapshot,
         scene_snapshot: SceneSnapshot,
-        plan: PreGraspPlan,
+        plan: HarvestMotionPlan,
     ) -> MoveIt2PlanningResult:
         if not _moveit2_python_available():
             return MoveIt2PlanningResult(
@@ -859,7 +829,7 @@ def _quaternion_from_pose(pose: Pose3D) -> object:
     return quaternion
 
 
-def build_planner(*, grasp_lateral_offset_m: float = 0.0) -> tuple[object, PlannerBackendInfo]:
+def build_planner(*, grasp_lateral_offset_m: float = 0.0) -> tuple[MotionPlanner, PlannerBackendInfo]:
     requested = os.environ.get("TOMATO_HARVEST_PLANNER_BACKEND", "auto").strip().lower()
 
     if requested == "geometric":

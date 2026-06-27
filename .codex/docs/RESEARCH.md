@@ -4,7 +4,7 @@ version: 0.1.0
 status: draft
 owner: atsushi
 created: 2026-06-17
-updated: 2026-06-26
+updated: 2026-06-27
 ---
 
 # 調査目的
@@ -281,6 +281,38 @@ Custom Docker Container
   - 速度指令ベースにしたい場合でも、一般的な方式は単純な `qdot = (q_target - q_now) / remaining_time` だけではなく、参照速度と追従誤差を使う PID 型の追従制御である。
   - 今回の simulator executor を改善するなら、最終的には `joint_trajectory_controller` 相当の時間基準追従へ寄せるのが最も一般的である。
 
+## 18. `segment_timeout` を一次判定にして waypoint IK へ即フォールバックするのは、一般的な MoveIt 実行方式ではない
+- 調査日: 2026-06-27
+- 確認できた事実:
+  - `FollowJointTrajectory` action の goal には `path_tolerance`、`goal_tolerance`、`goal_time_tolerance` があり、実測 joint 値が path tolerance を外れた場合は goal abort、最終時刻 + goal_time_tolerance までに goal tolerance へ入らない場合も goal abort である。
+  - MoveIt の `Trajectory Execution Manager` には `execution_duration_monitoring`、`allowed_execution_duration_scaling`、`allowed_goal_duration_margin`、`allowed_start_tolerance` があり、低レベル controller 側の expected duration 超過や開始点不整合を監視する。
+  - `joint_trajectory_controller` は waypoint を「特定時刻に到達すべき点列」として内部に保持し、時間補間しながら追従する。
+- 推論ではなく確認済みの解釈:
+  - 一般的な MoveIt 実行系の失敗判定は、`segment 単位のローカル timeout` より、`trajectory 全体の expected duration` と `path/goal tolerance` を基準にする。
+  - したがって、現行の `segment_timeout -> waypoint IK fallback` は MoveIt 標準の失敗意味論ではなく、このリポジトリ固有の簡略化である。
+
+## 19. 追従失敗時の改善方針としては、まず action 相当の abort と current-state replanning を行い、waypoint IK は劣化モードに下げるのが妥当である
+- 調査日: 2026-06-27
+- 確認できた事実:
+  - MoveIt は low-level controller を直接実装するのではなく、`FollowJointTrajectory` のような controller interface を通じて既存 controller と連携する。
+  - `joint_trajectory_controller` は cancel 時に即 hold だけでなく smooth deceleration を選べる設計を持つ。
+  - `allowed_start_tolerance` は trajectory 先頭点と current state の整合を実行前に確認するためのパラメータである。
+- 設計推論:
+  - simulator 内の executor でも、segment ごとに「止まったら別方式へ逃がす」より、まず trajectory 実行を abort 扱いにして停止し、現在 joint state から同じ phase 目標へ再計画する方が MoveIt の設計意図に近い。
+  - waypoint IK は、`MoveIt trajectory unavailable`、`replan failed`、`retry budget exceeded` のときだけ使う劣化モードに下げる方が、phase 間の stale trajectory 再利用や急なホーム復帰を避けやすい。
+  - この結論のうち「replan を優先する」は設計推論であり、`FollowJointTrajectory` action 自体が再計画方針を規定しているわけではない。
+
+## 20. `ros2_control` の `joint_trajectory_controller` は `position, velocity` command interface を同時に扱え、MoveIt はその action interface へ接続するのが標準構成である
+- 調査日: 2026-06-27
+- 確認できた事実:
+  - `joint_trajectory_controller` は command interface として `position`、`position, velocity`、`position, velocity, acceleration`、`velocity` などをサポートする。
+  - `position, velocity` command interface の場合、desired position はそのまま forward され、velocity 側は trajectory following の position/velocity error を使う PID で補助される。
+  - MoveIt の low-level controller 構成では、`move_group` は通常 `FollowJointTrajectory` controller interface を使い、別途起動した `ros2_control` の `JointTrajectoryController` action へ接続する。
+  - `joint_trajectory_controller` の action interface は execution monitoring を伴う主要経路であり、topic interface は fire-and-forget で、監視が必要なら action を優先すべきとされている。
+- 推論ではなく確認済みの解釈:
+  - 今回の `trajectory_tracking` が独自に持っている `q_ref(t)` 評価、追従ゲイン、timeout / tolerance 判定の多くは、`joint_trajectory_controller` と `FollowJointTrajectory` の組み合わせへ委譲できる。
+  - したがって、独自 PD executor の安定化をゲイン調整で詰めるより、`ros2_control` の `position, velocity` interface を使う標準構成へ寄せる方が、意味論と責務分離の両面で妥当である。
+
 # ソース
 - NVIDIA Isaac Sim Container Installation
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html
@@ -290,10 +322,16 @@ Custom Docker Container
   - https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_moveit.html
 - MoveIt Documentation: Low Level Controllers
   - https://moveit.picknik.ai/main/doc/examples/controller_configuration/controller_configuration_tutorial.html
+- MoveIt Documentation: Time Parameterization
+  - https://moveit.picknik.ai/main/doc/examples/time_parameterization/time_parameterization_tutorial.html
 - MoveIt Documentation: Trajectory Processing
   - https://moveit.picknik.ai/main/doc/concepts/trajectory_processing.html
 - ROS 2 Control Documentation: joint_trajectory_controller
   - https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html
+- ROS 2 Control Documentation: Trajectory Representation
+  - https://control.ros.org/master/doc/ros2_controllers/joint_trajectory_controller/doc/trajectory.html
+- control_msgs `FollowJointTrajectory.action`
+  - https://raw.githubusercontent.com/ros-controls/control_msgs/master/control_msgs/action/FollowJointTrajectory.action
 - NVIDIA Isaac Sim ROS 2 Cameras
   - https://docs.isaacsim.omniverse.nvidia.com/latest/ros2_tutorials/tutorial_ros2_camera.html
 - NVIDIA Isaac Sim ROS2 Joint Control: Extension Python Scripting

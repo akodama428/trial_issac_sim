@@ -212,7 +212,7 @@ tests/
   - `JointStateSnapshot`
   - `TfTreeSnapshot`
   - `TargetEstimate`
-  - `PreGraspPlan`
+  - `HarvestMotionPlan`
   - `JointTrajectory`
   - `JointTrajectoryPoint`
   - `MotionCommand`
@@ -375,8 +375,8 @@ flowchart TD
   B --> C["TomatoHarvestApplication.step()<br/>処理: bridge.spin_once -> robot.step -> consume_motion_command -> scene_runtime.apply_motion_command -> scene_runtime.advance -> publish_scene_snapshot -> robot.observe_scene"]
 
   C --> D["RobotRuntime.step(): DETECTING<br/>入力: CameraFrame, TfTreeSnapshot<br/>処理: TomatoTargetEstimator.estimate()<br/>出力: TargetEstimate"]
-  D --> E["RobotRuntime.step(): TARGET_FOUND / PLANNING<br/>入力: TargetEstimate, JointStateSnapshot, SceneSnapshot<br/>処理: planner.plan()<br/>出力: PreGraspPlan"]
-  E --> F["MoveItStyleMotionPublisher.build_*_command()<br/>入力: PreGraspPlan<br/>出力: MotionCommand"]
+  D --> E["RobotRuntime.step(): TARGET_FOUND / PLANNING<br/>入力: TargetEstimate, JointStateSnapshot, SceneSnapshot<br/>処理: planner.plan()<br/>出力: HarvestMotionPlan"]
+  E --> F["MoveItStyleMotionPublisher.build_*_command()<br/>入力: HarvestMotionPlan<br/>出力: MotionCommand"]
   F --> G["bridge.publish_motion_command()"]
   G --> H["scene_runtime.apply_motion_command()<br/>入力: MotionCommand<br/>出力: target_tool_pose / motion_waypoints / motion_joint_trajectory 更新"]
   H --> I["scene_runtime.advance()<br/>処理: tool pose / tomato pose / phase 進行"]
@@ -391,7 +391,7 @@ flowchart TD
 | `TomatoHarvestApplication.apply_control()` | `ControlCommand` | simulator / robot の phase を同期切替 | `ControlResult` |
 | `TomatoHarvestApplication.step()` | bridge / robot / scene 現状態 | robot step、motion consume、scene advance、snapshot 再配布 | ログ列 |
 | `TomatoTargetEstimator.estimate()` | `CameraFrame`, `TfTreeSnapshot` | target pose 推定 | `TargetEstimate` |
-| `MoveIt2ServiceBridgePlanner.plan()` | target / joint / tf / scene | waypoint と joint trajectory 生成 | `PreGraspPlan` |
+| `MoveIt2ServiceBridgePlanner.plan()` | target / joint / tf / scene | waypoint と joint trajectory 生成 | `HarvestMotionPlan` |
 | `IsaacSceneRuntime.apply_motion_command()` | `MotionCommand` | target pose、waypoint、trajectory、gripper 状態を更新 | `SceneSnapshot` |
 | `IsaacSceneRuntime.advance()` | runtime state | 1 step 分 scene を進める | 更新後 `SceneSnapshot` |
 | `IsaacFrankaMotionExecutor.step()` | 直近 snapshot | trajectory or IK を 1 step 実行 | 実行ログ |

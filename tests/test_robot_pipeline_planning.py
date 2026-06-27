@@ -4,11 +4,14 @@ import unittest
 
 from tomato_harvest_sim.api.contracts import (
     ControlCommand,
+    HarvestMotionPlan,
     HarvestTaskPhase,
+    JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
     MotionCommand,
     Pose3D,
+    RobotRuntimeState,
     TargetEstimate,
 )
 from tomato_harvest_sim.app.application import create_tomato_harvest_application
@@ -237,7 +240,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
                 break
 
         self.assertEqual(system.robot.state.task_phase, HarvestTaskPhase.MOVING_TO_GRASP)
-        self.assertIsNotNone(system.robot.state.last_pregrasp_plan)
+        self.assertIsNotNone(system.robot.state.last_harvest_motion_plan)
         expected_grasp_hover = Pose3D(
             round(layout.tomato_pose.x, 6),
             round(layout.tomato_pose.y, 6),
@@ -265,7 +268,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         expected_grasp_log = (
             f"Grasp command target xyz: ({expected_grasp.x:.4f}, {expected_grasp.y:.4f}, {expected_grasp.z:.4f})"
         )
-        self.assertEqual(system.robot.state.last_pregrasp_plan.grasp_pose, expected_grasp)
+        self.assertEqual(system.robot.state.last_harvest_motion_plan.grasp_pose, expected_grasp)
         self.assertEqual(
             system.bridge.state.last_motion_command,
             MotionCommand(
@@ -309,6 +312,78 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         ])
         self.assertLess(abs(system.simulator.state.robot_tool_pose.x - 0.34), 0.03)
         self.assertLess(abs(system.simulator.state.robot_tool_pose.z - 0.62), 0.03)
+
+    def test_application_replans_active_motion_from_current_joint_state(self) -> None:
+        class _RecordingPlanner:
+            def __init__(self, plan: HarvestMotionPlan) -> None:
+                self._plan = plan
+                self.calls: list[JointStateSnapshot] = []
+
+            def plan(
+                self,
+                target_estimate: TargetEstimate,
+                joint_state: JointStateSnapshot,
+                tf_tree: object,
+                scene_snapshot: object,
+            ) -> HarvestMotionPlan:
+                del target_estimate, tf_tree, scene_snapshot
+                self.calls.append(joint_state)
+                return self._plan
+
+        system = create_tomato_harvest_application(transport="in_memory", autostart_moveit_service=False)
+        system.boot()
+        layout = load_scene_layout_config()
+        estimate = TargetEstimate(
+            camera_name="fixed_camera",
+            target_world_pose=layout.tomato_pose,
+            target_camera_pose=Pose3D(0.05, 0.0, 0.20, 0.0, 0.0, 0.0),
+            confidence=1.0,
+        )
+        replanned_grasp = Pose3D(
+            round(layout.tomato_pose.x + 0.01, 6),
+            round(layout.tomato_pose.y, 6),
+            round(layout.tomato_pose.z + 0.05, 6),
+            180.0,
+            0.0,
+            0.0,
+        )
+        replanned_plan = HarvestMotionPlan(
+            planner_name="recording_replan",
+            target_pose=layout.tomato_pose,
+            pregrasp_pose=Pose3D(layout.tomato_pose.x - 0.1, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),
+            grasp_pose=replanned_grasp,
+            pull_pose=Pose3D(layout.tomato_pose.x - 0.06, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),
+            place_pose=Pose3D(layout.tray_pose.x, layout.tray_pose.y, layout.tray_pose.z + 0.12, 180.0, 0.0, 0.0),
+            pregrasp_waypoints=(Pose3D(layout.tomato_pose.x - 0.1, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),),
+            grasp_waypoints=(replanned_grasp,),
+            pull_waypoints=(Pose3D(layout.tomato_pose.x - 0.06, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),),
+            place_waypoints=(Pose3D(layout.tray_pose.x, layout.tray_pose.y, layout.tray_pose.z + 0.12, 180.0, 0.0, 0.0),),
+        )
+        planner = _RecordingPlanner(replanned_plan)
+        system.robot._planner = planner
+        system.robot.state.runtime_state = RobotRuntimeState.RUNNING
+        system.robot.state.task_phase = HarvestTaskPhase.MOVING_TO_GRASP
+        system.robot.state.last_target_estimate = estimate
+        system.robot.state.last_harvest_motion_plan = replanned_plan
+        system.robot.observe_scene(system.bridge.read_scene_snapshot())
+        current_joint_state = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4", "panda_joint5", "panda_joint6", "panda_joint7"),
+            positions_rad=(0.25, -0.35, 0.08, -1.95, 0.24, 1.72, 0.88),
+        )
+        system.sync_robot_joint_state(current_joint_state)
+
+        logs = system.replan_motion("path_tolerance_violation")
+
+        self.assertEqual(len(planner.calls), 1)
+        self.assertEqual(planner.calls[0], current_joint_state)
+        self.assertTrue(any("path_tolerance_violation" in line for line in logs))
+        self.assertEqual(system.robot.state.last_motion_command, MotionCommand(
+            command_name="move_to_grasp",
+            planner_name="recording_replan",
+            target_pose=replanned_grasp,
+            waypoint_poses=(replanned_grasp,),
+        ))
+        self.assertEqual(system.simulator.state.grasp_pose, replanned_grasp)
 
 
 if __name__ == "__main__":

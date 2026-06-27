@@ -137,7 +137,7 @@ class TargetEstimate:
 
 
 @dataclass(frozen=True)
-class PreGraspPlan:
+class HarvestMotionPlan:
     planner_name: str
     target_pose: Pose3D
     pregrasp_pose: Pose3D

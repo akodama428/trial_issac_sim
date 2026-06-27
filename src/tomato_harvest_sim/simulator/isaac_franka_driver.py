@@ -6,7 +6,8 @@ from pathlib import Path
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import JointStateSnapshot, Pose3D
+from tomato_harvest_sim.api.contracts import JointStateSnapshot, JointTrajectory, Pose3D
+from tomato_harvest_sim.robot.api.trajectory_tracking import ObservationData
 
 
 @dataclass(frozen=True)
@@ -120,6 +121,14 @@ class IsaacFrankaDriver:
             return None
         return np.asarray(current_velocities, dtype=float).reshape(-1)
 
+    def get_observation(self) -> ObservationData:
+        return ObservationData(
+            joint_positions=self.current_joint_positions(),
+            joint_velocities=self.current_joint_velocities(),
+            end_effector_pose=self.current_end_effector_pose(),
+            joint_state_snapshot=self.current_joint_state_snapshot(),
+        )
+
     def current_end_effector_pose(self) -> Pose3D | None:
         if self._articulation_kinematics_solver is None:
             return None
@@ -144,6 +153,25 @@ class IsaacFrankaDriver:
             joint_names=self.ARM_JOINT_NAMES,
             positions_rad=tuple(float(value) for value in current_positions[:7]),
         )
+
+    def preview_end_effector_path_for_joint_trajectory(self, trajectory: JointTrajectory) -> tuple[Pose3D, ...]:
+        preview_path: list[Pose3D] = []
+        for point in trajectory.points:
+            preview_pose = self.preview_end_effector_pose_for_joint_positions(np.asarray(point.positions_rad, dtype=float))
+            if preview_pose is None:
+                continue
+            if not preview_path or preview_path[-1] != preview_pose:
+                preview_path.append(preview_pose)
+        return tuple(preview_path)
+
+    def preview_end_effector_pose_for_joint_positions(self, joint_positions: np.ndarray) -> Pose3D | None:
+        if self._kinematics_solver is None:
+            return None
+        expanded_positions = self.expand_joint_targets(np.asarray(joint_positions, dtype=float))
+        preview_pose = self._try_forward_kinematics_preview(expanded_positions)
+        if preview_pose is not None:
+            return preview_pose
+        return self._preview_pose_by_temporarily_setting_articulation(expanded_positions)
 
     def home_joint_positions(self) -> np.ndarray | None:
         if self._home_joint_positions is None:
@@ -217,7 +245,7 @@ class IsaacFrankaDriver:
     def set_joint_velocity_targets_with_debug(
         self,
         *,
-        positions: np.ndarray,
+        positions: np.ndarray | None,
         velocities: np.ndarray,
         context: str,
     ) -> None:
@@ -249,7 +277,7 @@ class IsaacFrankaDriver:
             f"method={method} "
             f"context={context} "
             f"used_velocity_command={used_velocity_command} "
-            f"command_q={self._format_joint_positions(positions[:7])} "
+            f"command_q={self._format_joint_positions(positions[:7]) if positions is not None else 'velocity_only'} "
             f"command_qdot={self._format_joint_positions(velocities[:7]) if velocities.shape[0] >= 7 else '[]'} "
             f"readback_q={self._format_joint_positions(readback[:7]) if readback is not None else 'n/a'}"
         )
@@ -312,3 +340,67 @@ class IsaacFrankaDriver:
     @staticmethod
     def _format_joint_positions(values: tuple[float, ...] | np.ndarray) -> str:
         return "[" + ", ".join(f"{float(value):.4f}" for value in values) + "]"
+
+    def _try_forward_kinematics_preview(self, joint_positions: np.ndarray) -> Pose3D | None:
+        if self._kinematics_solver is None:
+            return None
+        arm_joint_positions = np.asarray(joint_positions[:7], dtype=float)
+        for method_name in ("compute_forward_kinematics", "get_end_effector_pose", "compute_end_effector_pose"):
+            method = getattr(self._kinematics_solver, method_name, None)
+            if not callable(method):
+                continue
+            for args in (
+                ("panda_hand", arm_joint_positions),
+                (arm_joint_positions, "panda_hand"),
+                ("panda_hand", arm_joint_positions.tolist()),
+                (arm_joint_positions.tolist(), "panda_hand"),
+            ):
+                try:
+                    preview_pose = self._pose_from_forward_kinematics_result(method(*args))
+                except Exception:
+                    continue
+                if preview_pose is not None:
+                    return preview_pose
+        return None
+
+    def _preview_pose_by_temporarily_setting_articulation(self, joint_positions: np.ndarray) -> Pose3D | None:
+        if self._articulation is None or not hasattr(self._articulation, "set_joint_positions"):
+            return None
+        current_positions = self.current_joint_positions()
+        if current_positions is None:
+            return None
+        try:
+            self._articulation.set_joint_positions(joint_positions)
+            return self.current_end_effector_pose()
+        except Exception:
+            return None
+        finally:
+            try:
+                self._articulation.set_joint_positions(current_positions)
+            except Exception:
+                pass
+
+    def _pose_from_forward_kinematics_result(self, result: object) -> Pose3D | None:
+        if result is None:
+            return None
+        position = None
+        if isinstance(result, tuple) and result:
+            position = result[0]
+        elif hasattr(result, "position"):
+            position = getattr(result, "position")
+        elif hasattr(result, "translation"):
+            position = getattr(result, "translation")
+        if position is None:
+            return None
+        coordinates = np.asarray(position, dtype=float).reshape(-1)
+        if coordinates.shape[0] < 3:
+            return None
+        hand_pose = Pose3D(
+            x=float(coordinates[0]),
+            y=float(coordinates[1]),
+            z=float(coordinates[2]),
+            roll=180.0,
+            pitch=0.0,
+            yaw=0.0,
+        )
+        return _shift_pose_by_local_offset(hand_pose, self.GRASP_TARGET_OFFSET_FROM_HAND_M)

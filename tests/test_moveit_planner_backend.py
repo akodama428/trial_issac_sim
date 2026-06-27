@@ -14,8 +14,8 @@ from tomato_harvest_sim.api.contracts import (
     TfTreeSnapshot,
     TomatoStatus,
 )
-from tomato_harvest_sim.robot.planner_backend import MoveIt2PlanningResult, MoveIt2ServiceBridgePlanner, build_planner
-from tomato_harvest_sim.robot.planner_backend import (
+from tomato_harvest_sim.robot.planner import MoveIt2PlanningResult, MoveIt2ServiceBridgePlanner, build_planner
+from tomato_harvest_sim.robot.planner.moveit_service_bridge import (
     _moveit_link_target_pose_from_runtime_tool_pose,
     _trajectory_is_noop,
     _tomato_planning_scene_ops,

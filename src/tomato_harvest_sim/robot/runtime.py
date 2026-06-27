@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from tomato_harvest_sim.api.bridge import BridgeProtocol
 from tomato_harvest_sim.api.contracts import (
     ControlCommand,
+    HarvestMotionPlan,
     HarvestTaskPhase,
     MotionCommand,
     Pose3D,
-    PreGraspPlan,
     RobotRuntimeState,
     ScenePhase,
     SceneSnapshot,
@@ -16,9 +16,11 @@ from tomato_harvest_sim.api.contracts import (
     TomatoStatus,
 )
 from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
+from tomato_harvest_sim.robot.api.planner import MotionPlanner
+from tomato_harvest_sim.robot.api.perception import TargetEstimator
 from tomato_harvest_sim.robot.motion import MoveItStyleMotionPublisher
 from tomato_harvest_sim.robot.perception import TomatoTargetEstimator
-from tomato_harvest_sim.robot.planner_backend import build_planner
+from tomato_harvest_sim.robot.planner import build_planner
 
 
 @dataclass
@@ -28,7 +30,7 @@ class RobotState:
     last_seen_phase: ScenePhase
     last_scene_snapshot: SceneSnapshot | None
     last_target_estimate: TargetEstimate | None
-    last_pregrasp_plan: PreGraspPlan | None
+    last_harvest_motion_plan: HarvestMotionPlan | None
     last_motion_command: MotionCommand | None
     planner_backend_name: str
     grasp_evaluation_wait_steps: int
@@ -45,7 +47,8 @@ class RobotRuntime:
     GRASP_EVALUATION_LOG_INTERVAL_STEPS = 10
 
     def __init__(self, *, grasp_lateral_offset_m: float = 0.0) -> None:
-        self._estimator = TomatoTargetEstimator()
+        self._estimator: TargetEstimator = TomatoTargetEstimator()
+        self._planner: MotionPlanner
         self._planner, planner_info = build_planner(grasp_lateral_offset_m=grasp_lateral_offset_m)
         self._motion_publisher = MoveItStyleMotionPublisher()
         self.state = RobotState(
@@ -54,7 +57,7 @@ class RobotRuntime:
             last_seen_phase=ScenePhase.BOOTING,
             last_scene_snapshot=None,
             last_target_estimate=None,
-            last_pregrasp_plan=None,
+            last_harvest_motion_plan=None,
             last_motion_command=None,
             planner_backend_name=planner_info.name,
             grasp_evaluation_wait_steps=0,
@@ -95,7 +98,7 @@ class RobotRuntime:
             self.state.runtime_state = RobotRuntimeState.READY
             self.state.task_phase = HarvestTaskPhase.IDLE
             self.state.last_target_estimate = None
-            self.state.last_pregrasp_plan = None
+            self.state.last_harvest_motion_plan = None
             self.state.last_motion_command = None
             self.state.grasp_evaluation_wait_steps = 0
             self.state.grasp_converged_steps = 0
@@ -138,7 +141,7 @@ class RobotRuntime:
                 bridge.read_tf_tree(),
                 self._require_scene_snapshot(),
             )
-            self.state.last_pregrasp_plan = plan
+            self.state.last_harvest_motion_plan = plan
             self.state.planner_backend_name = plan.planner_name
             self.state.task_phase = HarvestTaskPhase.PLANNING
             return (
@@ -160,9 +163,9 @@ class RobotRuntime:
             )
 
         if self.state.task_phase is HarvestTaskPhase.PLANNING:
-            if self.state.last_pregrasp_plan is None:
+            if self.state.last_harvest_motion_plan is None:
                 return ()
-            command = self._motion_publisher.build_pregrasp_command(self.state.last_pregrasp_plan)
+            command = self._motion_publisher.build_pregrasp_command(self.state.last_harvest_motion_plan)
             self.state.last_motion_command = command
             self.state.task_phase = HarvestTaskPhase.MOVING_TO_PREGRASP
             bridge.publish_motion_command(command)
@@ -173,7 +176,7 @@ class RobotRuntime:
 
         if self.state.task_phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
             snapshot = self._require_scene_snapshot()
-            target_pose = self.state.last_pregrasp_plan.pregrasp_pose
+            target_pose = self.state.last_harvest_motion_plan.pregrasp_pose
             if not self._target_pose_reached(snapshot, target_pose):
                 error_m = self._pose_error_m(snapshot.robot_tool_pose, target_pose)
                 return (
@@ -193,9 +196,9 @@ class RobotRuntime:
             )
 
         if self.state.task_phase is HarvestTaskPhase.PREGRASP_REACHED:
-            if self.state.last_pregrasp_plan is None:
+            if self.state.last_harvest_motion_plan is None:
                 return ()
-            command = self._motion_publisher.build_grasp_command(self.state.last_pregrasp_plan)
+            command = self._motion_publisher.build_grasp_command(self.state.last_harvest_motion_plan)
             self.state.last_motion_command = command
             self.state.task_phase = HarvestTaskPhase.MOVING_TO_GRASP
             self.state.grasp_converged_steps = 0
@@ -211,7 +214,7 @@ class RobotRuntime:
 
         if self.state.task_phase is HarvestTaskPhase.MOVING_TO_GRASP:
             snapshot = self._require_scene_snapshot()
-            target_pose = self.state.last_pregrasp_plan.grasp_pose
+            target_pose = self.state.last_harvest_motion_plan.grasp_pose
             error_m = self._pose_error_m(snapshot.robot_tool_pose, target_pose)
             if error_m > self.GRASP_CLOSE_TOLERANCE_M:
                 self.state.grasp_converged_steps = 0
@@ -253,9 +256,9 @@ class RobotRuntime:
                         "[Grasp] Settling at grasp pose before closing the gripper.",
                     )
                 return ()
-            if self.state.last_pregrasp_plan is None:
+            if self.state.last_harvest_motion_plan is None:
                 return ()
-            command = self._motion_publisher.build_close_gripper_command(self.state.last_pregrasp_plan)
+            command = self._motion_publisher.build_close_gripper_command(self.state.last_harvest_motion_plan)
             self.state.last_motion_command = command
             self.state.task_phase = HarvestTaskPhase.GRASP_EVALUATION
             self.state.grasp_evaluation_wait_steps = 0
@@ -273,9 +276,9 @@ class RobotRuntime:
                 return ()
             if snapshot.tomato_status is TomatoStatus.HELD:
                 self.state.grasp_evaluation_wait_steps = 0
-                if self.state.last_pregrasp_plan is None:
+                if self.state.last_harvest_motion_plan is None:
                     return ()
-                command = self._motion_publisher.build_pull_command(self.state.last_pregrasp_plan)
+                command = self._motion_publisher.build_pull_command(self.state.last_harvest_motion_plan)
                 self.state.last_motion_command = command
                 self.state.task_phase = HarvestTaskPhase.DETACHING
                 bridge.publish_motion_command(command)
@@ -333,9 +336,9 @@ class RobotRuntime:
             return ()
 
         if self.state.task_phase is HarvestTaskPhase.DETACHED:
-            if self.state.last_pregrasp_plan is None:
+            if self.state.last_harvest_motion_plan is None:
                 return ()
-            command = self._motion_publisher.build_place_command(self.state.last_pregrasp_plan)
+            command = self._motion_publisher.build_place_command(self.state.last_harvest_motion_plan)
             self.state.last_motion_command = command
             self.state.task_phase = HarvestTaskPhase.MOVING_TO_PLACE
             bridge.publish_motion_command(command)
@@ -345,11 +348,11 @@ class RobotRuntime:
             )
 
         if self.state.task_phase is HarvestTaskPhase.MOVING_TO_PLACE:
-            if not self._target_pose_reached(self._require_scene_snapshot(), self.state.last_pregrasp_plan.place_pose):
+            if not self._target_pose_reached(self._require_scene_snapshot(), self.state.last_harvest_motion_plan.place_pose):
                 return ()
-            if self.state.last_pregrasp_plan is None:
+            if self.state.last_harvest_motion_plan is None:
                 return ()
-            command = self._motion_publisher.build_open_gripper_command(self.state.last_pregrasp_plan)
+            command = self._motion_publisher.build_open_gripper_command(self.state.last_harvest_motion_plan)
             self.state.last_motion_command = command
             self.state.task_phase = HarvestTaskPhase.PLACED
             bridge.publish_motion_command(command)
@@ -363,9 +366,9 @@ class RobotRuntime:
             if snapshot is None:
                 return ()
             if snapshot.tomato_status is TomatoStatus.PLACED:
-                if self.state.last_pregrasp_plan is None:
+                if self.state.last_harvest_motion_plan is None:
                     return ()
-                command = self._motion_publisher.build_home_command(self.state.last_pregrasp_plan)
+                command = self._motion_publisher.build_home_command(self.state.last_harvest_motion_plan)
                 self.state.last_motion_command = command
                 self.state.task_phase = HarvestTaskPhase.RETURNING_HOME
                 bridge.publish_motion_command(command)
@@ -395,6 +398,44 @@ class RobotRuntime:
 
         return ()
 
+    def replan_active_motion(self, bridge: BridgeProtocol, *, reason: str) -> tuple[str, ...]:
+        if self.state.runtime_state is not RobotRuntimeState.RUNNING:
+            return ()
+
+        phase = self.state.task_phase
+        if phase not in {
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.DETACHING,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+        }:
+            return ()
+
+        if self.state.last_target_estimate is None:
+            return ()
+
+        plan = self._planner.plan(
+            self.state.last_target_estimate,
+            bridge.read_joint_state(),
+            bridge.read_tf_tree(),
+            self._require_scene_snapshot(),
+        )
+        command = self._motion_command_for_active_phase(plan)
+        if command is None:
+            return ()
+
+        self.state.last_harvest_motion_plan = plan
+        self.state.last_motion_command = command
+        self.state.planner_backend_name = plan.planner_name
+        bridge.publish_motion_command(command)
+        return (
+            f"[Replan] Active motion replan requested. phase={phase.value} reason={reason}",
+            (
+                f"[Replan] Published {command.command_name} using planner={plan.planner_name} "
+                f"trajectory={'yes' if command.joint_trajectory is not None else 'no'}"
+            ),
+        )
+
     def _require_scene_snapshot(self) -> SceneSnapshot:
         if self.state.last_scene_snapshot is None:
             raise RuntimeError("Scene snapshot is not available.")
@@ -413,3 +454,14 @@ class RobotRuntime:
     @staticmethod
     def _home_tool_pose() -> Pose3D:
         return load_scene_layout_config().home_tool_pose
+
+    def _motion_command_for_active_phase(self, plan: HarvestMotionPlan) -> MotionCommand | None:
+        if self.state.task_phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
+            return self._motion_publisher.build_pregrasp_command(plan)
+        if self.state.task_phase is HarvestTaskPhase.MOVING_TO_GRASP:
+            return self._motion_publisher.build_grasp_command(plan)
+        if self.state.task_phase is HarvestTaskPhase.DETACHING:
+            return self._motion_publisher.build_pull_command(plan)
+        if self.state.task_phase is HarvestTaskPhase.MOVING_TO_PLACE:
+            return self._motion_publisher.build_place_command(plan)
+        return None

@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 
-from tomato_harvest_sim.robot.ros_python import ensure_ros_python_modules_available
+from tomato_harvest_sim.robot.planner.ros_python import ensure_ros_python_modules_available
 
 
 MOVE_GROUP_EXECUTABLE = "/opt/ros/jazzy/lib/moveit_ros_move_group/move_group"
@@ -37,11 +37,11 @@ _MoveItParamsDumper.add_representer(str, _represent_multiline_string)
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[4]
 
 
 def _config_root() -> Path:
-    return Path(__file__).resolve().with_name("moveit_config")
+    return Path(__file__).resolve().parents[1] / "moveit_config"
 
 
 def _load_text(path: Path | str) -> str:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from tomato_harvest_sim.api.contracts import (
+    HarvestMotionPlan,
     JointStateSnapshot,
     Pose3D,
-    PreGraspPlan,
     SceneSnapshot,
     TargetEstimate,
     TfTreeSnapshot,
@@ -46,7 +46,7 @@ class MoveItStylePreGraspPlanner:
         joint_state: JointStateSnapshot,
         tf_tree: TfTreeSnapshot,
         scene_snapshot: SceneSnapshot,
-    ) -> PreGraspPlan:
+    ) -> HarvestMotionPlan:
         del joint_state, tf_tree
         target_pose = target_estimate.target_world_pose
         tray_pose = scene_snapshot.tray_pose
@@ -114,7 +114,7 @@ class MoveItStylePreGraspPlanner:
             0.0,
             0.0,
         )
-        return PreGraspPlan(
+        return HarvestMotionPlan(
             planner_name="moveit2_pregrasp_demo",
             target_pose=target_pose,
             pregrasp_pose=pregrasp_pose,

@@ -35,7 +35,7 @@ flowchart TD
   B --> C[TomatoTargetEstimator]
   C --> D[MoveItStylePreGraspPlanner]
   D --> E[MoveIt2ServiceBridgePlanner]
-  E --> F[PreGraspPlan]
+  E --> F[HarvestMotionPlan]
   F --> G[MoveItStyleMotionPublisher]
   G --> H[MotionCommand]
   H --> I[SceneRuntime]
@@ -93,7 +93,7 @@ flowchart TD
 - `SceneSnapshot`: トレイ、枝、茎、現在のツール位置などのシーン状態。
 
 #### 出力信号
-- `PreGraspPlan`: `pregrasp` / `grasp` / `pull` / `place` の各目標姿勢、ウェイポイント列、必要なら関節軌道を持つ。
+- `HarvestMotionPlan`: `pregrasp` / `grasp` / `pull` / `place` の各目標姿勢、ウェイポイント列、必要なら関節軌道を持つ。
 
 #### モジュール内の処理概要
 - `MoveItStylePreGraspPlanner` は、対象トマトとトレイ位置から幾何ベースの目標姿勢列を決める。
@@ -101,7 +101,7 @@ flowchart TD
 - 把持動作は 1 点ではなく、`grasp_hover -> grasp_entry -> grasp` の 3 段階ウェイポイントで表現される。
 - 引き抜き動作も `pull_lift -> pull` の 2 段階になっている。
 - `build_planner()` は環境変数と ROS/MoveIt Python 利用可否を見て、MoveIt バックエンドか幾何フォールバックを選ぶ。
-- `MoveIt2ServiceBridgePlanner` はまず幾何ベースの `PreGraspPlan` を作り、その後 MoveIt が使える場合だけ各フェーズの `JointTrajectory` を追加する。
+- `MoveIt2ServiceBridgePlanner` はまず幾何ベースの `HarvestMotionPlan` を作り、その後 MoveIt が使える場合だけ各フェーズの `JointTrajectory` を追加する。
 - MoveIt が使えない、サービス未起動、計画失敗、または no-op 軌道なら、姿勢列はそのまま残し、関節軌道なしでフォールバックする。
 
 ### 2. モジュール内の構成
@@ -136,7 +136,7 @@ flowchart TD
 #### 入力信号
 - `ControlCommand`: `start` / `stop` / `reset`。
 - `SceneSnapshot`: シーン状態、ツール位置、トマト状態、現在の motion target。
-- `PreGraspPlan`: planner が生成した姿勢列と関節軌道。
+- `HarvestMotionPlan`: planner が生成した姿勢列と関節軌道。
 - `MotionCommand`: 実行対象の単一動作。
 
 #### 出力信号
@@ -147,7 +147,7 @@ flowchart TD
 #### モジュール内の処理概要
 - `RobotRuntime.step()` が上位の状態機械を持つ。
 - 状態は `DETECTING -> TARGET_FOUND -> PLANNING -> MOVING_TO_PREGRASP -> ... -> COMPLETE` の順に進む。
-- `MoveItStyleMotionPublisher` は `PreGraspPlan` を `MotionCommand` に変換するだけで、実行はしない。
+- `MoveItStyleMotionPublisher` は `HarvestMotionPlan` を `MotionCommand` に変換するだけで、実行はしない。
 - `TomatoHarvestApplication.step()` は、robot 側が出した `MotionCommand` を simulator 側へ渡し、`SceneRuntime.apply_motion_command()` に反映する。
 - `SceneRuntime` は target pose、waypoints、joint trajectory、gripper 状態、トマト状態を scene state として保持する。
 - `IsaacFrankaMotionExecutor` は scene snapshot を見て、Isaac Sim 上の Franka articulation を実際に動かす。
@@ -174,7 +174,7 @@ flowchart TD
 ```
 
 - `RobotRuntime`: タスク状態機械。認識、計画、把持評価、detach、place、home 復帰までを管理する。
-- `MoveItStyleMotionPublisher`: `PreGraspPlan` を `move_to_pregrasp` などのコマンド名へ変換する。
+- `MoveItStyleMotionPublisher`: `HarvestMotionPlan` を `move_to_pregrasp` などのコマンド名へ変換する。
 - `Bridge`: robot 側と simulator 側の境界。`in_memory` と `ros2` の 2 実装がある。
 - `SceneRuntime`: motion command を scene state に展開する。実体ロボットの代わりにシミュレーション状態遷移を持つ。
 - `IsaacFrankaMotionExecutor`: Isaac Sim の articulation と Lula IK solver を使って関節指令を出す低レベル実行器。
@@ -203,7 +203,7 @@ flowchart TD
 - `ApplyPlanningScene` では、枝、茎、トレイ壁、対象トマトを衝突物として投入する。
 - 把持後フェーズでは、対象トマトを world object ではなく `panda_hand` へ attached object として扱う。
 - `GetMotionPlan` では、現在関節角を start state にし、目標位置を球領域、姿勢を orientation constraint として与える。
-- 返ってきた `joint_trajectory` は `PreGraspPlan.pregrasp_joint_trajectory` などへ格納される。
+- 返ってきた `joint_trajectory` は `HarvestMotionPlan.pregrasp_joint_trajectory` などへ格納される。
 - その後の実行は、ROS 2 action か Isaac Sim 内 executor が担当する。
 
 ### MoveIt を使う理由

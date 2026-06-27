@@ -1,28 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 
 from tomato_harvest_sim.api.contracts import JointTrajectory
-
-
-@dataclass
-class TrajectorySegment:
-    start_positions: np.ndarray
-    target_positions: np.ndarray
-    duration_sec: float
-    deadline_sec: float | None = None
-    start_time_sec: float | None = None
-    initial_error_max: float | None = None
-
-
-@dataclass(frozen=True)
-class TrajectoryReferenceState:
-    reference_positions: np.ndarray
-    reference_velocities: np.ndarray
-    alpha: float
-    elapsed_time_sec: float
+from tomato_harvest_sim.robot.api.trajectory_tracking import TrajectoryReferenceState, TrajectorySegment
 
 
 def step_toward_joint_positions(
@@ -121,7 +102,7 @@ def compute_trajectory_reference_state(
     proportional_gain: float,
     derivative_gain: float,
 ) -> tuple[TrajectoryReferenceState, np.ndarray]:
-    start_time_sec = active_segment.start_time_sec or now_sec
+    start_time_sec = active_segment.start_time_sec if active_segment.start_time_sec is not None else now_sec
     elapsed_time_sec = max(now_sec - start_time_sec, 0.0)
     duration_sec = max(active_segment.duration_sec, time_epsilon_sec)
     alpha = min(max(elapsed_time_sec / duration_sec, 0.0), 1.0)
@@ -129,7 +110,10 @@ def compute_trajectory_reference_state(
     start_arm = np.asarray(active_segment.start_positions[:7], dtype=float)
     target_arm = np.asarray(active_segment.target_positions[:7], dtype=float)
     reference_arm = start_arm + (target_arm - start_arm) * alpha
-    reference_arm_velocity = (target_arm - start_arm) / duration_sec
+    if elapsed_time_sec >= duration_sec:
+        reference_arm_velocity = np.zeros_like(target_arm, dtype=float)
+    else:
+        reference_arm_velocity = (target_arm - start_arm) / duration_sec
 
     full_reference_positions = np.asarray(current_positions, dtype=float).copy()
     full_reference_positions[:7] = reference_arm
@@ -153,6 +137,49 @@ def compute_trajectory_reference_state(
 
     full_command_velocities = np.zeros_like(current_positions, dtype=float)
     full_command_velocities[:7] = desired_qdot
+    return (
+        TrajectoryReferenceState(
+            reference_positions=full_reference_positions,
+            reference_velocities=full_reference_velocities,
+            alpha=alpha,
+            elapsed_time_sec=elapsed_time_sec,
+        ),
+        full_command_velocities,
+    )
+
+
+def sample_trajectory_reference_state(
+    *,
+    active_segment: TrajectorySegment,
+    current_positions: np.ndarray,
+    now_sec: float,
+    time_epsilon_sec: float,
+    arm_joint_velocity_limits_rad_s: np.ndarray,
+) -> tuple[TrajectoryReferenceState, np.ndarray]:
+    start_time_sec = active_segment.start_time_sec if active_segment.start_time_sec is not None else now_sec
+    elapsed_time_sec = max(now_sec - start_time_sec, 0.0)
+    duration_sec = max(active_segment.duration_sec, time_epsilon_sec)
+    alpha = min(max(elapsed_time_sec / duration_sec, 0.0), 1.0)
+
+    start_arm = np.asarray(active_segment.start_positions[:7], dtype=float)
+    target_arm = np.asarray(active_segment.target_positions[:7], dtype=float)
+    reference_arm = start_arm + (target_arm - start_arm) * alpha
+    if elapsed_time_sec >= duration_sec:
+        reference_arm_velocity = np.zeros_like(target_arm, dtype=float)
+    else:
+        reference_arm_velocity = (target_arm - start_arm) / duration_sec
+
+    full_reference_positions = np.asarray(current_positions, dtype=float).copy()
+    full_reference_positions[:7] = reference_arm
+    full_reference_velocities = np.zeros_like(current_positions, dtype=float)
+    full_reference_velocities[:7] = reference_arm_velocity
+
+    full_command_velocities = np.zeros_like(current_positions, dtype=float)
+    full_command_velocities[:7] = np.clip(
+        reference_arm_velocity,
+        -np.asarray(arm_joint_velocity_limits_rad_s[:7], dtype=float),
+        np.asarray(arm_joint_velocity_limits_rad_s[:7], dtype=float),
+    )
     return (
         TrajectoryReferenceState(
             reference_positions=full_reference_positions,

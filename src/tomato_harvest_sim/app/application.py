@@ -11,7 +11,7 @@ from tomato_harvest_sim.api.contracts import (
     SceneSnapshot,
     TomatoStatus,
 )
-from tomato_harvest_sim.robot.moveit_service import MoveItServiceManager
+from tomato_harvest_sim.robot.planner import MoveItServiceManager
 from tomato_harvest_sim.robot.runtime import RobotRuntime
 from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
 
@@ -94,6 +94,15 @@ class TomatoHarvestApplication:
         snapshot = self.scene_runtime.advance()
         self.bridge.publish_scene_snapshot(snapshot)
         self.robot.observe_scene(self.bridge.read_scene_snapshot())
+        return logs
+
+    def replan_motion(self, reason: str) -> tuple[str, ...]:
+        logs = self.robot.replan_active_motion(self.bridge, reason=reason)
+        motion_command = self.bridge.consume_motion_command()
+        if motion_command is not None:
+            snapshot = self.scene_runtime.apply_motion_command(motion_command)
+            self.bridge.publish_scene_snapshot(snapshot)
+            self.robot.observe_scene(self.bridge.read_scene_snapshot())
         return logs
 
     def close(self) -> None:

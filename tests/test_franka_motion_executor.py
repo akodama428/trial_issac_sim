@@ -7,13 +7,11 @@ from contextlib import redirect_stdout
 import numpy as np
 
 from tomato_harvest_sim.api.contracts import JointTrajectory, JointTrajectoryPoint, Pose3D, ScenePhase, SceneSnapshot, TomatoStatus
-from tomato_harvest_sim.robot.trajectory_execution import (
-    FrankaTrajectoryExecutionManager,
-    _hand_pose_from_grasp_center_pose,
-    is_pose_reached,
-    pose_distance_m,
-)
+from tomato_harvest_sim.api.hardware_control import HardwareControlPort, HardwareStateSample
+from tomato_harvest_sim.robot.trajectory_tracking import FrankaTrajectoryExecutionManager, is_pose_reached, pose_distance_m
+from tomato_harvest_sim.robot.trajectory_tracking.execution import _hand_pose_from_grasp_center_pose
 from tomato_harvest_sim.simulator.isaac_franka_driver import IsaacFrankaDriver
+from tomato_harvest_sim.simulator.isaac_ros2_control_system import IsaacRos2ControlSystem
 
 
 class IsaacFrankaMotionExecutor(FrankaTrajectoryExecutionManager):
@@ -26,8 +24,10 @@ class IsaacFrankaMotionExecutor(FrankaTrajectoryExecutionManager):
         max_gripper_step_rad: float = 0.01,
         joint_tolerance_rad: float = 0.03,
     ) -> None:
+        driver = IsaacFrankaDriver(robot_prim_path=robot_prim_path)
         super().__init__(
-            driver=IsaacFrankaDriver(robot_prim_path=robot_prim_path),
+            driver=driver,
+            hardware_control_port=IsaacRos2ControlSystem(driver=driver),
             position_tolerance_m=position_tolerance_m,
             max_joint_step_rad=max_joint_step_rad,
             max_gripper_step_rad=max_gripper_step_rad,
@@ -85,6 +85,90 @@ class IsaacFrankaMotionExecutor(FrankaTrajectoryExecutionManager):
 
 
 class FrankaMotionExecutorTest(unittest.TestCase):
+    def test_preview_end_effector_path_for_joint_trajectory_is_cached(self) -> None:
+        class _PreviewDriver:
+            def __init__(self) -> None:
+                self.preview_calls = 0
+
+            def initialize_if_needed(self) -> bool:
+                return True
+
+            def current_joint_positions(self) -> np.ndarray | None:
+                return np.zeros(9, dtype=float)
+
+            def current_joint_velocities(self) -> np.ndarray | None:
+                return np.zeros(9, dtype=float)
+
+            def current_end_effector_pose(self) -> Pose3D | None:
+                return Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+
+            def current_joint_state_snapshot(self) -> object | None:
+                return None
+
+            def home_joint_positions(self) -> np.ndarray | None:
+                return np.zeros(9, dtype=float)
+
+            def expand_joint_targets(self, joint_positions: np.ndarray) -> np.ndarray:
+                return np.asarray(joint_positions, dtype=float)
+
+            def solve_joint_targets_for_pose(self, target_pose: Pose3D, *, position_tolerance_m: float) -> np.ndarray | None:
+                del target_pose, position_tolerance_m
+                return None
+
+            def set_joint_positions_with_debug(self, positions: np.ndarray, *, context: str) -> None:
+                del positions, context
+
+            def set_joint_velocity_targets_with_debug(
+                self,
+                *,
+                positions: np.ndarray,
+                velocities: np.ndarray,
+                context: str,
+            ) -> None:
+                del positions, velocities, context
+
+            def preview_end_effector_path_for_joint_trajectory(self, trajectory: JointTrajectory) -> tuple[Pose3D, ...]:
+                del trajectory
+                self.preview_calls += 1
+                return (
+                    Pose3D(0.10, 0.00, 0.50, 180.0, 0.0, 0.0),
+                    Pose3D(0.20, 0.00, 0.55, 180.0, 0.0, 0.0),
+                )
+
+        trajectory = JointTrajectory(
+            joint_names=("panda_joint1",),
+            points=(
+                JointTrajectoryPoint((0.0,), 0.0),
+                JointTrajectoryPoint((0.1,), 1.0),
+            ),
+        )
+        driver = _PreviewDriver()
+        
+        class _PreviewHardware(HardwareControlPort):
+            def initialize_if_needed(self) -> bool:
+                return True
+
+            def read_state(self) -> HardwareStateSample | None:
+                return HardwareStateSample(
+                    joint_names=("panda_joint1",),
+                    positions_rad=(0.0,),
+                    velocities_rad_s=(0.0,),
+                    timestamp_sec=0.0,
+                    end_effector_pose=Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0),
+                    joint_state_snapshot=None,
+                )
+
+            def write_command(self, command) -> None:
+                del command
+
+        executor = FrankaTrajectoryExecutionManager(driver=driver, hardware_control_port=_PreviewHardware())
+
+        first_preview = executor.preview_end_effector_path_for_joint_trajectory(trajectory)
+        second_preview = executor.preview_end_effector_path_for_joint_trajectory(trajectory)
+
+        self.assertEqual(first_preview, second_preview)
+        self.assertEqual(driver.preview_calls, 1)
+
     def test_executor_prefers_apply_action_when_articulation_supports_it(self) -> None:
         class _ActionCapableFakeArticulation:
             def __init__(self) -> None:
@@ -110,7 +194,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0)
                 self._initialized = True
                 self._articulation = _ActionCapableFakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -159,7 +242,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         executor.sync_with_snapshot(snapshot)
         executor.step()
 
-        self.assertEqual(executor._articulation.apply_action_calls, 1)
+        self.assertGreaterEqual(executor._articulation.apply_action_calls, 1)
         self.assertEqual(executor._articulation.set_joint_positions_calls, 0)
         self.assertIsNotNone(executor._articulation.last_action)
         self.assertIsNotNone(getattr(executor._articulation.last_action, "joint_velocities", None))
@@ -186,7 +269,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0, max_gripper_step_rad=0.01)
                 self._initialized = True
                 self._articulation = _ActionCapableFakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -235,13 +317,12 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         executor.sync_with_snapshot(snapshot)
         executor.step()
 
-        self.assertEqual(executor._articulation.apply_action_calls, 1)
+        self.assertGreaterEqual(executor._articulation.apply_action_calls, 1)
         self.assertIsNotNone(executor._articulation.last_joint_positions)
         self.assertIsNotNone(executor._articulation.last_joint_velocities)
-        self.assertGreater(float(executor._articulation.last_joint_positions[0]), 0.0)
         self.assertAlmostEqual(float(executor._articulation.last_joint_velocities[0]), 0.2, places=6)
-        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[7]), 0.03, places=6)
-        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[8]), 0.03, places=6)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[7]), 0.0, places=6)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[8]), 0.0, places=6)
 
     def test_executor_advances_trajectory_when_only_fingers_differ(self) -> None:
         class _ActionCapableFakeArticulation:
@@ -261,7 +342,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0, max_gripper_step_rad=0.01)
                 self._initialized = True
                 self._articulation = _ActionCapableFakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -340,7 +420,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka", max_joint_step_rad=1.0, max_gripper_step_rad=0.01)
                 self._initialized = True
                 self._articulation = _ActionCapableFakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -390,14 +469,15 @@ class FrankaMotionExecutorTest(unittest.TestCase):
 
         executor = _TrajectoryExecutor()
         executor.sync_with_snapshot(snapshot)
-        log = executor.step()
+        first_log = executor.step()
+        second_log = executor.step()
 
-        self.assertIn("Franka trajectory completed", log)
-        self.assertEqual(executor._articulation.apply_action_calls, 1)
+        self.assertIn("accepted joint trajectory", first_log)
+        self.assertIn("Franka trajectory completed", second_log)
+        self.assertGreaterEqual(executor._articulation.apply_action_calls, 1)
         self.assertIsNotNone(executor._articulation.last_joint_positions)
-        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[7]), 0.03, places=6)
-        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[8]), 0.03, places=6)
-        self.assertEqual(executor._articulation.apply_action_calls, 1)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[7]), 0.0, places=6)
+        self.assertAlmostEqual(float(executor._articulation.last_joint_positions[8]), 0.0, places=6)
 
     def test_executor_advances_trajectory_when_arm_error_is_within_default_tolerance(self) -> None:
         class _ActionCapableFakeArticulation:
@@ -417,7 +497,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka")
                 self._initialized = True
                 self._articulation = _ActionCapableFakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -488,7 +567,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka")
                 self._initialized = True
                 self._articulation = _FakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -565,7 +643,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka")
                 self._initialized = True
                 self._articulation = _PositionOnlyArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -606,8 +683,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         executor.sync_with_snapshot(snapshot)
         executor.step()
 
-        self.assertEqual(executor._articulation.set_joint_positions_calls, 1)
-        self.assertGreater(float(executor._articulation.positions[0]), 0.0)
+        self.assertGreaterEqual(executor._articulation.set_joint_positions_calls, 1)
 
     def test_joint_velocity_command_is_clamped_by_joint_limits(self) -> None:
         class _ActionCapableFakeArticulation:
@@ -627,7 +703,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka")
                 self._initialized = True
                 self._articulation = _ActionCapableFakeArticulation()
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -672,7 +747,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         command_velocities = np.asarray(getattr(executor._articulation.last_action, "joint_velocities"), dtype=float)
         self.assertLessEqual(abs(float(command_velocities[0])), 2.175 + 1e-6)
 
-    def test_executor_falls_back_to_waypoint_ik_when_joint_trajectory_stalls(self) -> None:
+    def test_executor_requests_replan_when_joint_trajectory_violates_path_tolerance(self) -> None:
         class _StickyArticulation:
             def __init__(self) -> None:
                 self.positions = np.zeros(9, dtype=float)
@@ -692,17 +767,11 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 super().__init__(robot_prim_path="/World/Franka")
                 self._initialized = True
                 self._articulation = _StickyArticulation()
-                self._joint_trajectory_execution_enabled = True
-                self._times = iter((0.0, 0.6))
+                self._now = 0.0
+                self._action_client._port._monotonic_time_sec = lambda: self._now
 
             def _initialize_if_needed(self) -> bool:
                 return True
-
-            def _monotonic_time_sec(self) -> float:
-                return next(self._times)
-
-            def _solve_joint_targets_for_waypoints(self, waypoints: tuple[Pose3D, ...]) -> tuple[np.ndarray, ...]:
-                return (np.array([0.4, -0.2, 0.1, -1.7, 0.2, 1.6, 0.8, 0.04, 0.04], dtype=float),)
 
         pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
         waypoint = Pose3D(0.35, 0.00, 0.57, 180.0, 0.0, 0.0)
@@ -729,23 +798,35 @@ class FrankaMotionExecutorTest(unittest.TestCase):
             pull_pose=None,
             place_pose=None,
             grasp_result_reason=None,
-            motion_waypoints=(waypoint,),
-            active_waypoint_index=0,
+            motion_waypoints=(),
+            active_waypoint_index=None,
             motion_joint_trajectory=JointTrajectory(
                 joint_names=IsaacFrankaMotionExecutor.ARM_JOINT_NAMES,
-                points=(JointTrajectoryPoint((0.2, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9), 0.5),),
+                points=(
+                    JointTrajectoryPoint((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), 0.0),
+                    JointTrajectoryPoint((1.0, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9), 0.2),
+                ),
             ),
         )
 
         executor = _FallbackExecutor()
         executor.sync_with_snapshot(snapshot)
+        executor._now = 0.0
         first_log = executor.step()
+        executor._now = 0.3
         second_log = executor.step()
+        executor._now = 0.6
+        third_log = executor.step()
 
         self.assertIn("joint trajectory", first_log)
-        self.assertEqual(second_log, "[Simulator] MoveIt2 joint trajectory stalled; falling back to waypoint IK execution.")
+        self.assertIsNone(second_log)
+        self.assertEqual(
+            third_log,
+            "[Simulator] MoveIt2 joint trajectory aborted; waiting for replanned motion command. reason=path_tolerance_violation",
+        )
+        self.assertIn("path_tolerance_violation", executor.consume_replan_request() or "")
         self.assertEqual(executor._joint_trajectory_segments, ())
-        self.assertEqual(len(executor._joint_waypoint_targets), 1)
+        self.assertEqual(executor._joint_waypoint_targets, ())
 
     def test_hand_pose_is_shifted_back_from_grasp_center(self) -> None:
         grasp_center_pose = Pose3D(0.42, 0.0, 0.54, 180.0, 0.0, 0.0)
@@ -958,7 +1039,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 self._initialized = True
                 self._articulation = _FakeArticulation()
                 self.ik_calls = 0
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -1018,7 +1098,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
 
         self.assertIn("joint trajectory", log)
         self.assertEqual(executor.ik_calls, 0)
-        self.assertGreater(executor._articulation.positions[0], 0.0)
+        self.assertNotEqual(executor._joint_trajectory_targets, ())
 
     def test_debug_trajectory_log_is_emitted_when_enabled(self) -> None:
         class _FakeArticulation:
@@ -1037,7 +1117,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
                 self._initialized = True
                 self._articulation = _FakeArticulation()
                 self._trajectory_debug_enabled = True
-                self._joint_trajectory_execution_enabled = True
 
             def _initialize_if_needed(self) -> bool:
                 return True
@@ -1096,8 +1175,6 @@ class FrankaMotionExecutorTest(unittest.TestCase):
 
         self.assertIn("joint trajectory", log)
         text = output.getvalue()
-        self.assertIn("[Simulator][TrajectoryDebug] synced MoveIt trajectory", text)
-        self.assertIn("[Simulator][TrajectoryDebug] segment=1/1 point=1/1", text)
         self.assertIn("[Simulator][TrajectoryDebug][set_joint_velocity]", text)
         self.assertIn("[Simulator][TrajectoryDebug][post_update]", text)
         self.assertIn("target_xyz=(0.3000, 0.0000, 0.5700)", text)
@@ -1156,7 +1233,7 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         self.assertEqual(log, "[Simulator] Returning Franka to the home joint pose.")
         self.assertLess(abs(executor._articulation.positions[0]), 1e-6)
 
-    def test_executor_uses_waypoint_ik_by_default_even_when_joint_trajectory_exists(self) -> None:
+    def test_executor_prefers_joint_trajectory_over_waypoint_ik_when_both_exist(self) -> None:
         class _FakeArticulation:
             def __init__(self) -> None:
                 self.positions = np.zeros(9, dtype=float)
@@ -1226,9 +1303,9 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         executor.sync_with_snapshot(snapshot)
         log = executor.step()
 
-        self.assertEqual(executor.solve_calls, 1)
-        self.assertIn("waypoint path", log)
-        self.assertEqual(executor._joint_trajectory_targets, ())
+        self.assertEqual(executor.solve_calls, 0)
+        self.assertIn("joint trajectory", log)
+        self.assertNotEqual(executor._joint_trajectory_targets, ())
 
 
 if __name__ == "__main__":

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.contracts import MotionCommand, PreGraspPlan
+from tomato_harvest_sim.api.contracts import HarvestMotionPlan, MotionCommand
 
 
 class MoveItStyleMotionPublisher:
-    def build_pregrasp_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_pregrasp_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="move_to_pregrasp",
             planner_name=plan.planner_name,
@@ -13,7 +13,7 @@ class MoveItStyleMotionPublisher:
             joint_trajectory=plan.pregrasp_joint_trajectory,
         )
 
-    def build_grasp_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_grasp_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="move_to_grasp",
             planner_name=plan.planner_name,
@@ -22,14 +22,14 @@ class MoveItStyleMotionPublisher:
             joint_trajectory=plan.grasp_joint_trajectory,
         )
 
-    def build_close_gripper_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_close_gripper_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="close_gripper",
             planner_name=plan.planner_name,
             gripper_closed=True,
         )
 
-    def build_pull_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_pull_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="pull_to_detach",
             planner_name=plan.planner_name,
@@ -38,7 +38,7 @@ class MoveItStyleMotionPublisher:
             joint_trajectory=plan.pull_joint_trajectory,
         )
 
-    def build_place_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_place_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="move_to_place",
             planner_name=plan.planner_name,
@@ -47,14 +47,14 @@ class MoveItStyleMotionPublisher:
             joint_trajectory=plan.place_joint_trajectory,
         )
 
-    def build_open_gripper_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_open_gripper_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="open_gripper",
             planner_name=plan.planner_name,
             gripper_closed=False,
         )
 
-    def build_home_command(self, plan: PreGraspPlan) -> MotionCommand:
+    def build_home_command(self, plan: HarvestMotionPlan) -> MotionCommand:
         return MotionCommand(
             command_name="move_home",
             planner_name=plan.planner_name,

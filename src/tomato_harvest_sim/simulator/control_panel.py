@@ -30,6 +30,8 @@ class ControlPanelSystem(Protocol):
         reason: str | None = None,
     ) -> SceneSnapshot: ...
 
+    def replan_motion(self, reason: str) -> tuple[str, ...]: ...
+
     @property
     def simulator(self) -> object: ...
 
@@ -194,6 +196,9 @@ class ControlPanelController:
     def current_scene_snapshot(self) -> SceneSnapshot:
         return self._system.simulator.snapshot()
 
+    def current_robot_state(self) -> object:
+        return self._system.robot.state
+
     def sync_robot_tool_pose(self, pose: Pose3D) -> ControlPanelStatus:
         self._system.sync_robot_tool_pose(pose)
         return self.status()
@@ -220,6 +225,10 @@ class ControlPanelController:
 
     def close(self) -> None:
         self._system.close()
+
+    def request_motion_replan(self, reason: str) -> None:
+        for message in self._system.replan_motion(reason):
+            self._log(message)
 
 
 class IsaacControlPanelWindow:

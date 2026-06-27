@@ -9,9 +9,12 @@ from pathlib import Path
 from typing import Sequence
 
 from tomato_harvest_sim.app.application import create_tomato_harvest_application
+from tomato_harvest_sim.robot.ros2_control import JointTrajectoryControllerBridge
 from tomato_harvest_sim.simulator.control_panel import ControlPanelController, IsaacControlPanelWindow
-from tomato_harvest_sim.robot.trajectory_execution import FrankaTrajectoryExecutionManager
+from tomato_harvest_sim.robot.trajectory_tracking import TrajectoryTrackingCoordinator
+from tomato_harvest_sim.simulator.debug_visualization import build_scene_runtime_debug_state
 from tomato_harvest_sim.simulator.isaac_franka_driver import IsaacFrankaDriver
+from tomato_harvest_sim.simulator.isaac_ros2_control_system import IsaacRos2ControlSystem
 from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBridge, PhysicsHarvestScenePaths
 from tomato_harvest_sim.simulator.scene_plan import ReviewScenePlan, build_review_scene_plan
 from tomato_harvest_sim.simulator.scene_runtime_view import (
@@ -182,14 +185,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         _start_timeline_playback()
         _pump_updates(simulation_app.update, frame_count=4)
         _wait_for_first_frame(simulation_app=simulation_app, max_frames=240)
-        franka_executor = FrankaTrajectoryExecutionManager(
-            driver=IsaacFrankaDriver(
-                robot_prim_path=plan.robot_prim_path,
-                trajectory_debug_enabled=(
-                    os.environ.get(FrankaTrajectoryExecutionManager.DEBUG_TRAJECTORY_ENV, "").strip()
-                    not in {"", "0", "false", "False"}
-                ),
-            )
+        franka_driver = IsaacFrankaDriver(
+            robot_prim_path=plan.robot_prim_path,
+            trajectory_debug_enabled=(
+                os.environ.get(TrajectoryTrackingCoordinator.DEBUG_TRAJECTORY_ENV, "").strip()
+                not in {"", "0", "false", "False"}
+            ),
+        )
+        ros2_control_system = IsaacRos2ControlSystem(driver=franka_driver)
+        franka_executor = TrajectoryTrackingCoordinator(
+            driver=franka_driver,
+            hardware_control_port=ros2_control_system,
+            trajectory_execution_port=JointTrajectoryControllerBridge(hardware=ros2_control_system),
         )
         control_controller = _build_control_panel_controller(
             artifacts.camera_paths,
@@ -203,14 +210,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         control_window = None
         if not args.headless:
             control_window = IsaacControlPanelWindow(control_controller)
-        _sync_runtime_visuals(artifacts.runtime_display, control_controller)
+        _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
         _print_review_summary(plan, camera_paths=artifacts.camera_paths, camera_view=args.camera_view)
 
         if args.headless:
             for _ in range(args.headless_steps):
                 _sync_executor_joint_state_to_runtime(franka_executor, control_controller)
                 control_controller.step_runtime()
-                _sync_runtime_visuals(artifacts.runtime_display, control_controller)
+                _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
                 executor_log = _step_franka_executor(franka_executor, control_controller)
                 if executor_log is not None:
                     print(executor_log, flush=True)
@@ -221,7 +228,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _log_executor_post_update_debug(franka_executor)
                 if artifacts.physics_bridge is not None:
                     artifacts.physics_bridge.finalize_physics_step(control_controller)
-                _sync_runtime_visuals(artifacts.runtime_display, control_controller)
+                _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
             _pump_updates(simulation_app.update, frame_count=30)
             print("Headless scene runtime setup completed.", flush=True)
             return 0
@@ -230,7 +237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         while simulation_app.is_running():
             _sync_executor_joint_state_to_runtime(franka_executor, control_controller)
             status = control_controller.step_runtime()
-            _sync_runtime_visuals(artifacts.runtime_display, control_controller)
+            _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
             executor_log = _step_franka_executor(franka_executor, control_controller)
             if executor_log is not None:
                 print(executor_log, flush=True)
@@ -243,7 +250,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _log_executor_post_update_debug(franka_executor)
             if artifacts.physics_bridge is not None:
                 artifacts.physics_bridge.finalize_physics_step(control_controller)
-            _sync_runtime_visuals(artifacts.runtime_display, control_controller)
+            _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
             if deadline is not None and time.time() >= deadline:
                 print("Timeout reached. Closing Isaac review scene.", flush=True)
                 break
@@ -588,28 +595,49 @@ def _build_control_panel_controller(
     return controller
 
 
-def _sync_runtime_visuals(runtime_display: SceneRuntimeDisplay, controller: ControlPanelController) -> None:
+def _sync_runtime_visuals(
+    runtime_display: SceneRuntimeDisplay,
+    controller: ControlPanelController,
+    executor: TrajectoryTrackingCoordinator,
+) -> None:
     import omni.usd
 
     stage = omni.usd.get_context().get_stage()
     if stage is None:
         return
-    sync_scene_runtime_display(stage, runtime_display, controller.current_scene_snapshot())
+    robot_state = controller.current_robot_state()
+    snapshot = controller.current_scene_snapshot()
+    debug_state = build_scene_runtime_debug_state(
+        snapshot=snapshot,
+        target_estimate=getattr(robot_state, "last_target_estimate", None),
+        plan=getattr(robot_state, "last_harvest_motion_plan", None),
+        active_motion_command=getattr(robot_state, "last_motion_command", None),
+        trajectory_path_provider=executor.preview_end_effector_path_for_joint_trajectory,
+    )
+    sync_scene_runtime_display(
+        stage,
+        runtime_display,
+        snapshot,
+        debug_state=debug_state,
+    )
 
 
 def _step_franka_executor(
-    executor: FrankaTrajectoryExecutionManager,
+    executor: TrajectoryTrackingCoordinator,
     controller: ControlPanelController,
 ) -> str | None:
     try:
-        executor.sync_with_snapshot(controller.current_scene_snapshot())
-        return executor.step()
+        log = executor.run_cycle(controller.current_scene_snapshot())
+        reason = executor.consume_replan_request()
+        if reason is not None:
+            controller.request_motion_replan(reason)
+        return log
     except Exception as exc:
         return f"[Simulator] Franka executor error: {exc}"
 
 
 def _sync_executor_pose_to_runtime(
-    executor: FrankaTrajectoryExecutionManager,
+    executor: TrajectoryTrackingCoordinator,
     controller: ControlPanelController,
 ) -> None:
     pose = executor.current_end_effector_pose()
@@ -619,7 +647,7 @@ def _sync_executor_pose_to_runtime(
 
 
 def _sync_executor_joint_state_to_runtime(
-    executor: FrankaTrajectoryExecutionManager,
+    executor: TrajectoryTrackingCoordinator,
     controller: ControlPanelController,
 ) -> None:
     joint_state = executor.current_joint_state_snapshot()
@@ -628,7 +656,7 @@ def _sync_executor_joint_state_to_runtime(
     controller.sync_robot_joint_state(joint_state)
 
 
-def _log_executor_post_update_debug(executor: FrankaTrajectoryExecutionManager) -> None:
+def _log_executor_post_update_debug(executor: TrajectoryTrackingCoordinator) -> None:
     executor.log_post_update_debug_snapshot()
 
 
