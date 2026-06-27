@@ -7,8 +7,14 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from tomato_harvest_sim.api.contracts import (
+    AbortPolicy,
     CameraFrame,
     ControlCommand,
+    ExecutionPhaseSpec,
+    PhaseExecutionIntent,
+    PhaseId,
+    PhaseMotionPlan,
+    PoseSemantics,
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
@@ -16,6 +22,8 @@ from tomato_harvest_sim.api.contracts import (
     Pose3D,
     ScenePhase,
     SceneSnapshot,
+    SuccessJudge,
+    SuccessPolicy,
     TargetEstimate,
     TfTreeSnapshot,
     TomatoStatus,
@@ -425,6 +433,7 @@ class Ros2LoopbackBridge:
             gripper_closed=metadata.gripper_closed,
             waypoint_poses=metadata.waypoint_poses,
             joint_trajectory=trajectory,
+            execution_phase_spec=metadata.execution_phase_spec,
         )
         goal_handle.succeed()
         result = FollowJointTrajectory.Result()
@@ -654,6 +663,106 @@ def _trajectory_from_dict(data: dict[str, object] | None) -> JointTrajectory | N
     )
 
 
+def _success_policy_to_dict(policy: SuccessPolicy) -> dict[str, object]:
+    return {
+        "judge": policy.judge.value,
+        "position_tolerance_m": policy.position_tolerance_m,
+        "stable_steps": policy.stable_steps,
+        "required_tomato_status": None if policy.required_tomato_status is None else policy.required_tomato_status.value,
+    }
+
+
+def _success_policy_from_dict(data: dict[str, object] | None) -> SuccessPolicy | None:
+    if data is None:
+        return None
+    required_status = data.get("required_tomato_status")
+    return SuccessPolicy(
+        judge=SuccessJudge(str(data["judge"])),
+        position_tolerance_m=float(data["position_tolerance_m"]) if data.get("position_tolerance_m") is not None else None,
+        stable_steps=int(data.get("stable_steps", 1)),
+        required_tomato_status=TomatoStatus(str(required_status)) if required_status is not None else None,
+    )
+
+
+def _abort_policy_to_dict(policy: AbortPolicy) -> dict[str, object]:
+    return {
+        "nominal_timeout_sec": policy.nominal_timeout_sec,
+        "stall_timeout_sec": policy.stall_timeout_sec,
+        "min_progress_delta_m": policy.min_progress_delta_m,
+        "joint_path_tolerance_rad": policy.joint_path_tolerance_rad,
+        "allow_replan": policy.allow_replan,
+    }
+
+
+def _abort_policy_from_dict(data: dict[str, object] | None) -> AbortPolicy | None:
+    if data is None:
+        return None
+    return AbortPolicy(
+        nominal_timeout_sec=float(data["nominal_timeout_sec"]) if data.get("nominal_timeout_sec") is not None else None,
+        stall_timeout_sec=float(data["stall_timeout_sec"]) if data.get("stall_timeout_sec") is not None else None,
+        min_progress_delta_m=float(data["min_progress_delta_m"]) if data.get("min_progress_delta_m") is not None else None,
+        joint_path_tolerance_rad=(
+            float(data["joint_path_tolerance_rad"]) if data.get("joint_path_tolerance_rad") is not None else None
+        ),
+        allow_replan=bool(data.get("allow_replan", True)),
+    )
+
+
+def _execution_phase_spec_to_dict(spec: ExecutionPhaseSpec | None) -> dict[str, object] | None:
+    if spec is None:
+        return None
+    return {
+        "phase_id": spec.phase_id.value,
+        "intent": {
+            "phase_id": spec.intent.phase_id.value,
+            "phase_goal_pose": _pose_to_dict(spec.intent.phase_goal_pose),
+            "pose_semantics": spec.intent.pose_semantics.value,
+            "success": _success_policy_to_dict(spec.intent.success),
+            "abort": _abort_policy_to_dict(spec.intent.abort),
+        },
+        "motion": {
+            "phase_goal_pose": _pose_to_dict(spec.motion.phase_goal_pose),
+            "active_waypoints": [_pose_to_dict(pose) for pose in spec.motion.active_waypoints],
+            "joint_trajectory": _trajectory_to_dict(spec.motion.joint_trajectory),
+        },
+    }
+
+
+def _execution_phase_spec_from_dict(data: dict[str, object] | None) -> ExecutionPhaseSpec | None:
+    if data is None:
+        return None
+    intent_raw = data.get("intent")
+    motion_raw = data.get("motion")
+    if not isinstance(intent_raw, dict) or not isinstance(motion_raw, dict):
+        return None
+    success_policy = _success_policy_from_dict(intent_raw.get("success") if isinstance(intent_raw.get("success"), dict) else None)
+    abort_policy = _abort_policy_from_dict(intent_raw.get("abort") if isinstance(intent_raw.get("abort"), dict) else None)
+    if success_policy is None or abort_policy is None:
+        return None
+    waypoint_dicts = motion_raw.get("active_waypoints", [])
+    return ExecutionPhaseSpec(
+        phase_id=PhaseId(str(data["phase_id"])),
+        intent=PhaseExecutionIntent(
+            phase_id=PhaseId(str(intent_raw["phase_id"])),
+            phase_goal_pose=_pose_from_dict(intent_raw.get("phase_goal_pose") if isinstance(intent_raw.get("phase_goal_pose"), dict) else None),
+            pose_semantics=PoseSemantics(str(intent_raw["pose_semantics"])),
+            success=success_policy,
+            abort=abort_policy,
+        ),
+        motion=PhaseMotionPlan(
+            phase_goal_pose=_pose_from_dict(motion_raw.get("phase_goal_pose") if isinstance(motion_raw.get("phase_goal_pose"), dict) else None),
+            active_waypoints=tuple(
+                pose
+                for pose in (_pose_from_dict(item if isinstance(item, dict) else None) for item in waypoint_dicts)
+                if pose is not None
+            ),
+            joint_trajectory=_trajectory_from_dict(
+                motion_raw.get("joint_trajectory") if isinstance(motion_raw.get("joint_trajectory"), dict) else None
+            ),
+        ),
+    )
+
+
 def _motion_command_to_dict(command: MotionCommand, *, include_trajectory: bool) -> dict[str, object]:
     return {
         "command_name": command.command_name,
@@ -662,6 +771,7 @@ def _motion_command_to_dict(command: MotionCommand, *, include_trajectory: bool)
         "gripper_closed": command.gripper_closed,
         "waypoint_poses": [_pose_to_dict(pose) for pose in command.waypoint_poses],
         "joint_trajectory": _trajectory_to_dict(command.joint_trajectory) if include_trajectory else None,
+        "execution_phase_spec": _execution_phase_spec_to_dict(command.execution_phase_spec),
     }
 
 
@@ -678,6 +788,9 @@ def _motion_command_from_dict(data: dict[str, object]) -> MotionCommand:
             if pose is not None
         ),
         joint_trajectory=_trajectory_from_dict(data.get("joint_trajectory") if isinstance(data.get("joint_trajectory"), dict) else None),
+        execution_phase_spec=_execution_phase_spec_from_dict(
+            data.get("execution_phase_spec") if isinstance(data.get("execution_phase_spec"), dict) else None
+        ),
     )
 
 
@@ -717,6 +830,7 @@ def _scene_snapshot_to_dict(snapshot: SceneSnapshot) -> dict[str, object]:
         "motion_waypoints": [_pose_to_dict(pose) for pose in snapshot.motion_waypoints],
         "active_waypoint_index": snapshot.active_waypoint_index,
         "motion_joint_trajectory": _trajectory_to_dict(snapshot.motion_joint_trajectory),
+        "execution_phase_spec": _execution_phase_spec_to_dict(snapshot.execution_phase_spec),
     }
 
 
@@ -753,5 +867,8 @@ def _scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
         active_waypoint_index=int(data["active_waypoint_index"]) if data.get("active_waypoint_index") is not None else None,
         motion_joint_trajectory=_trajectory_from_dict(
             data.get("motion_joint_trajectory") if isinstance(data.get("motion_joint_trajectory"), dict) else None
+        ),
+        execution_phase_spec=_execution_phase_spec_from_dict(
+            data.get("execution_phase_spec") if isinstance(data.get("execution_phase_spec"), dict) else None
         ),
     )

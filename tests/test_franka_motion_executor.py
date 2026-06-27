@@ -320,7 +320,8 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         self.assertGreaterEqual(executor._articulation.apply_action_calls, 1)
         self.assertIsNotNone(executor._articulation.last_joint_positions)
         self.assertIsNotNone(executor._articulation.last_joint_velocities)
-        self.assertAlmostEqual(float(executor._articulation.last_joint_velocities[0]), 0.2, places=6)
+        expected_velocity = 0.2 / executor._joint_trajectory_segments[0].duration_sec
+        self.assertAlmostEqual(float(executor._articulation.last_joint_velocities[0]), expected_velocity, places=6)
         self.assertAlmostEqual(float(executor._articulation.last_joint_positions[7]), 0.0, places=6)
         self.assertAlmostEqual(float(executor._articulation.last_joint_positions[8]), 0.0, places=6)
 
@@ -624,6 +625,72 @@ class FrankaMotionExecutorTest(unittest.TestCase):
         )
         self.assertAlmostEqual(executor._joint_trajectory_segments[0].duration_sec, 0.5, places=6)
         self.assertAlmostEqual(executor._joint_trajectory_segments[1].duration_sec, 0.5, places=6)
+
+    def test_joint_trajectory_segments_extend_first_duration_for_synthetic_start(self) -> None:
+        class _FakeArticulation:
+            def __init__(self) -> None:
+                self.positions = np.array([1.7, -0.1, 0.2, -1.7, 0.1, 1.6, 0.8, 0.04, 0.04], dtype=float)
+
+            def get_joint_positions(self) -> np.ndarray:
+                return self.positions.copy()
+
+        class _SegmentExecutor(IsaacFrankaMotionExecutor):
+            def __init__(self) -> None:
+                super().__init__(robot_prim_path="/World/Franka")
+                self._initialized = True
+                self._articulation = _FakeArticulation()
+
+            def _initialize_if_needed(self) -> bool:
+                return True
+
+        pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        snapshot = SceneSnapshot(
+            phase=ScenePhase.RUNNING,
+            active_camera="fixed_camera",
+            tomato_attached=True,
+            tomato_status=TomatoStatus.ATTACHED,
+            gripper_closed=False,
+            robot_home=False,
+            cycle_id=1,
+            robot_model="Franka Panda",
+            robot_base_pose=pose,
+            fixed_camera_pose=pose,
+            hand_camera_pose=pose,
+            branch_pose=pose,
+            stem_pose=pose,
+            tomato_pose=pose,
+            tray_pose=pose,
+            robot_tool_pose=pose,
+            target_tool_pose=Pose3D(0.30, 0.00, 0.57, 180.0, 0.0, 0.0),
+            pregrasp_pose=None,
+            grasp_pose=None,
+            pull_pose=None,
+            place_pose=None,
+            grasp_result_reason=None,
+            motion_waypoints=(),
+            active_waypoint_index=None,
+            motion_joint_trajectory=JointTrajectory(
+                joint_names=(
+                    "panda_joint1",
+                    "panda_joint2",
+                    "panda_joint3",
+                    "panda_joint4",
+                    "panda_joint5",
+                    "panda_joint6",
+                    "panda_joint7",
+                ),
+                points=(
+                    JointTrajectoryPoint((0.2, -0.2, 0.1, -1.9, 0.2, 1.8, 0.9), 0.5),
+                    JointTrajectoryPoint((0.3, -0.1, 0.2, -1.8, 0.3, 1.7, 1.0), 1.0),
+                ),
+            ),
+        )
+
+        executor = _SegmentExecutor()
+        executor.sync_with_snapshot(snapshot)
+
+        self.assertEqual(len(executor._joint_trajectory_segments), 2)
+        self.assertGreater(executor._joint_trajectory_segments[0].duration_sec, 0.5)
 
     def test_executor_falls_back_to_position_commands_when_velocity_action_is_unavailable(self) -> None:
         class _PositionOnlyArticulation:

@@ -52,6 +52,26 @@ class TomatoStatus(StrEnum):
     FALLEN = "fallen"
 
 
+class PhaseId(StrEnum):
+    MOVING_TO_PREGRASP = "moving_to_pregrasp"
+    MOVING_TO_GRASP = "moving_to_grasp"
+    PULL_TO_DETACH = "pull_to_detach"
+    MOVING_TO_PLACE = "moving_to_place"
+    RETURNING_HOME = "returning_home"
+
+
+class PoseSemantics(StrEnum):
+    TOOL_CENTER = "tool_center"
+    GRASP_CENTER = "grasp_center"
+    MOVEIT_LINK = "moveit_link"
+
+
+class SuccessJudge(StrEnum):
+    END_EFFECTOR_POSE = "end_effector_pose"
+    JOINT_TRAJECTORY_COMPLETED = "joint_trajectory_completed"
+    TOMATO_STATE = "tomato_state"
+
+
 @dataclass(frozen=True)
 class Pose3D:
     x: float
@@ -89,6 +109,7 @@ class SceneSnapshot:
     motion_waypoints: tuple[Pose3D, ...] = ()
     active_waypoint_index: int | None = None
     motion_joint_trajectory: "JointTrajectory" | None = None
+    execution_phase_spec: "ExecutionPhaseSpec | None" = None
 
 
 @dataclass(frozen=True)
@@ -116,6 +137,46 @@ class JointTrajectoryPoint:
 class JointTrajectory:
     joint_names: tuple[str, ...]
     points: tuple[JointTrajectoryPoint, ...]
+
+
+@dataclass(frozen=True)
+class SuccessPolicy:
+    judge: SuccessJudge
+    position_tolerance_m: float | None = None
+    stable_steps: int = 1
+    required_tomato_status: TomatoStatus | None = None
+
+
+@dataclass(frozen=True)
+class AbortPolicy:
+    nominal_timeout_sec: float | None = None
+    stall_timeout_sec: float | None = None
+    min_progress_delta_m: float | None = None
+    joint_path_tolerance_rad: float | None = None
+    allow_replan: bool = True
+
+
+@dataclass(frozen=True)
+class PhaseExecutionIntent:
+    phase_id: PhaseId
+    phase_goal_pose: Pose3D | None
+    pose_semantics: PoseSemantics
+    success: SuccessPolicy
+    abort: AbortPolicy
+
+
+@dataclass(frozen=True)
+class PhaseMotionPlan:
+    phase_goal_pose: Pose3D | None
+    active_waypoints: tuple[Pose3D, ...]
+    joint_trajectory: JointTrajectory | None = None
+
+
+@dataclass(frozen=True)
+class ExecutionPhaseSpec:
+    phase_id: PhaseId
+    intent: PhaseExecutionIntent
+    motion: PhaseMotionPlan
 
 
 @dataclass(frozen=True)
@@ -163,6 +224,7 @@ class MotionCommand:
     gripper_closed: bool | None = None
     waypoint_poses: tuple[Pose3D, ...] = ()
     joint_trajectory: JointTrajectory | None = None
+    execution_phase_spec: ExecutionPhaseSpec | None = None
 
 
 @dataclass(frozen=True)

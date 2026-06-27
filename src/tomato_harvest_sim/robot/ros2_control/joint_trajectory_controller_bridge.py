@@ -6,7 +6,8 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from tomato_harvest_sim.api.hardware_control import HardwareCommandSample, HardwareControlPort
+from tomato_harvest_sim.api.hardware_control import HardwareCommandSample, HardwareControlPort, HardwareStateSample
+from tomato_harvest_sim.api.contracts import AbortPolicy, Pose3D, SuccessJudge
 from tomato_harvest_sim.api.trajectory_execution import (
     TrajectoryExecutionFeedback,
     TrajectoryExecutionPort,
@@ -175,23 +176,40 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
             segment=active_segment,
             current_positions=current_positions,
         )
+        progress_error, progress_epsilon = self._progress_tracking_values(
+            hardware_state=hardware_state,
+            segment_error_norm_rad=segment_error_norm_rad,
+        )
         self._initialize_segment_progress_if_needed(
             segment=active_segment,
-            segment_error_norm_rad=segment_error_norm_rad,
+            progress_error=progress_error,
             now_sec=now_sec,
         )
-        self._record_progress(segment_error_norm_rad=segment_error_norm_rad, now_sec=now_sec)
+        self._record_progress(progress_error=progress_error, progress_epsilon=progress_epsilon, now_sec=now_sec)
 
         if self._segment_reached(active_segment, current_positions):
             if self._active_segment_index >= len(self._active_segments) - 1:
-                self._write_terminal_hold_command(hardware_state, context_suffix="succeeded")
-                self._result = TrajectoryExecutionResult(
-                    controller_name=self._active_request.controller_name,
-                    state=TrajectoryExecutionState.SUCCEEDED,
-                    message="goal_reached",
-                    timestamp_sec=now_sec,
-                )
-                self._clear_active_goal()
+                if self._goal_target_pose_reached(hardware_state):
+                    self._write_terminal_hold_command(hardware_state, context_suffix="succeeded")
+                    self._result = TrajectoryExecutionResult(
+                        controller_name=self._active_request.controller_name,
+                        state=TrajectoryExecutionState.SUCCEEDED,
+                        message="goal_reached",
+                        timestamp_sec=now_sec,
+                    )
+                    self._clear_active_goal()
+                    return
+                self._write_terminal_hold_command(hardware_state, context_suffix="ee_settle")
+                self._publish_hold_feedback(hardware_state=hardware_state, error_norm_rad=segment_error_norm_rad, now_sec=now_sec)
+                if self._goal_has_timed_out(now_sec):
+                    self._write_terminal_hold_command(hardware_state, context_suffix="timeout")
+                    self._result = TrajectoryExecutionResult(
+                        controller_name=self._active_request.controller_name,
+                        state=TrajectoryExecutionState.ABORTED,
+                        message="goal_timeout",
+                        timestamp_sec=now_sec,
+                    )
+                    self._clear_active_goal()
                 return
             self._activate_next_segment(now_sec=now_sec, current_positions=current_positions)
             return
@@ -336,48 +354,51 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         self,
         *,
         segment: object,
-        segment_error_norm_rad: float,
+        progress_error: float,
         now_sec: float,
     ) -> None:
         if getattr(segment, "initial_error_max", None) is None:
-            segment.initial_error_max = segment_error_norm_rad
+            segment.initial_error_max = progress_error
         if self._segment_best_error_norm_rad is None:
-            self._segment_best_error_norm_rad = segment_error_norm_rad
+            self._segment_best_error_norm_rad = progress_error
             self._segment_last_progress_time_sec = now_sec
         if self._goal_best_error_norm_rad is None:
-            self._goal_best_error_norm_rad = segment_error_norm_rad
+            self._goal_best_error_norm_rad = progress_error
             self._goal_last_progress_time_sec = now_sec
 
-    def _record_progress(self, *, segment_error_norm_rad: float, now_sec: float) -> None:
+    def _record_progress(self, *, progress_error: float, progress_epsilon: float, now_sec: float) -> None:
         if (
             self._segment_best_error_norm_rad is None
-            or segment_error_norm_rad < self._segment_best_error_norm_rad - self.PROGRESS_EPSILON_RAD
+            or progress_error < self._segment_best_error_norm_rad - progress_epsilon
         ):
-            self._segment_best_error_norm_rad = segment_error_norm_rad
+            self._segment_best_error_norm_rad = progress_error
             self._segment_last_progress_time_sec = now_sec
-        if self._goal_best_error_norm_rad is None or segment_error_norm_rad < self._goal_best_error_norm_rad - self.PROGRESS_EPSILON_RAD:
-            self._goal_best_error_norm_rad = segment_error_norm_rad
+        if self._goal_best_error_norm_rad is None or progress_error < self._goal_best_error_norm_rad - progress_epsilon:
+            self._goal_best_error_norm_rad = progress_error
             self._goal_last_progress_time_sec = now_sec
 
     def _segment_has_stalled(self, now_sec: float) -> bool:
         if self._segment_last_progress_time_sec is None:
             return False
-        return (now_sec - self._segment_last_progress_time_sec) >= self.STALL_TIMEOUT_SEC
+        return (now_sec - self._segment_last_progress_time_sec) >= self._stall_timeout_sec()
 
     def _goal_has_timed_out(self, now_sec: float) -> bool:
         if self._goal_start_time_sec is None or self._goal_last_progress_time_sec is None:
             return False
         nominal_deadline_sec = self._trajectory_duration_sec() + self._goal_time_tolerance_sec
+        active_abort = self._active_abort_policy()
+        if active_abort is not None and active_abort.nominal_timeout_sec is not None:
+            nominal_deadline_sec = active_abort.nominal_timeout_sec
         if now_sec - self._goal_start_time_sec <= nominal_deadline_sec:
             return False
-        return (now_sec - self._goal_last_progress_time_sec) >= self.STALL_TIMEOUT_SEC
+        return (now_sec - self._goal_last_progress_time_sec) >= self._stall_timeout_sec()
 
     def _path_tolerance_is_violated(self, *, now_sec: float, path_error_norm_rad: float) -> bool:
         if self._goal_start_time_sec is None:
             return False
         if now_sec - self._goal_start_time_sec <= self._path_tolerance_grace_sec:
             return False
-        if path_error_norm_rad <= self._path_tolerance_rad:
+        if path_error_norm_rad <= self._active_path_tolerance_rad():
             return False
         return self._segment_has_stalled(now_sec)
 
@@ -396,13 +417,116 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
     def _write_terminal_hold_command(self, hardware_state: HardwareStateSample, *, context_suffix: str) -> None:
         if self._active_request is None:
             return
+        hold_positions = self._terminal_hold_positions(hardware_state, context_suffix=context_suffix)
         zero_velocities = np.zeros(len(hardware_state.positions_rad), dtype=float)
         self._hardware.write_command(
             HardwareCommandSample(
                 joint_names=hardware_state.joint_names,
-                positions_rad=tuple(float(value) for value in hardware_state.positions_rad),
+                positions_rad=tuple(float(value) for value in hold_positions),
                 velocities_rad_s=tuple(float(value) for value in zero_velocities),
                 context=f"{self._active_request.command_name}:{context_suffix}",
                 gripper_closed=self._active_request.gripper_closed,
             )
         )
+
+    def _terminal_hold_positions(self, hardware_state: HardwareStateSample, *, context_suffix: str) -> np.ndarray:
+        if context_suffix in {"succeeded", "ee_settle"} and self._active_segments:
+            target_positions = np.asarray(
+                getattr(self._active_segments[min(self._active_segment_index, len(self._active_segments) - 1)], "target_positions"),
+                dtype=float,
+            )
+            if target_positions.shape[0] == len(hardware_state.positions_rad):
+                return target_positions
+        return np.asarray(hardware_state.positions_rad, dtype=float)
+
+    def _goal_target_pose_reached(self, hardware_state: HardwareStateSample) -> bool:
+        if self._active_request is None:
+            return True
+        spec = self._active_request.execution_phase_spec
+        if spec is not None and spec.intent.success.judge is not SuccessJudge.END_EFFECTOR_POSE:
+            return True
+        target_pose = self._active_request.target_pose
+        tolerance_m = self._active_request.position_tolerance_m
+        if spec is not None and spec.intent.success.position_tolerance_m is not None:
+            tolerance_m = spec.intent.success.position_tolerance_m
+        current_pose = hardware_state.end_effector_pose
+        if target_pose is None or tolerance_m is None or current_pose is None:
+            return True
+        return self._pose_distance_m(current_pose, target_pose) <= tolerance_m
+
+    def _progress_tracking_values(
+        self,
+        *,
+        hardware_state: HardwareStateSample,
+        segment_error_norm_rad: float,
+    ) -> tuple[float, float]:
+        if self._active_request is None:
+            return segment_error_norm_rad, self.PROGRESS_EPSILON_RAD
+        spec = self._active_request.execution_phase_spec
+        if (
+            spec is None
+            or spec.intent.success.judge is not SuccessJudge.END_EFFECTOR_POSE
+            or hardware_state.end_effector_pose is None
+            or spec.motion.phase_goal_pose is None
+        ):
+            return segment_error_norm_rad, self.PROGRESS_EPSILON_RAD
+        abort_policy = spec.intent.abort
+        return (
+            self._pose_distance_m(hardware_state.end_effector_pose, spec.motion.phase_goal_pose),
+            abort_policy.min_progress_delta_m or self.PROGRESS_EPSILON_RAD,
+        )
+
+    def _active_abort_policy(self) -> AbortPolicy | None:
+        if self._active_request is None or self._active_request.execution_phase_spec is None:
+            return None
+        return self._active_request.execution_phase_spec.intent.abort
+
+    def _stall_timeout_sec(self) -> float:
+        active_abort = self._active_abort_policy()
+        if active_abort is not None and active_abort.stall_timeout_sec is not None:
+            return active_abort.stall_timeout_sec
+        return self.STALL_TIMEOUT_SEC
+
+    def _active_path_tolerance_rad(self) -> float:
+        active_abort = self._active_abort_policy()
+        if active_abort is not None and active_abort.joint_path_tolerance_rad is not None:
+            return active_abort.joint_path_tolerance_rad
+        return self._path_tolerance_rad
+
+    def _publish_hold_feedback(
+        self,
+        *,
+        hardware_state: HardwareStateSample,
+        error_norm_rad: float,
+        now_sec: float,
+    ) -> None:
+        if self._active_request is None:
+            return
+        desired_positions = tuple(float(value) for value in self._terminal_hold_positions(hardware_state, context_suffix="ee_settle"))
+        desired_velocities = tuple(0.0 for _ in hardware_state.positions_rad)
+        self._controller_state = JointTrajectoryControllerState(
+            controller_name=self._active_request.controller_name,
+            desired_positions_rad=desired_positions,
+            actual_positions_rad=tuple(float(value) for value in hardware_state.positions_rad),
+            desired_velocities_rad_s=desired_velocities,
+            actual_velocities_rad_s=tuple(float(value) for value in hardware_state.velocities_rad_s),
+            error_norm_rad=error_norm_rad,
+            timestamp_sec=now_sec,
+        )
+        self._feedback = TrajectoryExecutionFeedback(
+            controller_name=self._active_request.controller_name,
+            state=TrajectoryExecutionState.ACTIVE,
+            desired_positions_rad=self._controller_state.desired_positions_rad,
+            actual_positions_rad=self._controller_state.actual_positions_rad,
+            desired_velocities_rad_s=self._controller_state.desired_velocities_rad_s,
+            actual_velocities_rad_s=self._controller_state.actual_velocities_rad_s,
+            error_norm_rad=error_norm_rad,
+            timestamp_sec=now_sec,
+        )
+
+    @staticmethod
+    def _pose_distance_m(current_pose: Pose3D, target_pose: Pose3D) -> float:
+        dx = current_pose.x - target_pose.x
+        dy = current_pose.y - target_pose.y
+        dz = current_pose.z - target_pose.z
+        return float(np.sqrt(dx * dx + dy * dy + dz * dz))

@@ -10,6 +10,7 @@ from tomato_harvest_sim.api.contracts import (
     JointTrajectory,
     JointTrajectoryPoint,
     MotionCommand,
+    PhaseId,
     Pose3D,
     RobotRuntimeState,
     TargetEstimate,
@@ -209,12 +210,15 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             f"Grasp world xyz: ({layout.tomato_pose.x:.4f}, {layout.tomato_pose.y:.4f}, "
             f"{layout.tomato_pose.z + 0.045:.4f})"
         )
-        self.assertEqual(system.bridge.state.last_motion_command, MotionCommand(
-            command_name="move_to_pregrasp",
-            planner_name="moveit2_pregrasp_demo",
-            target_pose=expected_pregrasp,
-            waypoint_poses=(expected_pregrasp,),
-        ))
+        self.assertEqual(system.bridge.state.last_motion_command.command_name, "move_to_pregrasp")
+        self.assertEqual(system.bridge.state.last_motion_command.planner_name, "moveit2_pregrasp_demo")
+        self.assertEqual(system.bridge.state.last_motion_command.target_pose, expected_pregrasp)
+        self.assertEqual(system.bridge.state.last_motion_command.waypoint_poses, (expected_pregrasp,))
+        self.assertIsNotNone(system.bridge.state.last_motion_command.execution_phase_spec)
+        self.assertEqual(
+            system.bridge.state.last_motion_command.execution_phase_spec.phase_id,
+            PhaseId.MOVING_TO_PREGRASP,
+        )
         self.assertEqual(system.simulator.state.pregrasp_pose, expected_pregrasp)
         self.assertLess(abs(system.simulator.state.robot_tool_pose.x - expected_pregrasp.x), 0.03)
         self.assertLess(abs(system.simulator.state.robot_tool_pose.z - expected_pregrasp.z), 0.03)
@@ -269,14 +273,17 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             f"Grasp command target xyz: ({expected_grasp.x:.4f}, {expected_grasp.y:.4f}, {expected_grasp.z:.4f})"
         )
         self.assertEqual(system.robot.state.last_harvest_motion_plan.grasp_pose, expected_grasp)
+        self.assertEqual(system.bridge.state.last_motion_command.command_name, "move_to_grasp")
+        self.assertEqual(system.bridge.state.last_motion_command.planner_name, system.robot.state.planner_backend_name)
+        self.assertEqual(system.bridge.state.last_motion_command.target_pose, expected_grasp)
         self.assertEqual(
-            system.bridge.state.last_motion_command,
-            MotionCommand(
-                command_name="move_to_grasp",
-                planner_name=system.robot.state.planner_backend_name,
-                target_pose=expected_grasp,
-                waypoint_poses=(expected_grasp_hover, expected_grasp_entry, expected_grasp),
-            ),
+            system.bridge.state.last_motion_command.waypoint_poses,
+            (expected_grasp_hover, expected_grasp_entry, expected_grasp),
+        )
+        self.assertIsNotNone(system.bridge.state.last_motion_command.execution_phase_spec)
+        self.assertEqual(
+            system.bridge.state.last_motion_command.execution_phase_spec.phase_id,
+            PhaseId.MOVING_TO_GRASP,
         )
         self.assertEqual(system.simulator.state.grasp_pose, expected_grasp)
         self.assertTrue(any(expected_grasp_log in line for line in logs))
@@ -377,12 +384,15 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         self.assertEqual(len(planner.calls), 1)
         self.assertEqual(planner.calls[0], current_joint_state)
         self.assertTrue(any("path_tolerance_violation" in line for line in logs))
-        self.assertEqual(system.robot.state.last_motion_command, MotionCommand(
-            command_name="move_to_grasp",
-            planner_name="recording_replan",
-            target_pose=replanned_grasp,
-            waypoint_poses=(replanned_grasp,),
-        ))
+        self.assertEqual(system.robot.state.last_motion_command.command_name, "move_to_grasp")
+        self.assertEqual(system.robot.state.last_motion_command.planner_name, "recording_replan")
+        self.assertEqual(system.robot.state.last_motion_command.target_pose, replanned_grasp)
+        self.assertEqual(system.robot.state.last_motion_command.waypoint_poses, (replanned_grasp,))
+        self.assertIsNotNone(system.robot.state.last_motion_command.execution_phase_spec)
+        self.assertEqual(
+            system.robot.state.last_motion_command.execution_phase_spec.phase_id,
+            PhaseId.MOVING_TO_GRASP,
+        )
         self.assertEqual(system.simulator.state.grasp_pose, replanned_grasp)
 
 

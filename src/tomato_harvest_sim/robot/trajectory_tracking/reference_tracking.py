@@ -68,7 +68,7 @@ def build_joint_trajectory_segments(
             else:
                 start_positions = target_positions.copy()
                 min_duration_sec = time_epsilon_sec
-            if synthetic_start_logged and raw_time_sec <= time_epsilon_sec:
+            if synthetic_start_logged:
                 effective_time_sec = max(raw_time_sec, min_duration_sec)
             else:
                 effective_time_sec = max(raw_time_sec, time_epsilon_sec)

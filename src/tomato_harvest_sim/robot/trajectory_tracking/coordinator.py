@@ -169,9 +169,10 @@ class TrajectoryTrackingCoordinator:
         if current_pose is None:
             return FrankaMotionProgress(active_target=True, reached=False, distance_m=None)
         distance_m = pose_distance_m(current_pose, state.target_pose)
+        position_tolerance_m = state.position_tolerance_m or self._position_tolerance_m
         return FrankaMotionProgress(
             active_target=True,
-            reached=distance_m <= self._position_tolerance_m,
+            reached=distance_m <= position_tolerance_m,
             distance_m=distance_m,
         )
 
@@ -271,7 +272,7 @@ class TrajectoryTrackingCoordinator:
     def _solve_joint_targets_for_pose(self, target_pose: Pose3D) -> np.ndarray | None:
         return self._driver.solve_joint_targets_for_pose(
             target_pose,
-            position_tolerance_m=self._position_tolerance_m,
+            position_tolerance_m=self._state_store.state.position_tolerance_m or self._position_tolerance_m,
         )
 
     def _solve_joint_targets_for_waypoints(self, waypoints: tuple[Pose3D, ...]) -> tuple[np.ndarray, ...]:
@@ -308,7 +309,10 @@ class TrajectoryTrackingCoordinator:
                     command_name="joint_trajectory",
                     planner_name="trajectory_tracking",
                     trajectory=trajectory,
+                    target_pose=state.target_pose,
+                    position_tolerance_m=state.position_tolerance_m or self._position_tolerance_m,
                     gripper_closed=state.gripper_closed,
+                    execution_phase_spec=state.execution_phase_spec,
                 )
             )
             if not accepted:

@@ -1,0 +1,65 @@
+phases:
+  moving_to_pregrasp:
+    pose_semantics: tool_center
+    success:
+      judge: end_effector_pose
+      position_tolerance_m: 0.03
+      stable_steps: 1
+    abort:
+      nominal_timeout_sec: 3.0
+      stall_timeout_sec: 0.5
+      min_progress_delta_m: 0.005
+      joint_path_tolerance_rad: 0.30
+      allow_replan: true
+
+  moving_to_grasp:
+    pose_semantics: grasp_center
+    success:
+      judge: end_effector_pose
+      position_tolerance_m: 0.010
+      stable_steps: 2
+    abort:
+      nominal_timeout_sec: 2.0
+      stall_timeout_sec: 0.5
+      min_progress_delta_m: 0.002
+      joint_path_tolerance_rad: 0.20
+      allow_replan: true
+
+  pull_to_detach:
+    pose_semantics: grasp_center
+    success:
+      judge: tomato_state
+      stable_steps: 1
+      required_tomato_status: detached
+    abort:
+      nominal_timeout_sec: 2.5
+      stall_timeout_sec: 0.5
+      min_progress_delta_m: 0.002
+      joint_path_tolerance_rad: 0.30
+      allow_replan: true
+
+  moving_to_place:
+    pose_semantics: tool_center
+    success:
+      judge: end_effector_pose
+      position_tolerance_m: 0.05
+      stable_steps: 1
+    abort:
+      nominal_timeout_sec: 3.0
+      stall_timeout_sec: 0.5
+      min_progress_delta_m: 0.005
+      joint_path_tolerance_rad: 0.30
+      allow_replan: true
+
+  returning_home:
+    pose_semantics: tool_center
+    success:
+      judge: end_effector_pose
+      position_tolerance_m: 0.03
+      stable_steps: 1
+    abort:
+      nominal_timeout_sec: 3.0
+      stall_timeout_sec: 0.5
+      min_progress_delta_m: 0.005
+      joint_path_tolerance_rad: 0.30
+      allow_replan: false

@@ -5,7 +5,7 @@ from typing import Protocol
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import JointStateSnapshot, JointTrajectory, Pose3D
+from tomato_harvest_sim.api.contracts import ExecutionPhaseSpec, JointStateSnapshot, JointTrajectory, Pose3D
 
 
 @dataclass(frozen=True)
@@ -92,6 +92,8 @@ class TrajectoryTrackingState:
     motion_waypoints: tuple[Pose3D, ...] = ()
     snapshot_active_waypoint_index: int | None = None
     joint_trajectory: JointTrajectory | None = None
+    execution_phase_spec: ExecutionPhaseSpec | None = None
+    position_tolerance_m: float | None = None
     gripper_closed: bool = False
     home_command_pending: bool = False
     home_progress_announced: bool = False
@@ -111,7 +113,13 @@ class TrajectoryTrackingState:
     last_control_time_sec: float | None = None
     last_observed_joint_positions: np.ndarray | None = None
     last_observed_joint_time_sec: float | None = None
-    blocked_motion_signature: tuple[Pose3D | None, tuple[Pose3D, ...], JointTrajectory | None] | None = None
+    blocked_motion_signature: tuple[
+        Pose3D | None,
+        tuple[Pose3D, ...],
+        JointTrajectory | None,
+        ExecutionPhaseSpec | None,
+    ] | None = None
     pending_replan_reason: str | None = None
     replan_status_announced: bool = False
     trajectory_preview_cache: dict[JointTrajectory, tuple[Pose3D, ...]] = field(default_factory=dict)
+    arm_hold_joint_positions: np.ndarray | None = None

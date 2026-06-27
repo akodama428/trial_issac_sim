@@ -74,7 +74,7 @@ class Ros2MoveIt2PlannerBridge:
     BRANCH_SIZE_M = (0.18, 0.02, 0.02)
     STEM_SIZE_M = (0.008, 0.008, 0.06)
     ATTACHED_TOMATO_RADIUS_M = 0.01
-    ATTACHED_TOMATO_OFFSET_M = (0.0, 0.0, 0.0584)
+    ATTACHED_TOMATO_OFFSET_M = (0.0, 0.0, 0.1034)
     NOOP_TRAJECTORY_TOLERANCE_RAD = 1e-3
 
     def __init__(
@@ -187,6 +187,22 @@ class Ros2MoveIt2PlannerBridge:
             return self._fallback_result("pull_plan_failed")
         current_joint_state = _joint_state_from_trajectory(pull_trajectory)
 
+        pre_place_pose = plan.place_waypoints[0] if plan.place_waypoints else None
+        if pre_place_pose is not None:
+            approach_trajectory = self._plan_phase(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                target_pose=pre_place_pose,
+                attach_tomato=True,
+            )
+            if approach_trajectory is None:
+                return self._fallback_result("pre_place_plan_failed")
+            current_joint_state = _joint_state_from_trajectory(approach_trajectory)
+        else:
+            approach_trajectory = None
+
         place_trajectory = self._plan_phase(
             clients=clients,
             joint_state=current_joint_state,
@@ -197,6 +213,9 @@ class Ros2MoveIt2PlannerBridge:
         )
         if place_trajectory is None:
             return self._fallback_result("place_plan_failed")
+
+        if approach_trajectory is not None:
+            place_trajectory = _concatenate_trajectories(approach_trajectory, place_trajectory)
 
         return MoveIt2PlanningResult(
             success=True,
@@ -516,6 +535,22 @@ def _trajectory_is_noop(
 def _joint_state_from_trajectory(trajectory: JointTrajectory) -> JointStateSnapshot:
     last_point = trajectory.points[-1]
     return JointStateSnapshot(joint_names=trajectory.joint_names, positions_rad=last_point.positions_rad)
+
+
+def _concatenate_trajectories(traj1: JointTrajectory, traj2: JointTrajectory) -> JointTrajectory:
+    if not traj1.points:
+        return traj2
+    if not traj2.points:
+        return traj1
+    time_offset = traj1.points[-1].time_from_start_sec
+    shifted = tuple(
+        JointTrajectoryPoint(
+            positions_rad=p.positions_rad,
+            time_from_start_sec=p.time_from_start_sec + time_offset,
+        )
+        for p in traj2.points
+    )
+    return JointTrajectory(joint_names=traj1.joint_names, points=traj1.points + shifted)
 
 
 def _build_planning_scene_request(

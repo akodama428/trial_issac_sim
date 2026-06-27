@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from tomato_harvest_sim.api.contracts import (
     ControlCommand,
+    ExecutionPhaseSpec,
     JointTrajectory,
     MotionCommand,
     Pose3D,
@@ -41,6 +42,7 @@ class SceneRuntimeState:
     motion_waypoints: tuple[Pose3D, ...]
     active_waypoint_index: int | None
     motion_joint_trajectory: JointTrajectory | None
+    execution_phase_spec: ExecutionPhaseSpec | None
 
 
 class IsaacSceneRuntime:
@@ -135,9 +137,15 @@ class IsaacSceneRuntime:
         *,
         waypoint_poses: tuple[Pose3D, ...] = (),
         joint_trajectory: JointTrajectory | None = None,
+        execution_phase_spec: ExecutionPhaseSpec | None = None,
     ) -> SceneSnapshot:
         self.state.pregrasp_pose = pose
-        return self._set_motion_path(pose, waypoint_poses=waypoint_poses, joint_trajectory=joint_trajectory)
+        return self._set_motion_path(
+            pose,
+            waypoint_poses=waypoint_poses,
+            joint_trajectory=joint_trajectory,
+            execution_phase_spec=execution_phase_spec,
+        )
 
     def set_grasp_pose(
         self,
@@ -145,9 +153,15 @@ class IsaacSceneRuntime:
         *,
         waypoint_poses: tuple[Pose3D, ...] = (),
         joint_trajectory: JointTrajectory | None = None,
+        execution_phase_spec: ExecutionPhaseSpec | None = None,
     ) -> SceneSnapshot:
         self.state.grasp_pose = pose
-        return self._set_motion_path(pose, waypoint_poses=waypoint_poses, joint_trajectory=joint_trajectory)
+        return self._set_motion_path(
+            pose,
+            waypoint_poses=waypoint_poses,
+            joint_trajectory=joint_trajectory,
+            execution_phase_spec=execution_phase_spec,
+        )
 
     def set_pull_pose(
         self,
@@ -155,9 +169,15 @@ class IsaacSceneRuntime:
         *,
         waypoint_poses: tuple[Pose3D, ...] = (),
         joint_trajectory: JointTrajectory | None = None,
+        execution_phase_spec: ExecutionPhaseSpec | None = None,
     ) -> SceneSnapshot:
         self.state.pull_pose = pose
-        return self._set_motion_path(pose, waypoint_poses=waypoint_poses, joint_trajectory=joint_trajectory)
+        return self._set_motion_path(
+            pose,
+            waypoint_poses=waypoint_poses,
+            joint_trajectory=joint_trajectory,
+            execution_phase_spec=execution_phase_spec,
+        )
 
     def set_place_pose(
         self,
@@ -165,21 +185,34 @@ class IsaacSceneRuntime:
         *,
         waypoint_poses: tuple[Pose3D, ...] = (),
         joint_trajectory: JointTrajectory | None = None,
+        execution_phase_spec: ExecutionPhaseSpec | None = None,
     ) -> SceneSnapshot:
         self.state.place_pose = pose
-        return self._set_motion_path(pose, waypoint_poses=waypoint_poses, joint_trajectory=joint_trajectory)
+        return self._set_motion_path(
+            pose,
+            waypoint_poses=waypoint_poses,
+            joint_trajectory=joint_trajectory,
+            execution_phase_spec=execution_phase_spec,
+        )
 
-    def move_robot_home(self, is_home: bool = True) -> SceneSnapshot:
+    def move_robot_home(
+        self,
+        is_home: bool = True,
+        *,
+        execution_phase_spec: ExecutionPhaseSpec | None = None,
+    ) -> SceneSnapshot:
         if not is_home:
             self.state.robot_home = False
             return self.snapshot()
         return self._set_motion_path(
             self._layout.home_tool_pose,
             waypoint_poses=(self._layout.home_tool_pose,),
+            execution_phase_spec=execution_phase_spec,
         )
 
     def close_gripper(self) -> SceneSnapshot:
         self.state.gripper_closed = True
+        self._clear_motion_target()
         if self._physics_grasp_enabled:
             if self._physics_soft_fallback_enabled:
                 self.state.tomato_status = TomatoStatus.HELD
@@ -209,6 +242,7 @@ class IsaacSceneRuntime:
 
     def open_gripper(self) -> SceneSnapshot:
         self.state.gripper_closed = False
+        self._clear_motion_target()
         if self._physics_grasp_enabled:
             if self._physics_soft_fallback_enabled and self.state.tomato_status is TomatoStatus.DETACHED:
                 if self._is_place_release_pose():
@@ -237,18 +271,21 @@ class IsaacSceneRuntime:
                 command.target_pose,
                 waypoint_poses=command.waypoint_poses,
                 joint_trajectory=command.joint_trajectory,
+                execution_phase_spec=command.execution_phase_spec,
             )
         if command.command_name == "move_to_grasp":
             return self.set_grasp_pose(
                 command.target_pose,
                 waypoint_poses=command.waypoint_poses,
                 joint_trajectory=command.joint_trajectory,
+                execution_phase_spec=command.execution_phase_spec,
             )
         if command.command_name == "pull_to_detach":
             snapshot = self.set_pull_pose(
                 command.target_pose,
                 waypoint_poses=command.waypoint_poses,
                 joint_trajectory=command.joint_trajectory,
+                execution_phase_spec=command.execution_phase_spec,
             )
             if self._physics_grasp_enabled:
                 if self._physics_soft_fallback_enabled and self.state.tomato_status is TomatoStatus.HELD:
@@ -268,13 +305,14 @@ class IsaacSceneRuntime:
                 command.target_pose,
                 waypoint_poses=command.waypoint_poses,
                 joint_trajectory=command.joint_trajectory,
+                execution_phase_spec=command.execution_phase_spec,
             )
         if command.command_name == "close_gripper":
             return self.close_gripper()
         if command.command_name == "open_gripper":
             return self.open_gripper()
         if command.command_name == "move_home":
-            return self.move_robot_home()
+            return self.move_robot_home(execution_phase_spec=command.execution_phase_spec)
         raise ValueError(f"Unsupported motion command: {command.command_name}")
 
     def advance(self) -> SceneSnapshot:
@@ -369,6 +407,7 @@ class IsaacSceneRuntime:
             motion_waypoints=self.state.motion_waypoints,
             active_waypoint_index=self.state.active_waypoint_index,
             motion_joint_trajectory=self.state.motion_joint_trajectory,
+            execution_phase_spec=self.state.execution_phase_spec,
         )
 
     def _is_stable_grasp_pose(self) -> bool:
@@ -403,6 +442,7 @@ class IsaacSceneRuntime:
         *,
         waypoint_poses: tuple[Pose3D, ...],
         joint_trajectory: JointTrajectory | None = None,
+        execution_phase_spec: ExecutionPhaseSpec | None = None,
     ) -> SceneSnapshot:
         path = waypoint_poses or (final_pose,)
         active_index = self._first_unreached_waypoint_index(path)
@@ -410,6 +450,7 @@ class IsaacSceneRuntime:
         self.state.active_waypoint_index = active_index
         self.state.target_tool_pose = path[active_index]
         self.state.motion_joint_trajectory = joint_trajectory
+        self.state.execution_phase_spec = execution_phase_spec
         self.state.robot_home = False
         return self.snapshot()
 
@@ -453,6 +494,7 @@ class IsaacSceneRuntime:
         self.state.motion_waypoints = ()
         self.state.active_waypoint_index = None
         self.state.motion_joint_trajectory = None
+        self.state.execution_phase_spec = None
 
     def _step_tool_toward_target(self, current_pose: Pose3D, target_pose: Pose3D) -> Pose3D:
         dx = target_pose.x - current_pose.x
@@ -505,4 +547,5 @@ class IsaacSceneRuntime:
             motion_waypoints=(),
             active_waypoint_index=None,
             motion_joint_trajectory=None,
+            execution_phase_spec=None,
         )

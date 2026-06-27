@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from tomato_harvest_sim.api.contracts import JointTrajectory
+from tomato_harvest_sim.api.contracts import ExecutionPhaseSpec, JointTrajectory, Pose3D
 
 
 class TrajectoryExecutionState(StrEnum):
@@ -23,7 +23,10 @@ class TrajectoryExecutionRequest:
     command_name: str
     planner_name: str
     trajectory: JointTrajectory
+    target_pose: Pose3D | None = None
+    position_tolerance_m: float | None = None
     gripper_closed: bool | None = None
+    execution_phase_spec: ExecutionPhaseSpec | None = None
 
 
 @dataclass(frozen=True)

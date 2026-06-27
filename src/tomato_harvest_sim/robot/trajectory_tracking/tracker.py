@@ -342,13 +342,16 @@ class TrajectoryTracker:
     def _apply_gripper_state(self, *, state, current_positions: np.ndarray | None) -> TrackingStepResult:
         if current_positions is None:
             return TrackingStepResult()
-        target_positions = np.asarray(current_positions, dtype=float).reshape(-1)
+        target_positions = np.asarray(current_positions, dtype=float).copy()
         if target_positions.shape[0] < 9:
             return TrackingStepResult()
+        hold = state.arm_hold_joint_positions
+        if hold is not None and hold.shape[0] >= 7:
+            target_positions[:7] = hold[:7]
         desired_finger_position = 0.0 if state.gripper_closed else 0.04
         finger_targets = np.array([desired_finger_position, desired_finger_position], dtype=float)
         next_fingers = step_toward_joint_positions(
-            target_positions[7:9].copy(),
+            current_positions[7:9].copy(),
             finger_targets,
             max_step_rad=self._max_gripper_step_rad,
         )
