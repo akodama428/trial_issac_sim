@@ -61,10 +61,12 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         controller_manager: ControllerManager | None = None,
         controller_name: str = "joint_trajectory_controller",
         goal_tolerance_rad: float = 0.03,
-        path_tolerance_rad: float = 0.30,
+        path_tolerance_rad: float = 0.10,
         goal_time_tolerance_sec: float = 0.5,
         path_tolerance_grace_sec: float = 0.05,
         monotonic_time_sec: callable | None = None,
+        proportional_gain: float = 0.3,
+        derivative_gain: float = 0.1,
     ) -> None:
         self._hardware = hardware
         self._controller_manager = controller_manager or ControllerManager()
@@ -75,6 +77,8 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         self._path_tolerance_grace_sec = path_tolerance_grace_sec
         self._monotonic_time_sec = monotonic_time_sec or time.monotonic
         self._arm_joint_velocity_limits_rad_s = _load_arm_joint_velocity_limits_rad_s(self.ARM_DOF)
+        self._proportional_gain = proportional_gain
+        self._derivative_gain = derivative_gain
 
         self._active_request: TrajectoryExecutionRequest | None = None
         self._active_segments: tuple[object, ...] = ()
@@ -88,9 +92,11 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         self._goal_last_progress_time_sec: float | None = None
         self._segment_best_error_norm_rad: float | None = None
         self._segment_last_progress_time_sec: float | None = None
+        self._terminal_hold_cache: dict | None = None
 
     def send_goal(self, request: TrajectoryExecutionRequest) -> bool:
         self._result = None
+        self._terminal_hold_cache = None
         if not self._controller_manager.ensure_controller(request.controller_name):
             self._result = TrajectoryExecutionResult(
                 controller_name=request.controller_name,
@@ -118,6 +124,13 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
             joint_tolerance_rad=self._goal_tolerance_rad,
             time_epsilon_sec=1e-3,
             arm_joint_velocity_limits_rad_s=self._arm_joint_velocity_limits_rad_s,
+        )
+        hermite_count = sum(
+            1 for seg in segments if seg.start_velocities is not None and seg.target_velocities is not None
+        )
+        print(
+            f"[ControllerBridge] send_goal: segments={len(segments)} hermite_enabled={hermite_count}/{len(segments)}",
+            flush=True,
         )
         self._active_request = request
         self._active_segments = segments
@@ -156,6 +169,7 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
 
     def step(self) -> None:
         if self._active_request is None or not self._active_segments:
+            self._apply_terminal_damping_if_needed()
             return
 
         hardware_state = self._hardware.read_state()
@@ -191,6 +205,12 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
             if self._active_segment_index >= len(self._active_segments) - 1:
                 if self._goal_target_pose_reached(hardware_state):
                     self._write_terminal_hold_command(hardware_state, context_suffix="succeeded")
+                    self._terminal_hold_cache = {
+                        "positions": self._terminal_hold_positions(hardware_state, context_suffix="succeeded"),
+                        "gripper_closed": self._active_request.gripper_closed,
+                        "command_name": self._active_request.command_name,
+                        "controller_name": self._active_request.controller_name,
+                    }
                     self._result = TrajectoryExecutionResult(
                         controller_name=self._active_request.controller_name,
                         state=TrajectoryExecutionState.SUCCEEDED,
@@ -306,6 +326,62 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         self._segment_best_error_norm_rad = None
         self._segment_last_progress_time_sec = None
 
+    def _apply_terminal_damping_if_needed(self) -> None:
+        if self._terminal_hold_cache is None:
+            return
+        hw = self._hardware.read_state()
+        if hw is None:
+            return
+        target_positions = self._terminal_hold_cache["positions"]
+        n = len(hw.joint_names)
+        actual_vel = np.asarray(hw.velocities_rad_s, dtype=float)
+        vel_limits = np.asarray(self._arm_joint_velocity_limits_rad_s[:7], dtype=float)
+        damped_vel = np.zeros(n, dtype=float)
+        damped_vel[:7] = np.clip(-self._derivative_gain * actual_vel[:7], -vel_limits, vel_limits)
+        now_sec = self._monotonic_time_sec()
+        self._hardware.write_command(
+            HardwareCommandSample(
+                joint_names=hw.joint_names,
+                positions_rad=tuple(float(v) for v in target_positions[:n]),
+                velocities_rad_s=tuple(float(v) for v in damped_vel),
+                context=f"{self._terminal_hold_cache['command_name']}:terminal_damp",
+                gripper_closed=self._terminal_hold_cache["gripper_closed"],
+            )
+        )
+        self._controller_state = JointTrajectoryControllerState(
+            controller_name=self._terminal_hold_cache["controller_name"],
+            desired_positions_rad=tuple(float(v) for v in target_positions[:n]),
+            actual_positions_rad=tuple(float(v) for v in hw.positions_rad),
+            desired_velocities_rad_s=tuple(float(v) for v in damped_vel),
+            actual_velocities_rad_s=tuple(float(v) for v in hw.velocities_rad_s),
+            error_norm_rad=float(np.max(np.abs(target_positions[:7] - np.asarray(hw.positions_rad[:7], dtype=float)))),
+            timestamp_sec=now_sec,
+        )
+
+    def update_external_command_state(
+        self,
+        *,
+        desired_positions: tuple[float, ...],
+        desired_velocities: tuple[float, ...],
+        actual_positions: tuple[float, ...],
+        actual_velocities: tuple[float, ...],
+        timestamp_sec: float,
+    ) -> None:
+        arm_dof = min(self.ARM_DOF, len(desired_positions), len(actual_positions))
+        error_norm = float(np.max(np.abs(
+            np.asarray(desired_positions[:arm_dof], dtype=float)
+            - np.asarray(actual_positions[:arm_dof], dtype=float)
+        ))) if arm_dof > 0 else 0.0
+        self._controller_state = JointTrajectoryControllerState(
+            controller_name=self._controller_name,
+            desired_positions_rad=desired_positions,
+            actual_positions_rad=actual_positions,
+            desired_velocities_rad_s=desired_velocities,
+            actual_velocities_rad_s=actual_velocities,
+            error_norm_rad=error_norm,
+            timestamp_sec=timestamp_sec,
+        )
+
     def _trajectory_duration_sec(self) -> float:
         return float(sum(getattr(segment, "duration_sec", 0.0) for segment in self._active_segments))
 
@@ -317,12 +393,22 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         current_positions: np.ndarray,
         current_velocities: np.ndarray,
     ) -> tuple[np.ndarray, np.ndarray, float]:
-        reference_state, command_velocities = sample_trajectory_reference_state(
+        reference_state, feedforward_velocities = sample_trajectory_reference_state(
             active_segment=segment,
             current_positions=current_positions,
             now_sec=now_sec,
             time_epsilon_sec=1e-3,
             arm_joint_velocity_limits_rad_s=self._arm_joint_velocity_limits_rad_s,
+        )
+        vel_limits = np.asarray(self._arm_joint_velocity_limits_rad_s[:7], dtype=float)
+        position_error = reference_state.reference_positions[:7] - np.asarray(current_positions[:7], dtype=float)
+        velocity_error = reference_state.reference_velocities[:7] - np.asarray(current_velocities[:7], dtype=float)
+        correction = self._proportional_gain * position_error + self._derivative_gain * velocity_error
+        command_velocities = feedforward_velocities.copy()
+        command_velocities[:7] = np.clip(
+            feedforward_velocities[:7] + correction,
+            -vel_limits,
+            vel_limits,
         )
         return reference_state.reference_positions, command_velocities, reference_state.alpha
 
@@ -418,7 +504,8 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
         if self._active_request is None:
             return
         hold_positions = self._terminal_hold_positions(hardware_state, context_suffix=context_suffix)
-        zero_velocities = np.zeros(len(hardware_state.positions_rad), dtype=float)
+        n = len(hardware_state.positions_rad)
+        zero_velocities = np.zeros(n, dtype=float)
         self._hardware.write_command(
             HardwareCommandSample(
                 joint_names=hardware_state.joint_names,
@@ -427,6 +514,17 @@ class JointTrajectoryControllerBridge(TrajectoryExecutionPort):
                 context=f"{self._active_request.command_name}:{context_suffix}",
                 gripper_closed=self._active_request.gripper_closed,
             )
+        )
+        self._controller_state = JointTrajectoryControllerState(
+            controller_name=self._active_request.controller_name,
+            desired_positions_rad=tuple(float(v) for v in hold_positions),
+            actual_positions_rad=tuple(float(v) for v in hardware_state.positions_rad),
+            desired_velocities_rad_s=tuple(0.0 for _ in range(n)),
+            actual_velocities_rad_s=tuple(float(v) for v in hardware_state.velocities_rad_s),
+            error_norm_rad=float(np.max(np.abs(
+                hold_positions[:self.ARM_DOF] - np.asarray(hardware_state.positions_rad[:self.ARM_DOF], dtype=float)
+            ))),
+            timestamp_sec=self._monotonic_time_sec(),
         )
 
     def _terminal_hold_positions(self, hardware_state: HardwareStateSample, *, context_suffix: str) -> np.ndarray:

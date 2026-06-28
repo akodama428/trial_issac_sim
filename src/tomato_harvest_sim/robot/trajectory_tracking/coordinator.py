@@ -221,6 +221,9 @@ class TrajectoryTrackingCoordinator:
         self._state_store.state.pending_replan_reason = None
         return reason
 
+    def current_controller_state(self) -> object | None:
+        return self._action_client.current_controller_state()
+
     def log_post_update_debug_snapshot(self) -> None:
         if not self._trajectory_debug_enabled or not self._initialize_if_needed():
             return
@@ -262,12 +265,29 @@ class TrajectoryTrackingCoordinator:
             return
         if command.velocities is None:
             self._driver.set_joint_positions_with_debug(command.positions, context=command.context)
-            return
-        self._driver.set_joint_velocity_targets_with_debug(
-            positions=command.positions,
-            velocities=command.velocities,
-            context=command.context,
-        )
+        else:
+            self._driver.set_joint_velocity_targets_with_debug(
+                positions=command.positions,
+                velocities=command.velocities,
+                context=command.context,
+            )
+        hw = self._hardware_control_port.read_state()
+        if hw is not None:
+            n = len(hw.positions_rad)
+            desired_pos = tuple(float(v) for v in command.positions[:n])
+            zero_vel = tuple(0.0 for _ in range(n))
+            desired_vel = (
+                tuple(float(v) for v in command.velocities[:n])
+                if command.velocities is not None
+                else zero_vel
+            )
+            self._action_client.update_external_command_state(
+                desired_positions=desired_pos,
+                desired_velocities=desired_vel,
+                actual_positions=tuple(float(v) for v in hw.positions_rad),
+                actual_velocities=tuple(float(v) for v in hw.velocities_rad_s),
+                timestamp_sec=hw.timestamp_sec,
+            )
 
     def _solve_joint_targets_for_pose(self, target_pose: Pose3D) -> np.ndarray | None:
         return self._driver.solve_joint_targets_for_pose(

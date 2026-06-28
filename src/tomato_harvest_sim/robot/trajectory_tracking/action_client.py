@@ -32,3 +32,12 @@ class FollowJointTrajectoryActionClient:
 
     def active_segment_index(self) -> int | None:
         return getattr(self._port, "active_segment_index", None)
+
+    def current_controller_state(self) -> object | None:
+        fn = getattr(self._port, "current_controller_state", None)
+        return fn() if callable(fn) else None
+
+    def update_external_command_state(self, **kwargs: object) -> None:
+        fn = getattr(self._port, "update_external_command_state", None)
+        if callable(fn):
+            fn(**kwargs)

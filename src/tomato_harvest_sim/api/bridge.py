@@ -67,6 +67,8 @@ class BridgeProtocol(Protocol):
 
     def consume_motion_command(self) -> MotionCommand | None: ...
 
+    def publish_controller_state(self, state: object) -> None: ...
+
     def spin_once(self) -> None: ...
 
     def close(self) -> None: ...
@@ -148,6 +150,9 @@ class InMemoryRos2Bridge:
         self.state.pending_motion_command = None
         return command
 
+    def publish_controller_state(self, state: object) -> None:
+        return None
+
     def spin_once(self) -> None:
         return None
 
@@ -204,6 +209,7 @@ class Ros2LoopbackBridge:
         self._fixed_camera_publisher = self._sim_node.create_publisher(Image, FIXED_CAMERA_TOPIC, 10)
         self._hand_camera_publisher = self._sim_node.create_publisher(Image, HAND_CAMERA_TOPIC, 10)
         self._joint_state_publisher = self._sim_node.create_publisher(JointState, "/joint_states", 10)
+        self._joint_state_desired_publisher = self._sim_node.create_publisher(JointState, "/joint_states_desired", 10)
         self._tf_publisher = self._sim_node.create_publisher(TFMessage, "/tf", 10)
 
         self._sim_node.create_subscription(String, CONTROL_TOPIC, self._on_control_message, 10)
@@ -277,6 +283,29 @@ class Ros2LoopbackBridge:
         joint_message.name = list(joint_state.joint_names)
         joint_message.position = [float(value) for value in joint_state.positions_rad]
         self._joint_state_publisher.publish(joint_message)
+
+    def publish_controller_state(self, state: object) -> None:
+        from sensor_msgs.msg import JointState
+
+        desired = getattr(state, "desired_positions_rad", None)
+        actual = getattr(state, "actual_positions_rad", None)
+        if desired is None or actual is None:
+            return
+
+        n = len(desired)
+        joint_names = [f"panda_joint{i + 1}" for i in range(n)]
+
+        desired_msg = JointState()
+        desired_msg.name = joint_names
+        desired_msg.position = [float(v) for v in desired]
+        desired_msg.velocity = [float(v) for v in getattr(state, "desired_velocities_rad_s", [0.0] * n)]
+        self._joint_state_desired_publisher.publish(desired_msg)
+
+        actual_msg = JointState()
+        actual_msg.name = joint_names
+        actual_msg.position = [float(v) for v in actual]
+        actual_msg.velocity = [float(v) for v in getattr(state, "actual_velocities_rad_s", [0.0] * n)]
+        self._joint_state_publisher.publish(actual_msg)
         self.spin_once()
 
     def read_scene_snapshot(self) -> SceneSnapshot:

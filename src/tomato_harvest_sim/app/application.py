@@ -26,7 +26,6 @@ class TomatoHarvestApplication:
     robot: RobotRuntime
     bridge: BridgeProtocol
     moveit_service: MoveItServiceManager | None = None
-    executor: TrajectoryTrackingCoordinator | None = None
 
     @property
     def simulator(self) -> IsaacSceneRuntime:
@@ -91,48 +90,40 @@ class TomatoHarvestApplication:
     def step(self) -> tuple[str, ...]:
         self.bridge.spin_once()
 
-        # ① joint state sync: executor → bridge
-        if self.executor is not None:
-            joint_state = self.executor.current_joint_state_snapshot()
-            if joint_state is not None:
-                self.bridge.publish_joint_state(joint_state)
-
-        # ② perception / behavior / motion planning
-        logs = self.robot.step(self.bridge)
-
-        motion_command = self.bridge.consume_motion_command()
-        if motion_command is not None:
-            snapshot = self.scene_runtime.apply_motion_command(motion_command)
-            self.bridge.publish_scene_snapshot(snapshot)
+        if self.robot.has_executor:
+            # Isaac Sim パス: 前フレームの物理結果を受信してから計算
             self.robot.observe_scene(self.bridge.read_scene_snapshot())
-
-        snapshot = self.scene_runtime.advance()
-        self.bridge.publish_scene_snapshot(snapshot)
-        self.robot.observe_scene(self.bridge.read_scene_snapshot())
-
-        # ④ trajectory tracking + ros2_control (snapshot is post-advance)
-        if self.executor is not None:
-            executor_log = self.executor.run_cycle(self.scene_runtime.snapshot())
-            if executor_log:
-                logs = logs + (executor_log,)
-            reason = self.executor.consume_replan_request()
-            if reason is not None:
-                logs = logs + self.replan_motion(reason)
-
-            # ⑤ end effector sync: executor → scene
-            pose = self.executor.current_end_effector_pose()
+            logs = self.robot.step(self.bridge)
+            # gripper など bridge 経由のコマンドをシーンに反映
+            motion_command = self.bridge.consume_motion_command()
+            if motion_command is not None:
+                snapshot = self.scene_runtime.apply_motion_command(motion_command)
+                self.bridge.publish_scene_snapshot(snapshot)
+            # エンドエフェクタ姿勢をシーンに同期
+            pose = self.robot.consume_end_effector_pose()
             if pose is not None:
                 self.sync_robot_tool_pose(pose)
+        else:
+            # Python テストパス: Python 簡易物理で advance
+            logs = self.robot.step(self.bridge)
+            motion_command = self.bridge.consume_motion_command()
+            if motion_command is not None:
+                snapshot = self.scene_runtime.apply_motion_command(motion_command)
+                self.bridge.publish_scene_snapshot(snapshot)
+            snapshot = self.scene_runtime.advance()
+            self.bridge.publish_scene_snapshot(snapshot)
+            self.robot.observe_scene(self.bridge.read_scene_snapshot())
 
         return logs
 
     def replan_motion(self, reason: str) -> tuple[str, ...]:
         logs = self.robot.replan_active_motion(self.bridge, reason=reason)
-        motion_command = self.bridge.consume_motion_command()
-        if motion_command is not None:
-            snapshot = self.scene_runtime.apply_motion_command(motion_command)
-            self.bridge.publish_scene_snapshot(snapshot)
-            self.robot.observe_scene(self.bridge.read_scene_snapshot())
+        if not self.robot.has_executor:
+            motion_command = self.bridge.consume_motion_command()
+            if motion_command is not None:
+                snapshot = self.scene_runtime.apply_motion_command(motion_command)
+                self.bridge.publish_scene_snapshot(snapshot)
+                self.robot.observe_scene(self.bridge.read_scene_snapshot())
         return logs
 
     def close(self) -> None:
@@ -160,8 +151,7 @@ def create_tomato_harvest_application(
             physics_grasp_enabled=physics_grasp_enabled,
             physics_soft_fallback_enabled=physics_soft_fallback_enabled,
         ),
-        robot=RobotRuntime(grasp_lateral_offset_m=grasp_lateral_offset_m),
+        robot=RobotRuntime(grasp_lateral_offset_m=grasp_lateral_offset_m, executor=executor),
         bridge=bridge,
         moveit_service=moveit_service,
-        executor=executor,
     )

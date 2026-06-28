@@ -131,6 +131,7 @@ class JointStateSnapshot:
 class JointTrajectoryPoint:
     positions_rad: tuple[float, ...]
     time_from_start_sec: float = 0.0
+    velocities_rad_s: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True)

@@ -211,20 +211,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         control_window = None
         if not args.headless:
             control_window = IsaacControlPanelWindow(control_controller)
-        _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
+        if not args.headless:
+            _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
         _print_review_summary(plan, camera_paths=artifacts.camera_paths, camera_view=args.camera_view)
 
         if args.headless:
             for _ in range(args.headless_steps):
                 control_controller.step_runtime()
-                _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
                 if artifacts.physics_bridge is not None:
                     artifacts.physics_bridge.begin_physics_step()
                 simulation_app.update()
-                franka_executor.log_post_update_debug_snapshot()
                 if artifacts.physics_bridge is not None:
                     artifacts.physics_bridge.finalize_physics_step(control_controller)
-                _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
             _pump_updates(simulation_app.update, frame_count=30)
             print("Headless scene runtime setup completed.", flush=True)
             return 0
@@ -238,10 +236,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if artifacts.physics_bridge is not None:
                 artifacts.physics_bridge.begin_physics_step()
             simulation_app.update()
-            franka_executor.log_post_update_debug_snapshot()
             if artifacts.physics_bridge is not None:
                 artifacts.physics_bridge.finalize_physics_step(control_controller)
-            _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
             if deadline is not None and time.time() >= deadline:
                 print("Timeout reached. Closing Isaac review scene.", flush=True)
                 break

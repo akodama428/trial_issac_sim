@@ -396,5 +396,131 @@ class RobotPipelinePlanningTest(unittest.TestCase):
         self.assertEqual(system.simulator.state.grasp_pose, replanned_grasp)
 
 
+    def test_executor_run_cycle_called_before_start(self) -> None:
+        """executor.run_cycle() は Start 前（READY 状態）でも呼ばれてポジションを保持する"""
+        run_cycle_snapshots: list = []
+
+        class _RecordingExecutor:
+            def current_joint_state_snapshot(self):
+                return None
+
+            def run_cycle(self, snapshot):
+                run_cycle_snapshots.append(snapshot)
+                return None
+
+            def consume_replan_request(self):
+                return None
+
+            def log_post_update_debug_snapshot(self):
+                pass
+
+            def current_end_effector_pose(self):
+                return None
+
+        executor = _RecordingExecutor()
+        system = create_tomato_harvest_application(executor=executor)
+        system.boot()
+
+        self.assertEqual(system.robot.state.runtime_state, RobotRuntimeState.READY)
+
+        logs = system.robot.step(system.bridge)
+
+        self.assertEqual(logs, ())
+        self.assertEqual(len(run_cycle_snapshots), 1, "run_cycle should be called once even before Start")
+        self.assertIsNone(
+            run_cycle_snapshots[0].active_phase_motion_plan,
+            "active_phase_motion_plan should be None in hold-position mode",
+        )
+
+    def test_replan_during_moving_to_place_uses_place_only_trajectory(self) -> None:
+        """MOVING_TO_PLACE 中のリプランは plan_place_from_joint_state() を使い、
+        フルチェーンプランの誤った開始位置（end-of-pull）を避ける"""
+        layout = load_scene_layout_config()
+
+        place_replan_calls: list[JointStateSnapshot] = []
+        full_plan_calls: list[JointStateSnapshot] = []
+
+        new_place_trajectory = JointTrajectory(
+            joint_names=("panda_joint1", "panda_joint2"),
+            points=(
+                JointTrajectoryPoint((0.1, -0.3), 0.0),
+                JointTrajectoryPoint((0.2, -0.2), 1.0),
+            ),
+        )
+        prior_plan = HarvestMotionPlan(
+            planner_name="recording_prior",
+            target_pose=layout.tomato_pose,
+            pregrasp_pose=Pose3D(layout.tomato_pose.x - 0.1, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),
+            grasp_pose=Pose3D(layout.tomato_pose.x, layout.tomato_pose.y, layout.tomato_pose.z + 0.045, 180.0, 0.0, 0.0),
+            pull_pose=Pose3D(layout.tomato_pose.x - 0.08, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),
+            place_pose=Pose3D(0.35, -0.35, 0.57, 180.0, 0.0, 0.0),
+            pregrasp_waypoints=(Pose3D(layout.tomato_pose.x - 0.1, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),),
+            grasp_waypoints=(Pose3D(layout.tomato_pose.x, layout.tomato_pose.y, layout.tomato_pose.z + 0.045, 180.0, 0.0, 0.0),),
+            pull_waypoints=(Pose3D(layout.tomato_pose.x - 0.08, layout.tomato_pose.y, layout.tomato_pose.z + 0.08, 180.0, 0.0, 0.0),),
+            place_waypoints=(Pose3D(0.35, -0.35, 0.67, 180.0, 0.0, 0.0), Pose3D(0.35, -0.35, 0.57, 180.0, 0.0, 0.0)),
+        )
+        updated_plan = HarvestMotionPlan(
+            planner_name="recording_place_replan",
+            target_pose=prior_plan.target_pose,
+            pregrasp_pose=prior_plan.pregrasp_pose,
+            grasp_pose=prior_plan.grasp_pose,
+            pull_pose=prior_plan.pull_pose,
+            place_pose=prior_plan.place_pose,
+            pregrasp_waypoints=prior_plan.pregrasp_waypoints,
+            grasp_waypoints=prior_plan.grasp_waypoints,
+            pull_waypoints=prior_plan.pull_waypoints,
+            place_waypoints=prior_plan.place_waypoints,
+            place_joint_trajectory=new_place_trajectory,
+        )
+
+        class _RecordingPlanner:
+            def plan(self, target_estimate, joint_state, tf_tree, scene_snapshot):
+                full_plan_calls.append(joint_state)
+                return prior_plan
+
+            def plan_place_from_joint_state(self, prior, joint_state, tf_tree, scene_snapshot):
+                place_replan_calls.append(joint_state)
+                return updated_plan
+
+        estimate = TargetEstimate(
+            camera_name="fixed_camera",
+            target_world_pose=layout.tomato_pose,
+            target_camera_pose=Pose3D(0.05, 0.0, 0.20, 0.0, 0.0, 0.0),
+            confidence=1.0,
+        )
+        current_joint_state = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4", "panda_joint5", "panda_joint6", "panda_joint7"),
+            positions_rad=(1.40, -0.05, -1.42, -1.44, -0.03, 1.40, 0.68),
+        )
+
+        system = create_tomato_harvest_application(transport="in_memory", autostart_moveit_service=False)
+        system.boot()
+        system.robot._planner = _RecordingPlanner()
+        system.robot.state.runtime_state = RobotRuntimeState.RUNNING
+        system.robot.state.task_phase = HarvestTaskPhase.MOVING_TO_PLACE
+        system.robot.state.last_target_estimate = estimate
+        system.robot.state.last_harvest_motion_plan = prior_plan
+        system.robot.observe_scene(system.bridge.read_scene_snapshot())
+        system.sync_robot_joint_state(current_joint_state)
+
+        logs = system.replan_motion("path_tolerance_violation")
+
+        self.assertEqual(len(place_replan_calls), 1, "plan_place_from_joint_state should be called once")
+        self.assertEqual(place_replan_calls[0], current_joint_state, "should plan from actual current joint state")
+        self.assertEqual(len(full_plan_calls), 0, "full plan() should NOT be called during place-phase replan")
+        self.assertTrue(any("path_tolerance_violation" in line for line in logs))
+        self.assertEqual(system.robot.state.last_motion_command.command_name, "move_to_place")
+        self.assertEqual(system.robot.state.last_motion_command.planner_name, "recording_place_replan")
+        self.assertIsNotNone(system.robot.state.last_motion_command.phase_motion_plan)
+        self.assertEqual(
+            system.robot.state.last_motion_command.phase_motion_plan.phase_id,
+            PhaseId.MOVING_TO_PLACE,
+        )
+        self.assertEqual(
+            system.robot.state.last_motion_command.phase_motion_plan.joint_trajectory,
+            new_place_trajectory,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

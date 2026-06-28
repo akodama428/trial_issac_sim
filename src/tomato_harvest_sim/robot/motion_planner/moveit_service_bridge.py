@@ -66,6 +66,30 @@ class MoveIt2ServiceBridgePlanner(MotionPlanner):
             planning_scene_object_ids=result.planning_scene_object_ids,
         )
 
+    def plan_place_from_joint_state(
+        self,
+        prior_plan: HarvestMotionPlan,
+        joint_state: JointStateSnapshot,
+        tf_tree: TfTreeSnapshot,
+        scene_snapshot: SceneSnapshot,
+    ) -> HarvestMotionPlan | None:
+        """MOVING_TO_PLACE 中のリプラン専用。
+        フルチェーン（pregrasp→grasp→pull→place）を経由せず、
+        ロボットの実際の現在位置から直接 place 軌道を計画する。
+        """
+        plan_place_fn = getattr(self._bridge, "plan_place_trajectory", None)
+        if plan_place_fn is None:
+            return None
+        result = plan_place_fn(
+            joint_state=joint_state,
+            tf_tree=tf_tree,
+            scene_snapshot=scene_snapshot,
+            plan=prior_plan,
+        )
+        if not result.success:
+            return None
+        return replace(prior_plan, planner_name=result.backend_name, place_joint_trajectory=result.place_joint_trajectory)
+
 
 class Ros2MoveIt2PlannerBridge:
     MOVEIT_LINK_TO_RUNTIME_TOOL_OFFSET_M = (0.0, 0.0, 0.0584)
@@ -226,6 +250,67 @@ class Ros2MoveIt2PlannerBridge:
             pull_joint_trajectory=pull_trajectory,
             place_joint_trajectory=place_trajectory,
             planning_scene_object_ids=planning_scene_object_ids,
+        )
+
+    def plan_place_trajectory(
+        self,
+        *,
+        joint_state: JointStateSnapshot,
+        tf_tree: TfTreeSnapshot,
+        scene_snapshot: SceneSnapshot,
+        plan: HarvestMotionPlan,
+    ) -> MoveIt2PlanningResult:
+        """ロボットの現在位置から approach + place 軌道のみを計画する。
+        MOVING_TO_PLACE 中のリプランで使用し、フルチェーンによる位置ズレを防ぐ。
+        """
+        if not _moveit2_python_available():
+            return self._fallback_result("moveit2_python_unavailable")
+
+        clients = self._require_clients()
+        if clients is None:
+            return self._fallback_result("service_client_unavailable")
+
+        if not clients.wait_for_services(timeout_sec=self._planning_timeout_sec):
+            return self._fallback_result("service_unavailable")
+
+        base_frame_id = tf_tree.robot_base_frame_id
+        current_joint_state = joint_state
+
+        pre_place_pose = plan.place_waypoints[0] if plan.place_waypoints else None
+        if pre_place_pose is not None:
+            approach_trajectory = self._plan_phase(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                target_pose=pre_place_pose,
+                attach_tomato=True,
+            )
+            if approach_trajectory is None:
+                return self._fallback_result("pre_place_replan_failed")
+            current_joint_state = _joint_state_from_trajectory(approach_trajectory)
+        else:
+            approach_trajectory = None
+
+        place_trajectory = self._plan_phase(
+            clients=clients,
+            joint_state=current_joint_state,
+            base_frame_id=base_frame_id,
+            scene_snapshot=scene_snapshot,
+            target_pose=plan.place_pose,
+            attach_tomato=True,
+        )
+        if place_trajectory is None:
+            return self._fallback_result("place_replan_failed")
+
+        if approach_trajectory is not None:
+            place_trajectory = _concatenate_trajectories(approach_trajectory, place_trajectory)
+
+        return MoveIt2PlanningResult(
+            success=True,
+            backend_name="moveit2_service_bridge",
+            reason="service_ok",
+            place_joint_trajectory=place_trajectory,
         )
 
     def _fallback_result(self, reason: str) -> MoveIt2PlanningResult:
@@ -464,9 +549,15 @@ class _Ros2MoveIt2Clients:
             return None
         planned_trajectory = _joint_trajectory_from_msg(joint_trajectory)
         if planned_trajectory is not None:
+            has_velocities = any(p.velocities_rad_s is not None for p in planned_trajectory.points)
+            first_vel = planned_trajectory.points[0].velocities_rad_s if planned_trajectory.points else None
+            last_vel = planned_trajectory.points[-1].velocities_rad_s if planned_trajectory.points else None
             print(
                 "[MoveItBridge] motion plan response "
                 f"points={len(planned_trajectory.points)} "
+                f"has_velocities={has_velocities} "
+                f"first_vel={first_vel} "
+                f"last_vel={last_vel} "
                 f"joint_names={planned_trajectory.joint_names}",
                 flush=True,
             )
@@ -489,7 +580,9 @@ def _joint_trajectory_from_msg(joint_trajectory_msg: object) -> JointTrajectory 
         time_from_start_sec = 0.0
         if duration is not None:
             time_from_start_sec = float(getattr(duration, "sec", 0)) + float(getattr(duration, "nanosec", 0)) / 1_000_000_000.0
-        points.append(JointTrajectoryPoint(positions_rad=positions, time_from_start_sec=time_from_start_sec))
+        velocities_msg = getattr(point, "velocities", ())
+        velocities = tuple(float(v) for v in velocities_msg) if velocities_msg else None
+        points.append(JointTrajectoryPoint(positions_rad=positions, time_from_start_sec=time_from_start_sec, velocities_rad_s=velocities))
     return JointTrajectory(joint_names=joint_names, points=tuple(points))
 
 

@@ -61,6 +61,8 @@ class TrajectorySegment:
     deadline_sec: float | None = None
     start_time_sec: float | None = None
     initial_error_max: float | None = None
+    start_velocities: np.ndarray | None = None
+    target_velocities: np.ndarray | None = None
 
 
 @dataclass(frozen=True)

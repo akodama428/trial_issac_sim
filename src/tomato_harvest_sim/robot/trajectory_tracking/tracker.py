@@ -148,7 +148,11 @@ class TrajectoryTracker:
             )
 
         if state.target_pose is None:
-            return self._apply_gripper_state(state=state, current_positions=current_positions)
+            return self._apply_gripper_state(
+                state=state,
+                current_positions=current_positions,
+                current_velocities=observation.joint_velocities,
+            )
 
         if state.blocked_motion_signature is not None:
             hold_result = self._hold_replan_position(state=state, current_positions=current_positions)
@@ -339,7 +343,13 @@ class TrajectoryTracker:
             ),
         )
 
-    def _apply_gripper_state(self, *, state, current_positions: np.ndarray | None) -> TrackingStepResult:
+    def _apply_gripper_state(
+        self,
+        *,
+        state,
+        current_positions: np.ndarray | None,
+        current_velocities: np.ndarray | None = None,
+    ) -> TrackingStepResult:
         if current_positions is None:
             return TrackingStepResult()
         target_positions = np.asarray(current_positions, dtype=float).copy()
@@ -362,7 +372,12 @@ class TrajectoryTracker:
             target_fingers=finger_targets,
             command_fingers=next_fingers,
         )
-        return TrackingStepResult(command=TrackingCommand(target_positions, context="gripper_step"))
+        # Send zero velocity targets for all joints so Isaac Sim's PD damping term
+        # kd*(0 - vel_actual) actively resists arm drift during gripper closure.
+        target_velocities = np.zeros_like(target_positions)
+        return TrackingStepResult(
+            command=TrackingCommand(target_positions, velocities=target_velocities, context="gripper_step")
+        )
 
     def _hold_arm_pose_and_apply_gripper(
         self,

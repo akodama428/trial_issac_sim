@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from tomato_harvest_sim.api.bridge import BridgeProtocol
 from tomato_harvest_sim.api.contracts import (
@@ -8,6 +9,7 @@ from tomato_harvest_sim.api.contracts import (
     HarvestMotionPlan,
     HarvestTaskPhase,
     MotionCommand,
+    Pose3D,
     PhaseMotionPlan,
     RobotRuntimeState,
     ScenePhase,
@@ -18,6 +20,9 @@ from tomato_harvest_sim.robot.behavior_planner import BehaviorPlanner
 from tomato_harvest_sim.robot.motion import MoveItStyleMotionPublisher
 from tomato_harvest_sim.robot.perception import TomatoTargetEstimator
 from tomato_harvest_sim.robot.motion_planner import build_planner
+
+if TYPE_CHECKING:
+    from tomato_harvest_sim.robot.trajectory_tracking import TrajectoryTrackingCoordinator
 
 
 @dataclass
@@ -39,7 +44,12 @@ class RobotState:
 class HarvestRuntime:
     GRASP_SETTLE_STEPS = BehaviorPlanner.GRASP_SETTLE_STEPS
 
-    def __init__(self, *, grasp_lateral_offset_m: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        grasp_lateral_offset_m: float = 0.0,
+        executor: TrajectoryTrackingCoordinator | None = None,
+    ) -> None:
         planner, planner_info = build_planner(grasp_lateral_offset_m=grasp_lateral_offset_m)
         self.state = RobotState(
             runtime_state=RobotRuntimeState.BOOTING,
@@ -61,6 +71,16 @@ class HarvestRuntime:
             state=self.state,
             motion_publisher=MoveItStyleMotionPublisher(),
         )
+        self._executor = executor
+
+    @property
+    def has_executor(self) -> bool:
+        return self._executor is not None
+
+    def consume_end_effector_pose(self) -> Pose3D | None:
+        if self._executor is None:
+            return None
+        return self._executor.current_end_effector_pose()
 
     def boot(self) -> None:
         self.state.runtime_state = RobotRuntimeState.READY
@@ -98,9 +118,19 @@ class HarvestRuntime:
         raise ValueError(f"Unsupported control command: {command}")
 
     def step(self, bridge: BridgeProtocol) -> tuple[str, ...]:
-        if self.state.runtime_state is not RobotRuntimeState.RUNNING:
-            return ()
         snapshot = self.state.last_scene_snapshot
+
+        if self._executor is not None:
+            joint_state = self._executor.current_joint_state_snapshot()
+            if joint_state is not None:
+                bridge.publish_joint_state(joint_state)
+
+        if self.state.runtime_state is not RobotRuntimeState.RUNNING:
+            # Hold current position via executor even before Start (warmup / drift prevention)
+            if self._executor is not None and snapshot is not None:
+                self._executor.run_cycle(replace(snapshot, active_phase_motion_plan=None))
+            return ()
+
         if snapshot is None:
             return ()
 
@@ -120,7 +150,22 @@ class HarvestRuntime:
                 snapshot,
             )
 
-        return self._behavior_planner.step(snapshot, bridge, estimate=estimate, motion_plan=motion_plan)
+        logs = self._behavior_planner.step(snapshot, bridge, estimate=estimate, motion_plan=motion_plan)
+
+        if self._executor is not None:
+            effective_snapshot = replace(snapshot, active_phase_motion_plan=self.state.last_phase_motion_plan)
+            executor_log = self._executor.run_cycle(effective_snapshot)
+            if executor_log:
+                logs = logs + (executor_log,)
+            ctrl_state = self._executor.current_controller_state()
+            if ctrl_state is not None:
+                bridge.publish_controller_state(ctrl_state)
+            reason = self._executor.consume_replan_request()
+            if reason is not None:
+                logs = logs + self.replan_active_motion(bridge, reason=reason)
+            self._executor.log_post_update_debug_snapshot()
+
+        return logs
 
     def replan_active_motion(self, bridge: BridgeProtocol, *, reason: str) -> tuple[str, ...]:
         if self.state.runtime_state is not RobotRuntimeState.RUNNING:
@@ -130,10 +175,33 @@ class HarvestRuntime:
             return ()
         if self.state.last_target_estimate is None:
             return ()
+
+        current_joint_state = bridge.read_joint_state()
+        tf_tree = bridge.read_tf_tree()
+
+        # MOVING_TO_PLACE 中のリプランは place 軌道のみを再計画する。
+        # フルチェーン（pregrasp→grasp→pull→place）を経由すると place 軌道の
+        # 開始位置が end-of-pull になり、実際のロボット位置と乖離して即座に
+        # path_tolerance_violation を引き起こすため。
+        if (
+            self.state.task_phase is HarvestTaskPhase.MOVING_TO_PLACE
+            and self.state.last_harvest_motion_plan is not None
+        ):
+            plan_place_fn = getattr(self._planner, "plan_place_from_joint_state", None)
+            if plan_place_fn is not None:
+                motion_plan = plan_place_fn(
+                    self.state.last_harvest_motion_plan,
+                    current_joint_state,
+                    tf_tree,
+                    snapshot,
+                )
+                if motion_plan is not None:
+                    return self._behavior_planner.replan(snapshot, bridge, reason=reason, motion_plan=motion_plan)
+
         motion_plan = self._planner.plan(
             self.state.last_target_estimate,
-            bridge.read_joint_state(),
-            bridge.read_tf_tree(),
+            current_joint_state,
+            tf_tree,
             snapshot,
         )
         return self._behavior_planner.replan(snapshot, bridge, reason=reason, motion_plan=motion_plan)
