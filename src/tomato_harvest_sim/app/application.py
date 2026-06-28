@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from tomato_harvest_sim.api.bridge import BridgeProtocol, Ros2LoopbackBridge, create_bridge
 from tomato_harvest_sim.api.contracts import (
@@ -15,6 +16,9 @@ from tomato_harvest_sim.robot.motion_planner import MoveItServiceManager
 from tomato_harvest_sim.robot.runtime import RobotRuntime
 from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
 
+if TYPE_CHECKING:
+    from tomato_harvest_sim.robot.trajectory_tracking import TrajectoryTrackingCoordinator
+
 
 @dataclass
 class TomatoHarvestApplication:
@@ -22,6 +26,7 @@ class TomatoHarvestApplication:
     robot: RobotRuntime
     bridge: BridgeProtocol
     moveit_service: MoveItServiceManager | None = None
+    executor: TrajectoryTrackingCoordinator | None = None
 
     @property
     def simulator(self) -> IsaacSceneRuntime:
@@ -85,15 +90,40 @@ class TomatoHarvestApplication:
 
     def step(self) -> tuple[str, ...]:
         self.bridge.spin_once()
+
+        # ① joint state sync: executor → bridge
+        if self.executor is not None:
+            joint_state = self.executor.current_joint_state_snapshot()
+            if joint_state is not None:
+                self.bridge.publish_joint_state(joint_state)
+
+        # ② perception / behavior / motion planning
         logs = self.robot.step(self.bridge)
+
         motion_command = self.bridge.consume_motion_command()
         if motion_command is not None:
             snapshot = self.scene_runtime.apply_motion_command(motion_command)
             self.bridge.publish_scene_snapshot(snapshot)
             self.robot.observe_scene(self.bridge.read_scene_snapshot())
+
         snapshot = self.scene_runtime.advance()
         self.bridge.publish_scene_snapshot(snapshot)
         self.robot.observe_scene(self.bridge.read_scene_snapshot())
+
+        # ④ trajectory tracking + ros2_control (snapshot is post-advance)
+        if self.executor is not None:
+            executor_log = self.executor.run_cycle(self.scene_runtime.snapshot())
+            if executor_log:
+                logs = logs + (executor_log,)
+            reason = self.executor.consume_replan_request()
+            if reason is not None:
+                logs = logs + self.replan_motion(reason)
+
+            # ⑤ end effector sync: executor → scene
+            pose = self.executor.current_end_effector_pose()
+            if pose is not None:
+                self.sync_robot_tool_pose(pose)
+
         return logs
 
     def replan_motion(self, reason: str) -> tuple[str, ...]:
@@ -118,6 +148,7 @@ def create_tomato_harvest_application(
     physics_soft_fallback_enabled: bool = False,
     transport: str | None = None,
     autostart_moveit_service: bool = True,
+    executor: TrajectoryTrackingCoordinator | None = None,
 ) -> TomatoHarvestApplication:
     grasp_lateral_offset_m = 0.0 if grasp_mode == "success" else 0.08
     bridge = create_bridge(transport=transport)
@@ -132,4 +163,5 @@ def create_tomato_harvest_application(
         robot=RobotRuntime(grasp_lateral_offset_m=grasp_lateral_offset_m),
         bridge=bridge,
         moveit_service=moveit_service,
+        executor=executor,
     )

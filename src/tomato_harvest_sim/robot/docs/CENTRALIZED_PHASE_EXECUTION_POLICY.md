@@ -33,45 +33,59 @@
 - `simulator` が execution policy を持ってしまい、責務境界が崩れる。
 
 ## 解決方針
-各フェーズの execution 条件を `ExecutionPhaseSpec` に集約するが、上位計画と下位計画は分離する。
+各フェーズの execution 条件を `ExecutionPhaseSpec` に集約し、`trajectory_tracking` が config からロードする。上位計画（フェーズ管理・motion planning）と下位実行（軌道追従・到達判定）を分離する。
 
 - `behavior_planner`
-  - `SceneSnapshot` と task 状態から、次に実行すべき phase を選ぶ。
-  - `PhaseExecutionIntent` を生成する。
-  - 各フェーズの success / abort / replan 条件は `yaml` から読み込む。
-- `planner`
-  - `PhaseExecutionIntent` を入力として、対応する `PhaseMotionPlan` を生成する。
+  - task の **phase state machine** を持つ。
+  - `TargetEstimate` と `SceneSnapshot` と phase 実行結果から、フェーズ切り替えを判断する。
+  - perception や `motion_planner` を直接呼ばない。行動決定のみを担い、計画実行は `runtime` が委譲する。
+  - `PhaseExecutionIntent` は内部 artifact であり、境界 IF には出さない。
+- `motion_planner`
+  - `runtime` から呼ばれ、`BehaviorPlanner` が決定したフェーズに対応する `PhaseMotionPlan` を生成する。
   - MoveIt / 幾何計画 / `JointTrajectory` 生成を担当する。
 - `runtime`
-  - `PhaseExecutionIntent` と `PhaseMotionPlan` から `ExecutionPhaseSpec` を組み立てる。
-  - `ExecutionPhaseSpec` を dispatch する。
+  - **robot システム全体のオーケストレーション層**。ROS2 の launch ファイルに相当する。
+  - 各サブシステムを初期化・配線し、`step()` 内で以下を順に呼び出す。
+    1. `perception.estimate()` → `TargetEstimate`
+    2. `BehaviorPlanner.step(estimate, snapshot)` → フェーズ決定
+    3. `MotionPlanner.plan(phase)` → `PhaseMotionPlan`
+    4. `TrajectoryExecutionCoordinator.run_cycle(phase_motion_plan)` → 軌道追従・ros2_control 呼び出し
+    5. （`ros2_control` は coordinator が内部で呼び出す）
+  - phase state machine を持たない。`ExecutionPhaseSpec` の組み立てを行わない。
+  - ビジネスロジック・判定ロジックを持たない。各サブシステムへの委譲のみ。
 - `trajectory_tracking`
-  - `ExecutionPhaseSpec` を解釈して実行する。
+  - `PhaseMotionPlan` を受け取る。
+  - `phase_id` をキーに config から `ExecutionPhaseSpec`（success / abort / replan 条件）をロードする。
+  - 軌道追従制御と到達判定に集中する。
 - `ros2_control`
-  - `ExecutionPhaseSpec` に含まれる tolerance / timeout / abort 条件に従って controller semantics を返す。
+  - `trajectory_tracking` が解釈した tolerance / timeout を controller semantics に適用する。
+  - フェーズ名や収穫タスク状態は持たない。
 - `simulator`
   - command を Isaac Sim に適用し、observation を返すだけに限定する。
 
 ## 変更後アーキ図
+
+### コンポーネント構成とオーケストレーション
+
+`HarvestRuntime` が全サブシステムを初期化・配線し、トップレベル関数を呼び出す（点線）。
+サブシステム間のデータフローは実線で示す。
+
 ```mermaid
 flowchart TB
   subgraph Robot["robot"]
-    direction LR
+    direction TB
+
+    R1["HarvestRuntime\n全サブシステムの初期化・配線・lifecycle 管理\nROS2 launch ファイル相当"]
 
     subgraph Perception["perception"]
       D1["TargetEstimator"]
     end
 
     subgraph Behavior["behavior_planner"]
-      B1["BehaviorPlanner"]
-      B2["PhaseExecutionIntentBuilder"]
+      B1["BehaviorPlanner\n(phase state machine を持つ)"]
     end
 
-    subgraph Runtime["runtime"]
-      R1["HarvestRuntime"]
-    end
-
-    subgraph Planner["planner"]
+    subgraph Planner["motion_planner"]
       P1["MotionPlanner"]
       P2["MoveIt2ServiceBridge"]
     end
@@ -80,19 +94,30 @@ flowchart TB
       T1["TrajectoryExecutionCoordinator"]
       T2["ExecutionStateStore"]
       T3["ExecutionMonitor"]
+      T4["PhaseSpecLoader\n(config から ExecutionPhaseSpec をロード)"]
     end
 
     subgraph Control["ros2_control"]
       C1["JointTrajectoryControllerBridge"]
     end
+
+    R1 -. "① estimate()" .-> D1
+    R1 -. "② step(estimate, snapshot)" .-> B1
+    R1 -. "③ plan(phase)" .-> P1
+    R1 -. "④ run_cycle(phase_motion_plan)" .-> T1
+    D1 -- "TargetEstimate" --> B1
+    B1 -- "phase decision" --> R1
+    P1 --> P2
+    P1 -- "PhaseMotionPlan" --> R1
+    T1 -. "⑤ joint control" .-> C1
+    T1 --- T2
+    T1 --- T3
+    T1 --- T4
   end
 
-  subgraph Boundary["src/tomato_harvest_sim/api"]
+  subgraph Boundary["src/tomato_harvest_sim/api (データ境界)"]
     direction LR
-    A1["SceneSnapshot"]
-    A2["PhaseExecutionIntent"]
-    A3["PhaseMotionPlan"]
-    A4["ExecutionPhaseSpec"]
+    A1["SceneSnapshot\n(active_phase_motion_plan 含む)"]
     A5["TrajectoryExecutionRequest / Result"]
     A6["HardwareCommandSample / HardwareStateSample"]
   end
@@ -104,20 +129,7 @@ flowchart TB
     S3["Isaac Sim API"]
   end
 
-  D1 --> A1
   A1 --> R1
-  A1 --> B1
-  A1 --> P1
-  B1 --> A2
-  A2 --> P1
-  P1 --> P2
-  P2 --> A3
-  A2 --> R1
-  A3 --> R1
-  R1 --> A4
-  A4 --> T1
-  T1 --> T2
-  T1 --> T3
   T1 --> A5
   A5 --> C1
   C1 --> A6
@@ -136,9 +148,9 @@ flowchart TB
 - どの条件で abort するか
 - abort 後に replan するか
 
-これは `BehaviorPlanner` が出す `PhaseExecutionIntent` と、`MotionPlanner` が出す `PhaseMotionPlan` を `runtime` が束ねて組み立てる。
+`TrajectoryExecutionCoordinator` は受け取った `PhaseMotionPlan` の `phase_id` をキーに、起動時に config からロードした `ExecutionPhaseSpec` を参照する。`BehaviorPlanner` / `runtime` は `ExecutionPhaseSpec` を組み立てない。
 
-`PhaseExecutionIntent` に含まれる phase 条件の正本は、`PhaseExecutionIntentBuilder` が読む `yaml` とする。
+`PhaseSpecLoader`（`PhaseExecutionIntentBuilder` 相当）は `trajectory_tracking` 内部に置き、`yaml` から phase ごとの success / abort / replan 条件をロードする。正本は `yaml` とする。
 
 ## 提案する IF
 `src/tomato_harvest_sim/robot/api` に次のような定義を置く。
@@ -181,6 +193,7 @@ class PhaseExecutionIntent:
 
 @dataclass(frozen=True)
 class PhaseMotionPlan:
+    phase_id: PhaseId           # どのフェーズの計画か（coordinator が spec をロードするキー）
     phase_goal_pose: Pose3D | None
     active_waypoints: tuple[Pose3D, ...]
     joint_trajectory: JointTrajectory | None
@@ -202,11 +215,12 @@ class AbortPolicy:
     allow_replan: bool = True
 
 
+# trajectory_tracking 内部でのみ使用する（公開 IF ではない）
 @dataclass(frozen=True)
 class ExecutionPhaseSpec:
     phase_id: PhaseId
-    intent: PhaseExecutionIntent
-    motion: PhaseMotionPlan
+    intent: PhaseExecutionIntent    # config からロード（PhaseSpecLoader が生成）
+    motion: PhaseMotionPlan         # coordinator が受け取った PhaseMotionPlan
 ```
 
 ## YAML 設定
@@ -362,48 +376,70 @@ abort:
 ```
 
 ## 処理フロー
+
+### HarvestRuntime.step() のオーケストレーション順序
+
 ```mermaid
 flowchart TD
-  A["HarvestRuntime が task state を更新"] --> B["BehaviorPlanner が次フェーズを選び PhaseExecutionIntent を生成"]
-  B --> C["MotionPlanner が intent を受けて PhaseMotionPlan を生成"]
-  C --> D["HarvestRuntime が intent + motion から ExecutionPhaseSpec を構成"]
-  D --> E["TrajectoryExecutionCoordinator が spec を受け取る"]
-  E --> F["joint trajectory があれば TrajectoryExecutionRequest を構成"]
-  F --> G["JointTrajectoryControllerBridge が実行"]
-  G --> H["HardwareState を読み取り"]
-  H --> I{"spec.success を満たしたか"}
-  I -->|yes| J["phase completed"]
-  I -->|no| K{"spec.abort を満たしたか"}
-  K -->|yes| L["aborted result + replan reason"]
-  K -->|no| M["execution 継続"]
-  L --> N{"allow_replan?"}
-  N -->|yes| O["runtime へ replan request"]
-  N -->|no| P["runtime へ failure report"]
+  START(["HarvestRuntime.step()"])
+  START --> S1
+
+  S1["① perception.estimate()\nカメラフレーム・TF からターゲット位置を推定"]
+  S1 -- "TargetEstimate" --> S2
+
+  S2["② BehaviorPlanner.step(estimate, snapshot)\nstate machine を進め、次フェーズを決定"]
+  S2 -- "フェーズ切り替えが発生した場合" --> S3
+  S2 -- "切り替えなし（追従継続）" --> S4
+
+  S3["③ MotionPlanner.plan(phase)\nフェーズに対応する軌道を計画し PhaseMotionPlan を生成"]
+  S3 -- "PhaseMotionPlan" --> S4
+
+  S4["④ TrajectoryExecutionCoordinator.run_cycle(phase_motion_plan)\nPhaseMotionPlan から ExecutionPhaseSpec をロードし軌道追従状態を管理"]
+  S4 --> S5
+
+  S5["⑤ JointTrajectoryControllerBridge（ros2_control）\n各関節の追従制御コマンドを送出"]
+  S5 --> S6
+
+  S6["HardwareState を読み取り"]
+  S6 --> CHK
+
+  CHK{"spec.success を満たしたか"}
+  CHK -->|yes| OK["phase completed\n→ 次ステップで BehaviorPlanner が遷移"]
+  CHK -->|no| CHK2{"spec.abort を満たしたか"}
+  CHK2 -->|no| CONT["execution 継続"]
+  CHK2 -->|yes| CHK3{"allow_replan?"}
+  CHK3 -->|yes| REPLAN["BehaviorPlanner へ replan request\n→ ③ から再実行"]
+  CHK3 -->|no| FAIL["BehaviorPlanner へ failure report"]
 ```
 
 ## 変更後の責務分離
 ### `behavior_planner`
-- task の進行順序を持つ。
-- 現在状態から、今実行すべき phase を選ぶ。
-- `PhaseExecutionIntent` を生成する。
-- `yaml` を読み、phase ごとの success / abort / replan 条件を `SuccessPolicy` / `AbortPolicy` として組み立てる。
+- task の **phase state machine** を持つ。
+- `TargetEstimate` と `SceneSnapshot` と phase 実行結果から、次のフェーズへの切り替えを判断する。
+- perception や `motion_planner` を**直接呼ばない**。行動決定のみを担い、計画・実行は `runtime` が委譲する。
+- `PhaseExecutionIntent` は内部 artifact。`yaml` からロードするが、境界 IF には出さない。
 
-### `planner`
-- `PhaseExecutionIntent` を入力に `PhaseMotionPlan` を生成する。
+### `motion_planner`
+- `runtime` から呼ばれ、`BehaviorPlanner` が決定したフェーズに対応する `PhaseMotionPlan` を生成する。
 - 幾何学的な target pose、waypoint、`JointTrajectory` を生成する。
 - MoveIt を使った motion planning を担当する。
+- `BehaviorPlanner` には依存しない（`runtime` を介してのみ呼ばれる）。
 
 ### `runtime`
-- phase state machine を持つ。
-- `PhaseExecutionIntent` と `PhaseMotionPlan` から `ExecutionPhaseSpec` を組み立てる。
-- `ExecutionPhaseSpec` を dispatch する。
-- replan を行うか、次 phase に進むかを決める。
-- phase 条件の定数値そのものは持たない。
+- **robot システム全体のオーケストレーション層**。ROS2 の launch ファイルに相当する。
+- 各サブシステムを初期化・配線し、`step()` 内で以下を順に呼び出す。
+  1. `perception.estimate()` → `TargetEstimate`
+  2. `BehaviorPlanner.step(estimate, snapshot)` → フェーズ決定
+  3. フェーズ切り替え時のみ `MotionPlanner.plan(phase)` → `PhaseMotionPlan`
+  4. `TrajectoryExecutionCoordinator.run_cycle(phase_motion_plan)` → 軌道追従・ros2_control 呼び出し
+- lifecycle（boot / start / stop / reset）を管理する。
+- ビジネスロジック・判定ロジック・phase state machine を持たない。`ExecutionPhaseSpec` を組み立てない。
+- 各サブシステムへの委譲のみを行い、自身はデータを変換しない。
 
 ### `trajectory_tracking`
-- `ExecutionPhaseSpec` をそのまま実行に変換する。
-- `ExecutionPhaseSpec` に基づき success / abort / progress を判定する。
-- phase 固有の閾値をハードコードしない。
+- `PhaseMotionPlan` を受け取る。
+- `phase_id` から config の `ExecutionPhaseSpec`（success / abort / replan 条件）を内部でロードする。
+- 軌道追従制御と到達判定に集中する。phase 固有の閾値をハードコードしない。
 
 ### `ros2_control`
 - `ExecutionPhaseSpec` で与えられた tolerance / timeout を controller semantics に適用する。
@@ -429,13 +465,13 @@ flowchart TD
 つまり `scene_runtime` の active target は「可視化用 mirror」であり、execution owner ではない。
 
 ## 実装ステップ
-1. `robot/api` に `ExecutionPhaseSpec` と関連 enum / dataclass を追加する。
-2. `robot/behavior_planner` を追加し、`BehaviorPlanner` と `PhaseExecutionIntentBuilder` を置く。
-3. `PhaseExecutionIntentBuilder` が読む `yaml` を追加し、phase ごとの success / abort / replan 条件を外出しする。
-4. `planner` は `PhaseExecutionIntent` を入力に `PhaseMotionPlan` を返す構造へ寄せる。
-5. `runtime` で `intent + motion -> ExecutionPhaseSpec` を組み立てる。
-6. `TrajectoryExecutionRequest` を `ExecutionPhaseSpec` ベースへ寄せる。
-7. `state_store` の `target_pose` 中心設計を、`phase_goal_pose` / `active_waypoint_pose` 分離へ変更する。
+1. `PhaseMotionPlan` に `phase_id: PhaseId` を追加する。
+2. `BehaviorPlanner` に task の phase state machine を移植する（`HarvestRuntime` から）。
+3. `BehaviorPlanner.step()` が `PhaseMotionPlan | None` を返す IF へ変更する（phase 切り替えがない場合は `None`）。
+4. `trajectory_tracking` に `PhaseSpecLoader`（`PhaseExecutionIntentBuilder` 相当）を組み込む。
+5. `TrajectoryExecutionCoordinator` の受け取り口を `PhaseMotionPlan` のみへ変更し、内部で `ExecutionPhaseSpec` を構成する。
+6. `HarvestRuntime` から `ExecutionPhaseSpec` の組み立て処理を削除し、薄いオーケストレーション層へ簡略化する。
+7. `state_store` の `target_pose` 中心設計を `phase_goal_pose` / `active_waypoint_pose` 分離へ変更する。
 8. `scene_runtime.target_tool_pose` を execution の正本として使う設計をやめる。
 9. `joint_trajectory_controller_bridge` の timeout / abort 判定を `ExecutionPhaseSpec.abort` 参照へ変更する。
 10. `runtime` の `POSITION_TOLERANCE_M` / `GRASP_CLOSE_TOLERANCE_M` などの定数を削除し、`yaml` 由来の policy へ移す。

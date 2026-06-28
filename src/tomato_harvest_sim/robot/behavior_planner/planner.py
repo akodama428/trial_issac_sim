@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from tomato_harvest_sim.api.bridge import BridgeProtocol
 from tomato_harvest_sim.api.contracts import (
+    HarvestMotionPlan,
     HarvestTaskPhase,
     PhaseExecutionIntent,
     PhaseId,
@@ -9,6 +10,7 @@ from tomato_harvest_sim.api.contracts import (
     Pose3D,
     SceneSnapshot,
     SuccessJudge,
+    TargetEstimate,
     TomatoStatus,
 )
 from tomato_harvest_sim.robot.behavior_planner.intent_builder import PhaseExecutionIntentBuilder
@@ -33,14 +35,10 @@ class BehaviorPlanner:
         self,
         *,
         state=None,
-        estimator=None,
-        planner=None,
         intent_builder: PhaseExecutionIntentBuilder | None = None,
         motion_publisher: MoveItStyleMotionPublisher | None = None,
     ) -> None:
         self._shared_state = state
-        self._estimator = estimator
-        self._planner = planner
         self._intent_builder = intent_builder or PhaseExecutionIntentBuilder()
         self._motion_publisher = motion_publisher or MoveItStyleMotionPublisher()
 
@@ -50,16 +48,19 @@ class BehaviorPlanner:
             return None
         return self._intent_builder.build(phase_id)
 
-    def step(self, snapshot: SceneSnapshot, bridge: BridgeProtocol) -> tuple[str, ...]:
+    def step(
+        self,
+        snapshot: SceneSnapshot,
+        bridge: BridgeProtocol,
+        *,
+        estimate: TargetEstimate | None = None,
+        motion_plan: HarvestMotionPlan | None = None,
+    ) -> tuple[str, ...]:
         state = self._shared_state
 
         if state.task_phase is HarvestTaskPhase.DETECTING:
-            if self._estimator is None:
+            if estimate is None:
                 return ()
-            estimate = self._estimator.estimate(
-                bridge.read_camera_frame("fixed_camera"),
-                bridge.read_tf_tree(),
-            )
             state.last_target_estimate = estimate
             state.task_phase = HarvestTaskPhase.TARGET_FOUND
             bridge.publish_target_estimate(estimate)
@@ -77,16 +78,10 @@ class BehaviorPlanner:
             )
 
         if state.task_phase is HarvestTaskPhase.TARGET_FOUND:
-            if state.last_target_estimate is None or self._planner is None:
+            if motion_plan is None:
                 return ()
-            plan = self._planner.plan(
-                state.last_target_estimate,
-                bridge.read_joint_state(),
-                bridge.read_tf_tree(),
-                snapshot,
-            )
-            state.last_harvest_motion_plan = plan
-            state.planner_backend_name = plan.planner_name
+            state.last_harvest_motion_plan = motion_plan
+            state.planner_backend_name = motion_plan.planner_name
             state.task_phase = HarvestTaskPhase.PLANNING
             return (
                 "[State] target_found -> planning",
@@ -94,15 +89,15 @@ class BehaviorPlanner:
                 "[Planning] MoveIt2-ready pre-grasp plan was created.",
                 (
                     "Pre-grasp world xyz: "
-                    f"({plan.pregrasp_pose.x:.4f}, {plan.pregrasp_pose.y:.4f}, {plan.pregrasp_pose.z:.4f})"
+                    f"({motion_plan.pregrasp_pose.x:.4f}, {motion_plan.pregrasp_pose.y:.4f}, {motion_plan.pregrasp_pose.z:.4f})"
                 ),
                 (
                     "Grasp world xyz: "
-                    f"({plan.grasp_pose.x:.4f}, {plan.grasp_pose.y:.4f}, {plan.grasp_pose.z:.4f})"
+                    f"({motion_plan.grasp_pose.x:.4f}, {motion_plan.grasp_pose.y:.4f}, {motion_plan.grasp_pose.z:.4f})"
                 ),
                 (
                     "Pull world xyz: "
-                    f"({plan.pull_pose.x:.4f}, {plan.pull_pose.y:.4f}, {plan.pull_pose.z:.4f})"
+                    f"({motion_plan.pull_pose.x:.4f}, {motion_plan.pull_pose.y:.4f}, {motion_plan.pull_pose.z:.4f})"
                 ),
             )
 
@@ -309,7 +304,14 @@ class BehaviorPlanner:
 
         return ()
 
-    def replan(self, snapshot: SceneSnapshot, bridge: BridgeProtocol, *, reason: str) -> tuple[str, ...]:
+    def replan(
+        self,
+        snapshot: SceneSnapshot,
+        bridge: BridgeProtocol,
+        *,
+        reason: str,
+        motion_plan: HarvestMotionPlan,
+    ) -> tuple[str, ...]:
         state = self._shared_state
         phase = state.task_phase
         if phase not in {
@@ -319,34 +321,24 @@ class BehaviorPlanner:
             HarvestTaskPhase.MOVING_TO_PLACE,
         }:
             return ()
-
-        if state.last_target_estimate is None or self._planner is None:
-            return ()
-
-        plan = self._planner.plan(
-            state.last_target_estimate,
-            bridge.read_joint_state(),
-            bridge.read_tf_tree(),
-            snapshot,
-        )
         phase_id = self._TASK_PHASE_TO_PHASE_ID.get(phase)
         if phase_id is None:
             return ()
-        phase_motion_plan = phase_motion_from_harvest_plan(plan, phase_id)
+        phase_motion_plan = phase_motion_from_harvest_plan(motion_plan, phase_id)
         command = self._motion_publisher.build_phase_command(
-            planner_name=plan.planner_name,
+            planner_name=motion_plan.planner_name,
             phase_motion_plan=phase_motion_plan,
         )
-        state.last_harvest_motion_plan = plan
+        state.last_harvest_motion_plan = motion_plan
         state.last_motion_command = command
         state.last_phase_motion_plan = phase_motion_plan
         state.phase_success_stable_steps = 0
-        state.planner_backend_name = plan.planner_name
+        state.planner_backend_name = motion_plan.planner_name
         bridge.publish_motion_command(command)
         return (
             f"[Replan] Active motion replan requested. phase={phase.value} reason={reason}",
             (
-                f"[Replan] Published {command.command_name} using planner={plan.planner_name} "
+                f"[Replan] Published {command.command_name} using planner={motion_plan.planner_name} "
                 f"trajectory={'yes' if command.joint_trajectory is not None else 'no'}"
             ),
         )

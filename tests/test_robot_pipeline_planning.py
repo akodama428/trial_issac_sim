@@ -367,7 +367,7 @@ class RobotPipelinePlanningTest(unittest.TestCase):
             place_waypoints=(Pose3D(layout.tray_pose.x, layout.tray_pose.y, layout.tray_pose.z + 0.12, 180.0, 0.0, 0.0),),
         )
         planner = _RecordingPlanner(replanned_plan)
-        system.robot._behavior_planner._planner = planner
+        system.robot._planner = planner
         system.robot.state.runtime_state = RobotRuntimeState.RUNNING
         system.robot.state.task_phase = HarvestTaskPhase.MOVING_TO_GRASP
         system.robot.state.last_target_estimate = estimate

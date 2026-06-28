@@ -55,10 +55,10 @@ class HarvestRuntime:
             grasp_settle_wait_steps=0,
             phase_success_stable_steps=0,
         )
+        self._estimator = TomatoTargetEstimator()
+        self._planner = planner
         self._behavior_planner = BehaviorPlanner(
             state=self.state,
-            estimator=TomatoTargetEstimator(),
-            planner=planner,
             motion_publisher=MoveItStyleMotionPublisher(),
         )
 
@@ -103,7 +103,24 @@ class HarvestRuntime:
         snapshot = self.state.last_scene_snapshot
         if snapshot is None:
             return ()
-        return self._behavior_planner.step(snapshot, bridge)
+
+        estimate = None
+        if self.state.task_phase is HarvestTaskPhase.DETECTING:
+            estimate = self._estimator.estimate(
+                bridge.read_camera_frame("fixed_camera"),
+                bridge.read_tf_tree(),
+            )
+
+        motion_plan = None
+        if self.state.task_phase is HarvestTaskPhase.TARGET_FOUND and self.state.last_target_estimate is not None:
+            motion_plan = self._planner.plan(
+                self.state.last_target_estimate,
+                bridge.read_joint_state(),
+                bridge.read_tf_tree(),
+                snapshot,
+            )
+
+        return self._behavior_planner.step(snapshot, bridge, estimate=estimate, motion_plan=motion_plan)
 
     def replan_active_motion(self, bridge: BridgeProtocol, *, reason: str) -> tuple[str, ...]:
         if self.state.runtime_state is not RobotRuntimeState.RUNNING:
@@ -111,7 +128,15 @@ class HarvestRuntime:
         snapshot = self.state.last_scene_snapshot
         if snapshot is None:
             return ()
-        return self._behavior_planner.replan(snapshot, bridge, reason=reason)
+        if self.state.last_target_estimate is None:
+            return ()
+        motion_plan = self._planner.plan(
+            self.state.last_target_estimate,
+            bridge.read_joint_state(),
+            bridge.read_tf_tree(),
+            snapshot,
+        )
+        return self._behavior_planner.replan(snapshot, bridge, reason=reason, motion_plan=motion_plan)
 
     def _reset_phase_counters(self) -> None:
         self.state.grasp_evaluation_wait_steps = 0

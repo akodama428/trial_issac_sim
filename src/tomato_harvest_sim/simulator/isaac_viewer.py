@@ -204,6 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             grasp_mode=args.grasp_mode,
             physics_grasp_enabled=use_physx_harvest,
             transport=args.transport,
+            executor=franka_executor,
         )
         if args.auto_start:
             control_controller.start()
@@ -215,17 +216,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.headless:
             for _ in range(args.headless_steps):
-                _sync_executor_joint_state_to_runtime(franka_executor, control_controller)
                 control_controller.step_runtime()
                 _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
-                executor_log = _step_franka_executor(franka_executor, control_controller)
-                if executor_log is not None:
-                    print(executor_log, flush=True)
-                _sync_executor_pose_to_runtime(franka_executor, control_controller)
                 if artifacts.physics_bridge is not None:
                     artifacts.physics_bridge.begin_physics_step()
                 simulation_app.update()
-                _log_executor_post_update_debug(franka_executor)
+                franka_executor.log_post_update_debug_snapshot()
                 if artifacts.physics_bridge is not None:
                     artifacts.physics_bridge.finalize_physics_step(control_controller)
                 _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
@@ -235,19 +231,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         deadline = time.time() + args.timeout_seconds if args.timeout_seconds > 0 else None
         while simulation_app.is_running():
-            _sync_executor_joint_state_to_runtime(franka_executor, control_controller)
             status = control_controller.step_runtime()
             _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
-            executor_log = _step_franka_executor(franka_executor, control_controller)
-            if executor_log is not None:
-                print(executor_log, flush=True)
-            _sync_executor_pose_to_runtime(franka_executor, control_controller)
             if control_window is not None:
                 control_window.refresh_status(status)
             if artifacts.physics_bridge is not None:
                 artifacts.physics_bridge.begin_physics_step()
             simulation_app.update()
-            _log_executor_post_update_debug(franka_executor)
+            franka_executor.log_post_update_debug_snapshot()
             if artifacts.physics_bridge is not None:
                 artifacts.physics_bridge.finalize_physics_step(control_controller)
             _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
@@ -576,12 +567,14 @@ def _build_control_panel_controller(
     grasp_mode: str,
     physics_grasp_enabled: bool,
     transport: str,
+    executor: TrajectoryTrackingCoordinator | None = None,
 ) -> ControlPanelController:
     system = create_tomato_harvest_application(
         grasp_mode=grasp_mode,
         physics_grasp_enabled=physics_grasp_enabled,
         physics_soft_fallback_enabled=False,
         transport=transport,
+        executor=executor,
     )
     controller = ControlPanelController(
         system=system,
@@ -621,43 +614,6 @@ def _sync_runtime_visuals(
         debug_state=debug_state,
     )
 
-
-def _step_franka_executor(
-    executor: TrajectoryTrackingCoordinator,
-    controller: ControlPanelController,
-) -> str | None:
-    try:
-        log = executor.run_cycle(controller.current_scene_snapshot())
-        reason = executor.consume_replan_request()
-        if reason is not None:
-            controller.request_motion_replan(reason)
-        return log
-    except Exception as exc:
-        return f"[Simulator] Franka executor error: {exc}"
-
-
-def _sync_executor_pose_to_runtime(
-    executor: TrajectoryTrackingCoordinator,
-    controller: ControlPanelController,
-) -> None:
-    pose = executor.current_end_effector_pose()
-    if pose is None:
-        return
-    controller.sync_robot_tool_pose(pose)
-
-
-def _sync_executor_joint_state_to_runtime(
-    executor: TrajectoryTrackingCoordinator,
-    controller: ControlPanelController,
-) -> None:
-    joint_state = executor.current_joint_state_snapshot()
-    if joint_state is None:
-        return
-    controller.sync_robot_joint_state(joint_state)
-
-
-def _log_executor_post_update_debug(executor: TrajectoryTrackingCoordinator) -> None:
-    executor.log_post_update_debug_snapshot()
 
 
 def _wait_for_first_frame(*, simulation_app: object, max_frames: int) -> None:
