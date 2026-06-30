@@ -11,6 +11,8 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/workspace/tomato-harvest/src
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
     curl \
     git \
     gnupg2 \
@@ -32,6 +34,11 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     python3-rosdep \
     ros-${ROS_DISTRO}-desktop \
     ros-${ROS_DISTRO}-moveit \
+    ros-${ROS_DISTRO}-ros2-control \
+    ros-${ROS_DISTRO}-ros2-controllers \
+    ros-${ROS_DISTRO}-joint-trajectory-controller \
+    ros-${ROS_DISTRO}-joint-state-broadcaster \
+    ros-${ROS_DISTRO}-controller-manager \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/tomato-harvest
@@ -41,7 +48,17 @@ COPY config /workspace/tomato-harvest/config
 COPY scripts /workspace/tomato-harvest/scripts
 COPY src /workspace/tomato-harvest/src
 COPY tests /workspace/tomato-harvest/tests
+COPY packages /workspace/tomato-harvest/packages
 COPY docker/entrypoint.sh /workspace/tomato-harvest/docker/entrypoint.sh
+
+# Build the franka_ros2_control C++ package in a colcon workspace.
+WORKDIR /workspace/ros2_ws
+RUN mkdir -p src \
+    && ln -s /workspace/tomato-harvest/packages/franka_ros2_control src/franka_ros2_control \
+    && . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+
+WORKDIR /workspace/tomato-harvest
 
 RUN chmod +x \
     /workspace/tomato-harvest/python.sh \

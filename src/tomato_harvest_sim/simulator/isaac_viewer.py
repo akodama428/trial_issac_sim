@@ -75,6 +75,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=os.environ.get("TOMATO_HARVEST_VIEWER_TRANSPORT", "in_memory"),
         help="Transport used between simulator and robot runtime inside the review viewer.",
     )
+    parser.add_argument(
+        "--backend",
+        choices=("in_process", "ros2_control"),
+        default=os.environ.get("TOMATO_HARVEST_TRAJECTORY_BACKEND", "in_process"),
+        help=(
+            "Trajectory execution backend. "
+            "'in_process' uses the built-in Python JointTrajectoryControllerBridge. "
+            "'ros2_control' delegates to an external C++ JointTrajectoryController "
+            "via the franka_ros2_control package."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -192,12 +203,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 not in {"", "0", "false", "False"}
             ),
         )
-        ros2_control_system = IsaacRos2ControlSystem(driver=franka_driver)
-        franka_executor = TrajectoryTrackingCoordinator(
-            driver=franka_driver,
-            hardware_control_port=ros2_control_system,
-            trajectory_execution_port=JointTrajectoryControllerBridge(hardware=ros2_control_system),
-        )
+        isaac_joint_bridge = None
+        if args.backend == "ros2_control":
+            from tomato_harvest_sim.simulator.isaac_joint_ros2_bridge import IsaacJointRos2Bridge
+            from tomato_harvest_sim.simulator.ros2_joint_state_hardware_port import Ros2JointStateHardwarePort
+            from tomato_harvest_sim.robot.trajectory_tracking.ros2_action_trajectory_port import Ros2ActionTrajectoryPort
+            print("[isaac_viewer] Using ros2_control backend.", flush=True)
+            isaac_joint_bridge = IsaacJointRos2Bridge(driver=franka_driver)
+            hw_port = Ros2JointStateHardwarePort(driver=franka_driver)
+            traj_port = Ros2ActionTrajectoryPort()
+            franka_executor = TrajectoryTrackingCoordinator(
+                driver=franka_driver,
+                hardware_control_port=hw_port,
+                trajectory_execution_port=traj_port,
+                allow_direct_drive=False,
+            )
+        else:
+            ros2_control_system = IsaacRos2ControlSystem(driver=franka_driver)
+            franka_executor = TrajectoryTrackingCoordinator(
+                driver=franka_driver,
+                hardware_control_port=ros2_control_system,
+                trajectory_execution_port=JointTrajectoryControllerBridge(hardware=ros2_control_system),
+            )
         control_controller = _build_control_panel_controller(
             artifacts.camera_paths,
             initial_camera_view=args.camera_view,
@@ -217,6 +244,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.headless:
             for _ in range(args.headless_steps):
+                if isaac_joint_bridge is not None:
+                    isaac_joint_bridge.step()
                 control_controller.step_runtime()
                 if artifacts.physics_bridge is not None:
                     artifacts.physics_bridge.begin_physics_step()
@@ -229,6 +258,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         deadline = time.time() + args.timeout_seconds if args.timeout_seconds > 0 else None
         while simulation_app.is_running():
+            if isaac_joint_bridge is not None:
+                isaac_joint_bridge.step()
             status = control_controller.step_runtime()
             _sync_runtime_visuals(artifacts.runtime_display, control_controller, franka_executor)
             if control_window is not None:
@@ -248,6 +279,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if "control_controller" in locals():
                 control_controller.close()
         finally:
+            if "isaac_joint_bridge" in locals() and isaac_joint_bridge is not None:
+                isaac_joint_bridge.close()
             simulation_app.close()
     return 0
 

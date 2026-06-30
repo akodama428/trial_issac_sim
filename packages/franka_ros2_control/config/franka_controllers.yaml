@@ -1,0 +1,53 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz
+    # use_sim_time は設定しない: controller_manager の RT ループは /clock の到着に
+    # ブロックされる。Isaac Sim が /clock を配信し始めるのはコントローラーの
+    # activate 試行より後になるため、use_sim_time=true だと
+    # "Switch controller timed out" でコントローラーが永久に inactive のまま残る。
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+
+    command_interfaces:
+      - position
+      - velocity
+
+    state_interfaces:
+      - position
+      - velocity
+
+    # Smooth interpolation between waypoints.
+    interpolation_method: splines
+
+    # In simulation, use open-loop control: the JTC tracks trajectory internally
+    # rather than comparing commanded vs actual hardware positions.
+    # This prevents path-tolerance aborts caused by PD-controller lag in Isaac Sim.
+    open_loop_control: true
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: true
+
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 10.0  # generous timeout for sim time
+      panda_joint1: {goal: 0.1}
+      panda_joint2: {goal: 0.1}
+      panda_joint3: {goal: 0.1}
+      panda_joint4: {goal: 0.1}
+      panda_joint5: {goal: 0.1}
+      panda_joint6: {goal: 0.1}
+      panda_joint7: {goal: 0.1}

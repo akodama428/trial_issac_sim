@@ -1,0 +1,10 @@
+<library path="franka_ros2_control">
+  <class name="franka_ros2_control/IsaacSimHardwareInterface"
+         type="franka_ros2_control::IsaacSimHardwareInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      ros2_control HardwareInterface that bridges to Isaac Sim via ROS2 topics.
+      Reads /isaac_joint_states, writes /isaac_joint_commands.
+    </description>
+  </class>
+</library>

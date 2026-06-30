@@ -1,0 +1,115 @@
+<?xml version="1.0"?>
+<!--
+  Minimal robot description for ros2_control.
+  Only the ros2_control tags matter here; visuals/collisions live in the full URDF.
+-->
+<robot name="panda">
+
+  <link name="panda_link0"/>
+  <link name="panda_link1"/>
+  <link name="panda_link2"/>
+  <link name="panda_link3"/>
+  <link name="panda_link4"/>
+  <link name="panda_link5"/>
+  <link name="panda_link6"/>
+  <link name="panda_link7"/>
+  <link name="panda_hand"/>
+
+  <joint name="panda_joint1" type="revolute">
+    <parent link="panda_link0"/>
+    <child link="panda_link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87" velocity="2.1750"/>
+  </joint>
+  <joint name="panda_joint2" type="revolute">
+    <parent link="panda_link1"/>
+    <child link="panda_link2"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.7628" upper="1.7628" effort="87" velocity="2.1750"/>
+  </joint>
+  <joint name="panda_joint3" type="revolute">
+    <parent link="panda_link2"/>
+    <child link="panda_link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="87" velocity="2.1750"/>
+  </joint>
+  <joint name="panda_joint4" type="revolute">
+    <parent link="panda_link3"/>
+    <child link="panda_link4"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-3.0718" upper="-0.0698" effort="87" velocity="2.1750"/>
+  </joint>
+  <joint name="panda_joint5" type="revolute">
+    <parent link="panda_link4"/>
+    <child link="panda_link5"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12" velocity="2.6100"/>
+  </joint>
+  <joint name="panda_joint6" type="revolute">
+    <parent link="panda_link5"/>
+    <child link="panda_link6"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-0.0175" upper="3.7525" effort="12" velocity="2.6100"/>
+  </joint>
+  <joint name="panda_joint7" type="revolute">
+    <parent link="panda_link6"/>
+    <child link="panda_link7"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.8973" upper="2.8973" effort="12" velocity="2.6100"/>
+  </joint>
+  <joint name="panda_hand_joint" type="fixed">
+    <parent link="panda_link7"/>
+    <child link="panda_hand"/>
+  </joint>
+
+  <ros2_control name="IsaacSimHardwareInterface" type="system">
+    <hardware>
+      <plugin>franka_ros2_control/IsaacSimHardwareInterface</plugin>
+      <param name="isaac_joint_states_topic">/isaac_joint_states</param>
+      <param name="isaac_joint_commands_topic">/isaac_joint_commands</param>
+    </hardware>
+    <joint name="panda_joint1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_joint2">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_joint3">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_joint4">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_joint5">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_joint6">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_joint7">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+
+</robot>

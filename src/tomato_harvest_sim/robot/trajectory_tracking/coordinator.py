@@ -79,9 +79,11 @@ class TrajectoryTrackingCoordinator:
         max_joint_step_rad: float = 0.05,
         max_gripper_step_rad: float = 0.01,
         joint_tolerance_rad: float = 0.03,
+        allow_direct_drive: bool = True,
     ) -> None:
         self._driver = driver
         self._hardware_control_port = hardware_control_port
+        self._allow_direct_drive = allow_direct_drive
         resolved_trajectory_execution_port = trajectory_execution_port or JointTrajectoryControllerBridge(
             hardware=self._hardware_control_port
         )
@@ -261,7 +263,7 @@ class TrajectoryTrackingCoordinator:
         )
 
     def _apply_tracking_command(self, command: TrackingCommand | None) -> None:
-        if command is None:
+        if command is None or not self._allow_direct_drive:
             return
         if command.velocities is None:
             self._driver.set_joint_positions_with_debug(command.positions, context=command.context)

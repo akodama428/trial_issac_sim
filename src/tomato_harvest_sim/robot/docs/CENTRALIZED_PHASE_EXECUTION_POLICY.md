@@ -70,12 +70,16 @@
 `HarvestRuntime` が全サブシステムを初期化・配線し、トップレベル関数を呼び出す（点線）。
 サブシステム間のデータフローは実線で示す。
 
+**軌道制御は別 ROS2 パッケージ（C++）として分離し、ROS2 IF 経由で接続する。**  
+Python 側の `trajectory_tracking` は `FollowJointTrajectory` action client として振る舞い、
+C++ の標準 `JointTrajectoryController` が軌道補間・PD 追従・tolerance 管理を担う。
+
 ```mermaid
 flowchart TB
-  subgraph Robot["robot"]
+  subgraph RobotPkg["tomato_harvest_sim (Python / Isaac Sim プロセス内)"]
     direction TB
 
-    R1["HarvestRuntime\n全サブシステムの初期化・配線・lifecycle 管理\nROS2 launch ファイル相当"]
+    R1["HarvestRuntime\n全サブシステムの初期化・配線・lifecycle 管理"]
 
     subgraph Perception["perception"]
       D1["TargetEstimator"]
@@ -94,11 +98,13 @@ flowchart TB
       T1["TrajectoryExecutionCoordinator"]
       T2["ExecutionStateStore"]
       T3["ExecutionMonitor"]
-      T4["PhaseSpecLoader\n(config から ExecutionPhaseSpec をロード)"]
+      T4["PhaseSpecLoader\n(ExecutionPhaseSpec をロード)"]
+      T5["FollowJointTrajectory\nAction Client"]
     end
 
-    subgraph Control["ros2_control"]
-      C1["JointTrajectoryControllerBridge"]
+    subgraph IsaacSim["simulator (Isaac Sim)"]
+      IS1["Isaac Sim API\n(物理シミュレーション)"]
+      IS2["ROS2 Bridge\nomni.isaac.ros2_bridge"]
     end
 
     R1 -. "① estimate()" .-> D1
@@ -109,36 +115,46 @@ flowchart TB
     B1 -- "phase decision" --> R1
     P1 --> P2
     P1 -- "PhaseMotionPlan" --> R1
-    T1 -. "⑤ joint control" .-> C1
     T1 --- T2
     T1 --- T3
     T1 --- T4
+    T1 --> T5
+    IS1 <--> IS2
   end
 
-  subgraph Boundary["src/tomato_harvest_sim/api (データ境界)"]
+  subgraph ROS2IF["ROS2 Interface (プロセス境界)"]
     direction LR
-    A1["SceneSnapshot\n(active_phase_motion_plan 含む)"]
-    A5["TrajectoryExecutionRequest / Result"]
-    A6["HardwareCommandSample / HardwareStateSample"]
+    AC["FollowJointTrajectory (Action)\n/follow_joint_trajectory"]
+    JS["/joint_states (Topic)"]
+    CMD["/isaac_joint_commands (Topic)"]
+    ISS["/isaac_joint_states (Topic)"]
   end
 
-  subgraph Simulation["simulator"]
-    direction LR
-    S1["IsaacRos2ControlSystem"]
-    S2["IsaacFrankaDriver"]
-    S3["Isaac Sim API"]
+  subgraph CtrlPkg["franka_ros2_control (C++ / 別 ROS2 ノード)"]
+    direction TB
+    C1["JointTrajectoryController\n標準 ros2_control C++\n軌道補間・PD 追従・path tolerance 管理"]
+    C2["IsaacSimHardwareInterface\n(ros2_control HardwareInterface C++)\n状態読み取り・指令書き込み"]
+    C1 <--> C2
   end
 
-  A1 --> R1
-  T1 --> A5
-  A5 --> C1
-  C1 --> A6
-  A6 --> S1
-  S1 --> S2
-  S2 --> S3
-  S3 --> S2
-  S1 --> A6
+  T5 -->|"JointTrajectory goal\nfeedback / result"| AC
+  AC --> C1
+  C2 -->|"joint_states"| JS
+  JS -->|"観測値"| T1
+  IS2 -->|"publish"| ISS
+  ISS -->|"read_state()"| C2
+  C2 -->|"write_command()"| CMD
+  CMD -->|"subscribe"| IS2
 ```
+
+### プロセス境界と接続 IF の整理
+
+| 接続 | 種別 | 方向 | 内容 |
+|---|---|---|---|
+| `trajectory_tracking` → C++ controller | ROS2 Action | Python → C++ | `FollowJointTrajectory` goal / feedback / result |
+| C++ hardware IF → Python | ROS2 Topic | C++ → Python | `/joint_states`（観測値） |
+| C++ hardware IF → Isaac Sim | ROS2 Topic | C++ → Isaac Sim | joint command（位置・速度） |
+| Isaac Sim → C++ hardware IF | ROS2 Topic | Isaac Sim → C++ | joint state（位置・速度） |
 
 ## フェーズ spec の責務
 `ExecutionPhaseSpec` は 1 フェーズ分の execution contract を表す。

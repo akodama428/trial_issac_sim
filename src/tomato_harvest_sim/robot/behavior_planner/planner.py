@@ -54,7 +54,6 @@ class BehaviorPlanner:
         bridge: BridgeProtocol,
         *,
         estimate: TargetEstimate | None = None,
-        motion_plan: HarvestMotionPlan | None = None,
     ) -> tuple[str, ...]:
         state = self._shared_state
 
@@ -74,30 +73,6 @@ class BehaviorPlanner:
                 (
                     "Target world xyz: "
                     f"({estimate.target_world_pose.x:.4f}, {estimate.target_world_pose.y:.4f}, {estimate.target_world_pose.z:.4f})"
-                ),
-            )
-
-        if state.task_phase is HarvestTaskPhase.TARGET_FOUND:
-            if motion_plan is None:
-                return ()
-            state.last_harvest_motion_plan = motion_plan
-            state.planner_backend_name = motion_plan.planner_name
-            state.task_phase = HarvestTaskPhase.PLANNING
-            return (
-                "[State] target_found -> planning",
-                f"[Planning] Planner backend={state.planner_backend_name}",
-                "[Planning] MoveIt2-ready pre-grasp plan was created.",
-                (
-                    "Pre-grasp world xyz: "
-                    f"({motion_plan.pregrasp_pose.x:.4f}, {motion_plan.pregrasp_pose.y:.4f}, {motion_plan.pregrasp_pose.z:.4f})"
-                ),
-                (
-                    "Grasp world xyz: "
-                    f"({motion_plan.grasp_pose.x:.4f}, {motion_plan.grasp_pose.y:.4f}, {motion_plan.grasp_pose.z:.4f})"
-                ),
-                (
-                    "Pull world xyz: "
-                    f"({motion_plan.pull_pose.x:.4f}, {motion_plan.pull_pose.y:.4f}, {motion_plan.pull_pose.z:.4f})"
                 ),
             )
 

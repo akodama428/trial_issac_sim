@@ -141,7 +141,10 @@ class HarvestRuntime:
                 bridge.read_tf_tree(),
             )
 
-        motion_plan = None
+        # 上位計画 (BehaviorPlanner) を先に実行し、今ティックの current_phase を確定する。
+        # その後、下位計画 (MotionPlanner) が current_phase を参照して軌道を生成する。
+        logs = self._behavior_planner.step(snapshot, bridge, estimate=estimate)
+
         if self.state.task_phase is HarvestTaskPhase.TARGET_FOUND and self.state.last_target_estimate is not None:
             motion_plan = self._planner.plan(
                 self.state.last_target_estimate,
@@ -149,8 +152,27 @@ class HarvestRuntime:
                 bridge.read_tf_tree(),
                 snapshot,
             )
-
-        logs = self._behavior_planner.step(snapshot, bridge, estimate=estimate, motion_plan=motion_plan)
+            if motion_plan is not None:
+                self.state.last_harvest_motion_plan = motion_plan
+                self.state.planner_backend_name = motion_plan.planner_name
+                self.state.task_phase = HarvestTaskPhase.PLANNING
+                logs = logs + (
+                    "[State] target_found -> planning",
+                    f"[Planning] Planner backend={motion_plan.planner_name}",
+                    "[Planning] MoveIt2-ready pre-grasp plan was created.",
+                    (
+                        "Pre-grasp world xyz: "
+                        f"({motion_plan.pregrasp_pose.x:.4f}, {motion_plan.pregrasp_pose.y:.4f}, {motion_plan.pregrasp_pose.z:.4f})"
+                    ),
+                    (
+                        "Grasp world xyz: "
+                        f"({motion_plan.grasp_pose.x:.4f}, {motion_plan.grasp_pose.y:.4f}, {motion_plan.grasp_pose.z:.4f})"
+                    ),
+                    (
+                        "Pull world xyz: "
+                        f"({motion_plan.pull_pose.x:.4f}, {motion_plan.pull_pose.y:.4f}, {motion_plan.pull_pose.z:.4f})"
+                    ),
+                )
 
         if self._executor is not None:
             effective_snapshot = replace(snapshot, active_phase_motion_plan=self.state.last_phase_motion_plan)
