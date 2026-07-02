@@ -506,6 +506,7 @@ class _Ros2MoveIt2Clients:
     ) -> None:
         import rclpy
         from moveit_msgs.srv import ApplyPlanningScene, GetMotionPlan
+        from rclpy.executors import SingleThreadedExecutor
 
         self._rclpy = rclpy
         if not self._rclpy.ok():
@@ -513,6 +514,14 @@ class _Ros2MoveIt2Clients:
         self._node = self._rclpy.create_node("tomato_harvest_moveit_bridge")
         self._motion_plan_client = self._node.create_client(GetMotionPlan, motion_plan_service_name)
         self._planning_scene_client = self._node.create_client(ApplyPlanningScene, planning_scene_service_name)
+        # robot_node の executor とは独立した専用 executor で spin する。
+        # rclpy.spin_until_future_complete() はデフォルト executor を使うため、
+        # robot_node の rclpy.spin() 内から呼ぶと "Executor is already spinning" になる。
+        self._executor = SingleThreadedExecutor()
+        self._executor.add_node(self._node)
+
+    def _spin_until_done(self, future: object, timeout_sec: float) -> None:
+        self._executor.spin_until_future_complete(future, timeout_sec=timeout_sec)
 
     def wait_for_services(self, *, timeout_sec: float) -> bool:
         motion_ready = bool(self._motion_plan_client.wait_for_service(timeout_sec=timeout_sec))
@@ -522,7 +531,7 @@ class _Ros2MoveIt2Clients:
 
     def apply_planning_scene(self, request: object, *, timeout_sec: float) -> bool:
         future = self._planning_scene_client.call_async(request)
-        self._rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout_sec)
+        self._spin_until_done(future, timeout_sec=timeout_sec)
         if not future.done():
             return False
         response = future.result()
@@ -532,7 +541,7 @@ class _Ros2MoveIt2Clients:
 
     def plan_to_pose(self, request: object, *, timeout_sec: float) -> JointTrajectory | None:
         future = self._motion_plan_client.call_async(request)
-        self._rclpy.spin_until_future_complete(self._node, future, timeout_sec=timeout_sec)
+        self._spin_until_done(future, timeout_sec=timeout_sec)
         if not future.done():
             return None
         response = future.result()

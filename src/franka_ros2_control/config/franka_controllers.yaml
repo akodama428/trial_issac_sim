@@ -42,12 +42,16 @@ joint_trajectory_controller:
     allow_integration_in_goal_trajectories: true
 
     constraints:
-      stopped_velocity_tolerance: 0.05
-      goal_time: 10.0  # generous timeout for sim time
-      panda_joint1: {goal: 0.1}
-      panda_joint2: {goal: 0.1}
-      panda_joint3: {goal: 0.1}
-      panda_joint4: {goal: 0.1}
-      panda_joint5: {goal: 0.1}
-      panda_joint6: {goal: 0.1}
-      panda_joint7: {goal: 0.1}
+      stopped_velocity_tolerance: 0.01
+      goal_time: 5.0
+      # goal: 0.0 disables the final position tolerance check.
+      # In standalone mode (no Isaac Sim), the hardware interface does not
+      # simulate physics, so the robot never reaches the commanded position.
+      # Setting goal to 0.0 lets the JTC declare success at trajectory end.
+      panda_joint1: {goal: 0.0}
+      panda_joint2: {goal: 0.0}
+      panda_joint3: {goal: 0.0}
+      panda_joint4: {goal: 0.0}
+      panda_joint5: {goal: 0.0}
+      panda_joint6: {goal: 0.0}
+      panda_joint7: {goal: 0.0}

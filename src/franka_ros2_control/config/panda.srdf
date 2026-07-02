@@ -1,0 +1,48 @@
+<?xml version="1.0" ?>
+<!--
+  Semantic Robot Description Format (SRDF) for Franka Panda.
+  Defines planning groups, end effector, and disabled collision pairs.
+-->
+<robot name="panda">
+  <!-- World-to-base virtual joint (fixed: robot is bolted to the floor) -->
+  <virtual_joint name="virtual_joint" type="fixed" parent_frame="world" child_link="panda_link0"/>
+
+  <!-- 7-DOF arm chain ending at panda_hand -->
+  <group name="panda_arm">
+    <chain base_link="panda_link0" tip_link="panda_hand"/>
+  </group>
+
+  <!-- End effector attached to panda_link7 -->
+  <end_effector name="panda_hand" parent_link="panda_link7" group="panda_arm"/>
+
+  <!-- Named configuration: Franka "ready" pose -->
+  <group_state name="ready" group="panda_arm">
+    <joint name="panda_joint1" value="0"/>
+    <joint name="panda_joint2" value="-0.7853981633974483"/>
+    <joint name="panda_joint3" value="0"/>
+    <joint name="panda_joint4" value="-2.356194490192345"/>
+    <joint name="panda_joint5" value="0"/>
+    <joint name="panda_joint6" value="1.5707963267948966"/>
+    <joint name="panda_joint7" value="0.7853981633974483"/>
+  </group_state>
+
+  <!-- Disable self-collision between adjacent and known-safe link pairs -->
+  <disable_collisions link1="panda_hand" link2="panda_link6" reason="Adjacent"/>
+  <disable_collisions link1="panda_hand" link2="panda_link7" reason="Adjacent"/>
+  <disable_collisions link1="panda_link0" link2="panda_link1" reason="Adjacent"/>
+  <disable_collisions link1="panda_link1" link2="panda_link2" reason="Adjacent"/>
+  <disable_collisions link1="panda_link2" link2="panda_link3" reason="Adjacent"/>
+  <disable_collisions link1="panda_link3" link2="panda_link4" reason="Adjacent"/>
+  <disable_collisions link1="panda_link4" link2="panda_link5" reason="Adjacent"/>
+  <disable_collisions link1="panda_link5" link2="panda_link6" reason="Adjacent"/>
+  <disable_collisions link1="panda_link6" link2="panda_link7" reason="Adjacent"/>
+  <disable_collisions link1="panda_link0" link2="panda_link2" reason="Never"/>
+  <disable_collisions link1="panda_link1" link2="panda_link3" reason="Never"/>
+  <disable_collisions link1="panda_link1" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_link2" link2="panda_link4" reason="Never"/>
+  <disable_collisions link1="panda_link3" link2="panda_link5" reason="Never"/>
+  <disable_collisions link1="panda_link3" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_link4" link2="panda_link6" reason="Never"/>
+  <disable_collisions link1="panda_link4" link2="panda_link7" reason="Never"/>
+  <disable_collisions link1="panda_link5" link2="panda_link7" reason="Never"/>
+</robot>

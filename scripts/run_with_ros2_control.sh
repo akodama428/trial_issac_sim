@@ -30,7 +30,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------- #
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-PKG_SRC="${REPO_ROOT}/packages/franka_ros2_control"
+PKG_SRC="${REPO_ROOT}/src/franka_ros2_control"
 
 ROS_DISTRO="${ROS_DISTRO:-jazzy}"
 WS_DIR="${FRANKA_ROS2_WS:-/tmp/franka_ros2_ws}"

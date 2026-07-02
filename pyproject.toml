@@ -13,3 +13,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+tomato_harvest_robot_node = "tomato_harvest_sim.robot.robot_node:main"
+tomato_harvest_simulator_node = "tomato_harvest_sim.simulator.simulator_node:main"

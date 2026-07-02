@@ -8,11 +8,11 @@ if [[ -f "/opt/ros/${ROS_DISTRO}/setup.bash" ]]; then
   set -u
 fi
 
-# Source the franka_ros2_control colcon workspace if built.
-if [[ -f "/workspace/ros2_ws/install/setup.bash" ]]; then
+# Source the colcon install directory built inside the project root.
+if [[ -f "/workspace/tomato-harvest/install/setup.bash" ]]; then
   set +u
   # shellcheck disable=SC1091
-  source "/workspace/ros2_ws/install/setup.bash"
+  source "/workspace/tomato-harvest/install/setup.bash"
   set -u
 fi
 

@@ -54,6 +54,8 @@ class Ros2ActionTrajectoryPort:
         self._spin_timeout_sec = spin_timeout_sec
         self._FollowJointTrajectory = FollowJointTrajectory
 
+        from rclpy.executors import SingleThreadedExecutor
+
         self._initialized_here = False
         if not rclpy.ok():
             rclpy.init(args=None)
@@ -63,6 +65,11 @@ class Ros2ActionTrajectoryPort:
         self._action_client: ActionClient = ActionClient(
             self._node, FollowJointTrajectory, action_name
         )
+        # robot_node の executor とは独立した専用 executor を使う。
+        # rclpy.spin_once() は default executor を使うため、
+        # robot_node の rclpy.spin() 内から呼ぶと "Executor is already spinning" になる。
+        self._executor = SingleThreadedExecutor()
+        self._executor.add_node(self._node)
 
         self._active_request: TrajectoryExecutionRequest | None = None
         self._feedback: TrajectoryExecutionFeedback | None = None
@@ -125,7 +132,7 @@ class Ros2ActionTrajectoryPort:
         self._result_future = None
 
     def step(self) -> None:
-        self._rclpy.spin_once(self._node, timeout_sec=self._spin_timeout_sec)
+        self._executor.spin_once(timeout_sec=self._spin_timeout_sec)
 
     def active_request(self) -> TrajectoryExecutionRequest | None:
         return self._active_request
@@ -144,7 +151,7 @@ class Ros2ActionTrajectoryPort:
     def _ensure_server_ready(self) -> bool:
         if self._server_ready:
             return True
-        self._rclpy.spin_once(self._node, timeout_sec=0.01)
+        self._executor.spin_once(timeout_sec=0.01)
         ready = self._action_client.wait_for_server(
             timeout_sec=self._server_wait_timeout_sec
         )

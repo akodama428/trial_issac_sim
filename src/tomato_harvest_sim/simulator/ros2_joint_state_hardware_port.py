@@ -12,9 +12,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-import numpy as np
-
-from tomato_harvest_sim.api.hardware_control import HardwareCommandSample, HardwareControlPort, HardwareStateSample
+from tomato_harvest_sim.api.hardware_control import HardwareCommandSample, HardwareStateSample
 from tomato_harvest_sim.api.contracts import Pose3D
 
 if TYPE_CHECKING:
@@ -28,35 +26,49 @@ class Ros2JointStateHardwarePort:
 
     This is the observation-only port used by TrajectoryTrackingCoordinator
     when the C++ JointTrajectoryController is active.
+
+    driver が None の場合（robot ノードなど Isaac Sim 外での利用）は EE pose なしで動作する。
+    external_node が指定された場合はそのノード上にサブスクリプションを作成し、
+    spin_once は外部エグゼキュータに委ねる（read_state 内では呼ばない）。
     """
 
     def __init__(
         self,
         *,
-        driver: IsaacFrankaDriver,
+        driver: IsaacFrankaDriver | None = None,
         joint_states_topic: str = "/joint_states",
         spin_timeout_sec: float = 0.001,
+        external_node: object | None = None,
     ) -> None:
         import rclpy
-        from rclpy.node import Node
         from sensor_msgs.msg import JointState
 
         self._driver = driver
         self._spin_timeout_sec = spin_timeout_sec
         self._rclpy = rclpy
         self._initialized_here = False
+        self._external_node = external_node
 
-        if not rclpy.ok():
-            rclpy.init(args=None)
-            self._initialized_here = True
+        if external_node is not None:
+            self._node = external_node
+            self._node.create_subscription(
+                JointState,
+                joint_states_topic,
+                self._on_joint_state,
+                rclpy.qos.QoSProfile(depth=1),
+            )
+        else:
+            if not rclpy.ok():
+                rclpy.init(args=None)
+                self._initialized_here = True
 
-        self._node: Node = rclpy.create_node("ros2_joint_state_hardware_port")
-        self._sub = self._node.create_subscription(
-            JointState,
-            joint_states_topic,
-            self._on_joint_state,
-            rclpy.qos.QoSProfile(depth=1),
-        )
+            self._node = rclpy.create_node("ros2_joint_state_hardware_port")
+            self._node.create_subscription(
+                JointState,
+                joint_states_topic,
+                self._on_joint_state,
+                rclpy.qos.QoSProfile(depth=1),
+            )
 
         self._last_joint_names: tuple[str, ...] = ()
         self._last_positions: tuple[float, ...] | None = None
@@ -64,16 +76,19 @@ class Ros2JointStateHardwarePort:
         self._last_stamp_sec: float = 0.0
 
     def initialize_if_needed(self) -> bool:
+        if self._driver is None:
+            return True
         return self._driver.initialize_if_needed()
 
     def read_state(self) -> HardwareStateSample | None:
-        self._rclpy.spin_once(self._node, timeout_sec=self._spin_timeout_sec)
+        if self._external_node is None:
+            self._rclpy.spin_once(self._node, timeout_sec=self._spin_timeout_sec)
 
         if self._last_positions is None:
             return None
 
         ee_pose: Pose3D | None = None
-        if self._driver.initialize_if_needed():
+        if self._driver is not None and self._driver.initialize_if_needed():
             ee_pose = self._driver.current_end_effector_pose()
 
         from tomato_harvest_sim.api.contracts import JointStateSnapshot

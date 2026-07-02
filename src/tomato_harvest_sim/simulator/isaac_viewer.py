@@ -86,6 +86,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "via the franka_ros2_control package."
         ),
     )
+    parser.add_argument(
+        "--simulator-only",
+        action="store_true",
+        help=(
+            "新 ROS2 コンポーネントアーキテクチャ向け: SimulatorNode のみ起動し、"
+            "HarvestRuntime は起動しない。tomato_harvest_robot_node と組み合わせて使う。"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -204,12 +212,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         isaac_joint_bridge = None
-        if args.backend == "ros2_control":
+        if args.backend == "ros2_control" or args.simulator_only:
             from tomato_harvest_sim.simulator.isaac_joint_ros2_bridge import IsaacJointRos2Bridge
-            from tomato_harvest_sim.simulator.ros2_joint_state_hardware_port import Ros2JointStateHardwarePort
-            from tomato_harvest_sim.robot.trajectory_tracking.ros2_action_trajectory_port import Ros2ActionTrajectoryPort
             print("[isaac_viewer] Using ros2_control backend.", flush=True)
             isaac_joint_bridge = IsaacJointRos2Bridge(driver=franka_driver)
+
+        # --simulator-only: HarvestRuntime を持たず SimulatorNode のみ起動する。
+        # control_controller の作成（= HarvestRuntime 起動）を完全にスキップする。
+        if args.simulator_only:
+            _run_simulator_node_main_loop(
+                simulation_app=simulation_app,
+                franka_driver=franka_driver,
+                isaac_joint_bridge=isaac_joint_bridge,
+                artifacts=artifacts,
+                headless=args.headless,
+                headless_steps=args.headless_steps,
+            )
+            return 0
+
+        if args.backend == "ros2_control":
+            from tomato_harvest_sim.simulator.ros2_joint_state_hardware_port import Ros2JointStateHardwarePort
+            from tomato_harvest_sim.robot.trajectory_tracking.ros2_action_trajectory_port import Ros2ActionTrajectoryPort
             hw_port = Ros2JointStateHardwarePort(driver=franka_driver)
             traj_port = Ros2ActionTrajectoryPort()
             franka_executor = TrajectoryTrackingCoordinator(
@@ -233,6 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             transport=args.transport,
             executor=franka_executor,
         )
+
         if args.auto_start:
             control_controller.start()
         control_window = None
@@ -675,6 +699,158 @@ def _print_review_summary(_: ReviewScenePlan, *, camera_paths: CameraPrimPaths, 
     print(f"Fixed camera: {camera_paths.fixed_camera_prim_path}", flush=True)
     print(f"Hand camera: {camera_paths.hand_camera_prim_path}", flush=True)
     print(f"Initial camera view: {camera_view}", flush=True)
+
+
+def _run_simulator_node_main_loop(
+    *,
+    simulation_app: object,
+    franka_driver: IsaacFrankaDriver,
+    isaac_joint_bridge: object | None,
+    artifacts: SceneBuildArtifacts,
+    headless: bool,
+    headless_steps: int,
+) -> None:
+    """新 ROS2 コンポーネントアーキテクチャ向けメインループ。
+
+    HarvestRuntime を持たず、SimulatorNode のみを起動する。
+    tomato_harvest_robot_node（別プロセス）が HarvestRuntime を担う。
+
+    physics_bridge との連携のため、scene_runtime の snapshot を返す
+    最小アダプタを内部で定義する。
+    """
+    import rclpy
+    from std_msgs.msg import String
+    from tomato_harvest_sim.api.bridge import CONTROL_TOPIC
+    from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
+    from tomato_harvest_sim.simulator.simulator_node import SimulatorNode
+
+    if not rclpy.ok():
+        rclpy.init(args=None)
+
+    scene_runtime = IsaacSceneRuntime()
+    node = SimulatorNode(scene_runtime)
+    node.boot()
+    print("[simulator_only] SimulatorNode 起動完了。robot_node からの接続を待ちます。", flush=True)
+
+    # IsaacPhysicsHarvestBridge.finalize_physics_step() が要求する controller インタフェース
+    class _PhysicsController:
+        def current_scene_snapshot(self):
+            return scene_runtime.snapshot()
+
+        def sync_tomato_physics(self, pose, *, attached=None, status=None, reason=None):
+            scene_runtime.sync_tomato_physics(pose, attached=attached, status=status, reason=reason)
+
+    physics_controller = _PhysicsController() if artifacts.physics_bridge is not None else None
+
+    # ControlPanelWindow 向けの最小アダプタ。
+    # ボタン操作を CONTROL_TOPIC へ publish して SimulatorNode（次の tick() で scene_runtime へ反映）
+    # と robot_node の両方へ伝達する。
+    _control_pub = node.create_publisher(String, CONTROL_TOPIC, 10)
+
+    class _RobotStateStub:
+        class _Val:
+            def __init__(self, v: str) -> None:
+                self.value = v
+
+        def __init__(self) -> None:
+            self.runtime_state = self._Val("n/a")
+            self.task_phase = self._Val("n/a")
+
+    class _RobotStub:
+        def __init__(self) -> None:
+            self.state = _RobotStateStub()
+
+    _robot_stub = _RobotStub()
+
+    class _SimulatorOnlyControlSystem:
+        @property
+        def simulator(self):
+            return scene_runtime
+
+        @property
+        def robot(self):
+            return _robot_stub
+
+        def boot(self) -> None:
+            pass
+
+        def apply_control(self, command):
+            msg = String()
+            msg.data = command.value
+            _control_pub.publish(msg)
+            return True
+
+        def step(self) -> tuple[str, ...]:
+            return ()
+
+        def set_active_camera(self, camera_name: str):
+            return scene_runtime.set_active_camera(camera_name)
+
+        def sync_robot_tool_pose(self, pose):
+            return scene_runtime.snapshot()
+
+        def sync_robot_joint_state(self, joint_state) -> None:
+            pass
+
+        def sync_tomato_physics(self, pose, *, attached=None, status=None, reason=None):
+            return scene_runtime.sync_tomato_physics(
+                pose, attached=attached, status=status, reason=reason
+            )
+
+        def replan_motion(self, reason: str) -> tuple[str, ...]:
+            return ()
+
+        def close(self) -> None:
+            pass
+
+    control_system = _SimulatorOnlyControlSystem()
+    control_controller = ControlPanelController(
+        system=control_system,
+        set_viewport_camera=lambda camera_name: _set_active_camera(
+            artifacts.camera_paths,
+            camera_view="hand" if camera_name == "hand_camera" else "fixed",
+        ),
+        log_fn=lambda message: print(message, flush=True),
+    )
+    control_controller.boot(initial_camera_name="fixed_camera")
+
+    control_window: IsaacControlPanelWindow | None = None
+    if not headless:
+        control_window = IsaacControlPanelWindow(control_controller)
+
+    def _step() -> None:
+        if isaac_joint_bridge is not None:
+            isaac_joint_bridge.step()
+
+        ee_pose = franka_driver.current_end_effector_pose()
+        if ee_pose is not None:
+            scene_runtime.sync_robot_tool_pose(ee_pose)
+
+        joint_state = franka_driver.current_joint_state_snapshot()
+        node.tick(joint_state=joint_state)
+
+        status = control_controller.step_runtime()
+        if control_window is not None:
+            control_window.refresh_status(status)
+
+        if artifacts.physics_bridge is not None:
+            artifacts.physics_bridge.begin_physics_step()
+        simulation_app.update()
+        if artifacts.physics_bridge is not None:
+            artifacts.physics_bridge.finalize_physics_step(physics_controller)
+
+    if headless:
+        for _ in range(headless_steps):
+            _step()
+        _pump_updates(simulation_app.update, frame_count=30)
+        print("Headless simulator_node setup completed.", flush=True)
+        node.destroy_node()
+        return
+
+    while simulation_app.is_running():
+        _step()
+
+    node.destroy_node()
 
 
 def _pump_updates(update_fn: object, *, frame_count: int) -> None:

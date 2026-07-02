@@ -48,17 +48,13 @@ COPY config /workspace/tomato-harvest/config
 COPY scripts /workspace/tomato-harvest/scripts
 COPY src /workspace/tomato-harvest/src
 COPY tests /workspace/tomato-harvest/tests
-COPY packages /workspace/tomato-harvest/packages
 COPY docker/entrypoint.sh /workspace/tomato-harvest/docker/entrypoint.sh
 
-# Build the franka_ros2_control C++ package in a colcon workspace.
-WORKDIR /workspace/ros2_ws
-RUN mkdir -p src \
-    && ln -s /workspace/tomato-harvest/packages/franka_ros2_control src/franka_ros2_control \
-    && . /opt/ros/${ROS_DISTRO}/setup.sh \
-    && colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-
-WORKDIR /workspace/tomato-harvest
+# Build all ROS2 packages (C++ + Python) in the project root workspace.
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
+    && colcon build \
+       --symlink-install \
+       --cmake-args -DCMAKE_BUILD_TYPE=Release
 
 RUN chmod +x \
     /workspace/tomato-harvest/python.sh \
