@@ -163,14 +163,17 @@ class HarvestRuntime:
                     (
                         "Pre-grasp world xyz: "
                         f"({motion_plan.pregrasp_pose.x:.4f}, {motion_plan.pregrasp_pose.y:.4f}, {motion_plan.pregrasp_pose.z:.4f})"
+                        if motion_plan.pregrasp_pose is not None else "Pre-grasp world xyz: n/a"
                     ),
                     (
                         "Grasp world xyz: "
                         f"({motion_plan.grasp_pose.x:.4f}, {motion_plan.grasp_pose.y:.4f}, {motion_plan.grasp_pose.z:.4f})"
+                        if motion_plan.grasp_pose is not None else "Grasp world xyz: n/a"
                     ),
                     (
                         "Pull world xyz: "
                         f"({motion_plan.pull_pose.x:.4f}, {motion_plan.pull_pose.y:.4f}, {motion_plan.pull_pose.z:.4f})"
+                        if motion_plan.pull_pose is not None else "Pull world xyz: n/a"
                     ),
                 )
 

@@ -131,7 +131,7 @@ class IsaacPhysicsHarvestBridge:
         if self._grasp_joint_active and not snapshot.gripper_closed:
             self._debug_log("[PhysicsHarvest] gripper opened while grasp joint active. Removing grasp joint.")
             self._remove_grasp_joint()
-            if snapshot.place_pose is not None and self._distance(snapshot.robot_tool_pose, snapshot.place_pose) <= self.PLACE_DISTANCE_M:
+            if self._distance(snapshot.robot_tool_pose, snapshot.tray_pose) <= self.PLACE_DISTANCE_M:
                 controller.sync_tomato_physics(
                     tomato_pose,
                     attached=False,

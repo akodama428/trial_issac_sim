@@ -115,7 +115,6 @@ class RobotNodeBridge:
         self._last_tf_tree: TfTreeSnapshot | None = None
         self._pending_control: ControlCommand | None = None
 
-        node.create_publisher(String, CONTROL_TOPIC, 10)  # ユーザー UI 用（現在は未使用）
         self._motion_command_pub = node.create_publisher(String, MOTION_COMMAND_TOPIC, 10)
         self._motion_metadata_pub = node.create_publisher(String, MOTION_METADATA_TOPIC, 10)
         self._target_estimate_pub = node.create_publisher(String, TARGET_ESTIMATE_TOPIC, 10)
@@ -144,11 +143,6 @@ class RobotNodeBridge:
             self._pending_control = ControlCommand(msg.data.strip().lower())
         except ValueError:
             self._node.get_logger().warning(f"Unknown control command: {msg.data!r}")
-
-    def publish_control(self, command: ControlCommand) -> None:
-        msg = String()
-        msg.data = command.value
-        self._node.create_publisher(String, CONTROL_TOPIC, 10).publish(msg)
 
     def consume_control_command(self) -> ControlCommand | None:
         command = self._pending_control
@@ -193,12 +187,14 @@ class RobotNodeBridge:
         self._target_estimate_pub.publish(msg)
 
     def publish_motion_command(self, command: object) -> None:
+        data = json.dumps(_motion_command_to_dict(command))
+
         metadata_msg = String()
-        metadata_msg.data = json.dumps(_motion_command_to_dict(command, include_trajectory=False))
+        metadata_msg.data = data
         self._motion_metadata_pub.publish(metadata_msg)
 
         command_msg = String()
-        command_msg.data = json.dumps(_motion_command_to_dict(command, include_trajectory=True))
+        command_msg.data = data
         self._motion_command_pub.publish(command_msg)
 
     def consume_motion_command(self) -> None:

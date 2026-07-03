@@ -80,7 +80,7 @@ def build_review_scene_plan() -> ReviewScenePlan:
         tomato_pose=snapshot.tomato_pose,
         tray_pose=snapshot.tray_pose,
         robot_tool_pose=snapshot.robot_tool_pose,
-        pregrasp_pose=snapshot.pregrasp_pose,
+        pregrasp_pose=None,
         tomato_radius_m=layout.tomato_radius_m,
         tray_inner_size_m=layout.tray_inner_size_m,
         tray_wall_thickness_m=layout.tray_wall_thickness_m,

@@ -78,7 +78,7 @@ def sync_scene_runtime_display(
     if not display.tomato_driven_by_physics:
         _set_translate(stage, display.tomato_prim_path, snapshot.tomato_pose)
     _set_translate(stage, display.robot_tool_proxy_prim_path, snapshot.robot_tool_pose)
-    effective_debug_state = debug_state or SceneRuntimeDebugState(pregrasp_pose=snapshot.pregrasp_pose)
+    effective_debug_state = debug_state or SceneRuntimeDebugState()
     _sync_marker(stage, display.pregrasp_marker_prim_path, effective_debug_state.pregrasp_pose)
     _sync_marker(stage, display.grasp_marker_prim_path, effective_debug_state.grasp_pose)
     _sync_marker(stage, display.pull_marker_prim_path, effective_debug_state.pull_pose)

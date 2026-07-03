@@ -101,14 +101,7 @@ class SceneSnapshot:
     tray_pose: Pose3D
     robot_tool_pose: Pose3D
     target_tool_pose: Pose3D | None
-    pregrasp_pose: Pose3D | None
-    grasp_pose: Pose3D | None
-    pull_pose: Pose3D | None
-    place_pose: Pose3D | None
     grasp_result_reason: str | None
-    motion_waypoints: tuple[Pose3D, ...] = ()
-    active_waypoint_index: int | None = None
-    motion_joint_trajectory: "JointTrajectory" | None = None
     active_phase_motion_plan: "PhaseMotionPlan | None" = None
 
 
@@ -224,8 +217,6 @@ class MotionCommand:
     planner_name: str
     target_pose: Pose3D | None = None
     gripper_closed: bool | None = None
-    waypoint_poses: tuple[Pose3D, ...] = ()
-    joint_trajectory: JointTrajectory | None = None
     phase_motion_plan: PhaseMotionPlan | None = None
 
 

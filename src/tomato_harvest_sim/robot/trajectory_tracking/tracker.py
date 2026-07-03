@@ -220,7 +220,6 @@ class TrajectoryTracker:
             store.clear_waypoint_state(clear_raw=False)
             return
 
-        active_index = state.snapshot_active_waypoint_index if state.snapshot_active_waypoint_index is not None else len(waypoints) - 1
         if waypoints != state.waypoint_signature or not state.joint_waypoint_targets:
             joint_targets = solve_joint_targets_for_waypoints(waypoints)
             if not joint_targets:
@@ -228,11 +227,8 @@ class TrajectoryTracker:
                 return
             state.joint_waypoint_targets = joint_targets
             state.waypoint_signature = waypoints
-            state.active_waypoint_index = min(active_index, len(joint_targets) - 1)
+            state.active_waypoint_index = 0
             return
-
-        snapshot_index = min(active_index, len(state.joint_waypoint_targets) - 1)
-        state.active_waypoint_index = max(state.active_waypoint_index, snapshot_index)
 
     def _step_home_motion(
         self,

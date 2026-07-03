@@ -35,18 +35,14 @@ from tomato_harvest_sim.api.bridge import (
     CONTROL_TOPIC,
     FIXED_CAMERA_TOPIC,
     HAND_CAMERA_TOPIC,
-    MOTION_COMMAND_TOPIC,
-    MOTION_METADATA_TOPIC,
     SCENE_SNAPSHOT_TOPIC,
     _build_image_message,
     _build_tf_message,
-    _motion_command_from_dict,
     _scene_snapshot_to_dict,
 )
 from tomato_harvest_sim.api.contracts import (
     ControlCommand,
     JointStateSnapshot,
-    MotionCommand,
     SceneSnapshot,
 )
 
@@ -66,7 +62,6 @@ class SimulatorNode(Node):
 
         self._scene_runtime = scene_runtime
         self._pending_control: ControlCommand | None = None
-        self._pending_motion_command: MotionCommand | None = None
 
         self._scene_snapshot_pub = self.create_publisher(String, SCENE_SNAPSHOT_TOPIC, 10)
         self._fixed_camera_pub = self.create_publisher(Image, FIXED_CAMERA_TOPIC, 10)
@@ -75,8 +70,6 @@ class SimulatorNode(Node):
         self._tf_pub = self.create_publisher(TFMessage, "/tf", 10)
 
         self.create_subscription(String, CONTROL_TOPIC, self._on_control, 10)
-        self.create_subscription(String, MOTION_COMMAND_TOPIC, self._on_motion_command, 10)
-        self.create_subscription(String, MOTION_METADATA_TOPIC, self._on_motion_metadata, 10)
 
         self.get_logger().info("tomato_harvest_simulator_node 起動")
 
@@ -105,11 +98,7 @@ class SimulatorNode(Node):
             self._scene_runtime.apply_control(self._pending_control)
             self._pending_control = None
 
-        if self._pending_motion_command is not None:
-            snapshot = self._scene_runtime.apply_motion_command(self._pending_motion_command)
-            self._pending_motion_command = None
-        else:
-            snapshot = self._scene_runtime.snapshot()
+        snapshot = self._scene_runtime.snapshot()
 
         if joint_state is not None:
             self._publish_joint_state(joint_state)
@@ -122,13 +111,6 @@ class SimulatorNode(Node):
             self._pending_control = ControlCommand(msg.data.strip().lower())
         except ValueError:
             self.get_logger().warning(f"Unknown control command: {msg.data!r}")
-
-    def _on_motion_command(self, msg: String) -> None:
-        payload = json.loads(msg.data)
-        self._pending_motion_command = _motion_command_from_dict(payload)
-
-    def _on_motion_metadata(self, _msg: String) -> None:
-        pass
 
     def _publish_snapshot(self, snapshot: SceneSnapshot) -> None:
         scene_msg = String()

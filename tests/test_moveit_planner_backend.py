@@ -42,10 +42,6 @@ def _scene_snapshot() -> SceneSnapshot:
         tray_pose=Pose3D(0.35, -0.35, 0.45, 0.0, 0.0, 0.0),
         robot_tool_pose=Pose3D(0.18, 0.0, 0.65, 180.0, 0.0, 0.0),
         target_tool_pose=None,
-        pregrasp_pose=None,
-        grasp_pose=None,
-        pull_pose=None,
-        place_pose=None,
         grasp_result_reason=None,
     )
 

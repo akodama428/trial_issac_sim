@@ -31,9 +31,14 @@ def build_scene_runtime_debug_state(
     active_motion_command: MotionCommand | None,
     trajectory_path_provider: Callable[[JointTrajectory], tuple[Pose3D, ...]] | None = None,
 ) -> SceneRuntimeDebugState:
+    # active_waypoint_pose: get from active_phase_motion_plan if available
     active_waypoint_pose = None
-    if snapshot.active_waypoint_index is not None and 0 <= snapshot.active_waypoint_index < len(snapshot.motion_waypoints):
-        active_waypoint_pose = snapshot.motion_waypoints[snapshot.active_waypoint_index]
+    active_plan = snapshot.active_phase_motion_plan
+    if active_plan is not None and len(active_plan.active_waypoints) >= 2:
+        # Use the last waypoint as the active one (matches old behavior of index=1)
+        active_waypoint_pose = active_plan.active_waypoints[-1]
+    elif active_plan is not None and len(active_plan.active_waypoints) >= 1:
+        active_waypoint_pose = active_plan.active_waypoints[0]
 
     perception_ray_points: tuple[Pose3D, ...] = ()
     target_estimate_pose = None
@@ -68,18 +73,23 @@ def build_scene_runtime_debug_state(
             trajectory_path_provider=trajectory_path_provider,
         )
 
+    # Fallback waypoints come from active_phase_motion_plan if available
+    fallback_waypoints: tuple[Pose3D, ...] = ()
+    if active_plan is not None:
+        fallback_waypoints = active_plan.active_waypoints
+
     tracking_path_points = _resolve_motion_command_path_points(
         command=active_motion_command,
-        fallback_waypoints=snapshot.motion_waypoints,
+        fallback_waypoints=fallback_waypoints,
         trajectory_path_provider=trajectory_path_provider,
     )
 
     return SceneRuntimeDebugState(
         target_estimate_pose=target_estimate_pose,
-        pregrasp_pose=plan.pregrasp_pose if plan is not None else snapshot.pregrasp_pose,
-        grasp_pose=plan.grasp_pose if plan is not None else snapshot.grasp_pose,
-        pull_pose=plan.pull_pose if plan is not None else snapshot.pull_pose,
-        place_pose=plan.place_pose if plan is not None else snapshot.place_pose,
+        pregrasp_pose=plan.pregrasp_pose if plan is not None else None,
+        grasp_pose=plan.grasp_pose if plan is not None else None,
+        pull_pose=plan.pull_pose if plan is not None else None,
+        place_pose=plan.place_pose if plan is not None else None,
         active_target_pose=snapshot.target_tool_pose,
         active_waypoint_pose=active_waypoint_pose,
         perception_ray_points=perception_ray_points,
@@ -99,9 +109,15 @@ def _resolve_motion_command_path_points(
 ) -> tuple[Pose3D, ...]:
     if command is None:
         return _dedupe_pose_points(fallback_waypoints)
+    # Get waypoints and trajectory from phase_motion_plan if available
+    cmd_waypoints = fallback_waypoints
+    cmd_trajectory: JointTrajectory | None = None
+    if command.phase_motion_plan is not None:
+        cmd_waypoints = command.phase_motion_plan.active_waypoints or fallback_waypoints
+        cmd_trajectory = command.phase_motion_plan.joint_trajectory
     return _resolve_path_points(
-        waypoints=command.waypoint_poses or fallback_waypoints,
-        trajectory=command.joint_trajectory,
+        waypoints=cmd_waypoints,
+        trajectory=cmd_trajectory,
         trajectory_path_provider=trajectory_path_provider,
     )
 

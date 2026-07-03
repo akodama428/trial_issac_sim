@@ -92,7 +92,6 @@ class TrackingStepResult:
 class TrajectoryTrackingState:
     target_pose: Pose3D | None = None
     motion_waypoints: tuple[Pose3D, ...] = ()
-    snapshot_active_waypoint_index: int | None = None
     joint_trajectory: JointTrajectory | None = None
     active_phase_motion_plan: PhaseMotionPlan | None = None
     execution_phase_spec: ExecutionPhaseSpec | None = None

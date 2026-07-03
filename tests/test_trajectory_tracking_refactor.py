@@ -39,6 +39,17 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
         active_phase_motion_plan: PhaseMotionPlan | None = None,
     ) -> SceneSnapshot:
         pose = Pose3D(0.0, 0.0, 0.0, 180.0, 0.0, 0.0)
+        # motion_waypoints and motion_joint_trajectory are now carried via
+        # active_phase_motion_plan; if an explicit plan is given, use it.
+        # Otherwise build one if waypoints/trajectory are given.
+        plan = active_phase_motion_plan
+        if plan is None and (motion_waypoints or motion_joint_trajectory):
+            plan = PhaseMotionPlan(
+                phase_id=PhaseId.MOVING_TO_PREGRASP,
+                phase_goal_pose=target_tool_pose,
+                active_waypoints=motion_waypoints,
+                joint_trajectory=motion_joint_trajectory,
+            )
         return SceneSnapshot(
             phase=phase,
             active_camera="fixed_camera",
@@ -57,15 +68,8 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
             tray_pose=pose,
             robot_tool_pose=pose,
             target_tool_pose=target_tool_pose,
-            pregrasp_pose=None,
-            grasp_pose=None,
-            pull_pose=None,
-            place_pose=None,
             grasp_result_reason=None,
-            motion_waypoints=motion_waypoints,
-            active_waypoint_index=active_waypoint_index,
-            motion_joint_trajectory=motion_joint_trajectory,
-            active_phase_motion_plan=active_phase_motion_plan,
+            active_phase_motion_plan=plan,
         )
 
     def test_state_store_marks_home_pending_on_ready_cycle_change(self) -> None:

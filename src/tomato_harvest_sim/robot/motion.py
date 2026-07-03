@@ -73,8 +73,6 @@ class MoveItStyleMotionPublisher:
             command_name=command_name_for_phase(phase_motion_plan.phase_id),
             planner_name=planner_name,
             target_pose=phase_motion_plan.phase_goal_pose,
-            waypoint_poses=phase_motion_plan.active_waypoints,
-            joint_trajectory=phase_motion_plan.joint_trajectory,
             phase_motion_plan=phase_motion_plan,
         )
 

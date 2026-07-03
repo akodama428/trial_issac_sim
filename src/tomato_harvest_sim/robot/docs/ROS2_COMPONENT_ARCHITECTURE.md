@@ -78,12 +78,12 @@ flowchart TB
   　　  ① TomatoTargetEstimator
   　　  ② BehaviorPlanner
   　　  ③ MotionPlanner  ← MoveIt2 service
-  　　  ④ TrajectoryTrackingCoordinator
-  　　　  └ Ros2ActionTrajectoryPort"]
+  　　  ④ TrajectoryTrackingCoordinator"]
 
   CPP["⚙️  franka_ros2_control
   ─────────────────────────────────────
   C++ プロセス
+  ・MotionCommandExecutor  ← NEW: motion_command → 軌道実行
   ・JointTrajectoryController  panda_joint1–7
   ・IsaacSimHardwareInterface
   ・joint_state_broadcaster"]
@@ -93,14 +93,15 @@ flowchart TB
   外部プロセス
   GetMotionPlan service"]
 
-  SIM -->|"/tomato_harvest/scene_snapshot (JSON)\n/tf  ·  /camera/fixed/image_raw"| ROBOT
-  ROBOT -->|"/tomato_harvest/motion_command (JSON)\n/tomato_harvest/control\n/tomato_harvest/target_estimate"| SIM
+  SIM -->|"/tomato_harvest/scene_snapshot (JSON)\n/tf  ·  /camera/fixed/image_raw\n/tomato_harvest/control  (UI ボタン操作)"| ROBOT
+  ROBOT -->|"/tomato_harvest/motion_command (JSON)\n(gripper 開閉 → SIM · アーム軌道 → CPP)"| SIM
+  ROBOT -->|"/tomato_harvest/motion_command (JSON)\n(phase_motion_plan.joint_trajectory → 軌道実行)"| CPP
+  ROBOT -->|"/tomato_harvest/target_estimate"| SIM
 
   SIM -->|"/isaac_joint_states\n/clock"| CPP
   CPP -->|"/isaac_joint_commands"| SIM
 
   CPP -->|"/joint_states"| ROBOT
-  ROBOT -->|"FollowJointTrajectory Action\n/joint_trajectory_controller/follow_joint_trajectory"| CPP
 
   ROBOT -->|"GetMotionPlan Service"| MV
 ```
@@ -124,15 +125,17 @@ flowchart TB
     direction TB
     ROB_NODE["RobotNode\n(tomato_harvest_robot_node)"]
     RT["HarvestRuntime\n① EST → ② BP → ③ PLN → ④ Coordinator"]
-    PORT["Ros2ActionTrajectoryPort\nFollowJointTrajectory client"]
-    ROB_NODE --> RT --> PORT
+    ROB_NODE --> RT
   end
 
   subgraph PROC_CPP["⚙️ franka_ros2_control  （C++ プロセス）"]
     direction TB
+    SUB_MC_CPP["Subscriber\n/tomato_harvest/motion_command"]
+    MCE["MotionCommandExecutor\nNEW: motion_command JSON をパース\nphase_motion_plan.joint_trajectory → JTC へ送信"]
     JSB["joint_state_broadcaster\n→ /joint_states"]
     JTC["JointTrajectoryController\n軌道補間 · open_loop  panda_joint1–7"]
     HWI["IsaacSimHardwareInterface\n/isaac_joint_states → state  command → /isaac_joint_commands"]
+    SUB_MC_CPP --> MCE --> JTC
     JSB --> HWI
     JTC <--> HWI
   end
@@ -141,12 +144,12 @@ flowchart TB
     MV["GetMotionPlan service"]
   end
 
-  PROC_SIM -->|"/tomato_harvest/scene_snapshot · /tf · /camera"| PROC_ROBOT
-  PROC_ROBOT -->|"/tomato_harvest/motion_command · /control"| PROC_SIM
+  PROC_SIM -->|"/tomato_harvest/scene_snapshot · /tf · /camera\n/tomato_harvest/control  (UI ボタン)"| PROC_ROBOT
+  PROC_ROBOT -->|"/tomato_harvest/motion_command\n(gripper のみ)"| PROC_SIM
+  PROC_ROBOT -->|"/tomato_harvest/motion_command\n(arm trajectory)"| PROC_CPP
   PROC_SIM -->|"/isaac_joint_states · /clock"| PROC_CPP
   PROC_CPP -->|"/isaac_joint_commands"| PROC_SIM
   PROC_CPP -->|"/joint_states"| PROC_ROBOT
-  PORT -->|"FollowJointTrajectory Action"| PROC_CPP
   RT -->|"GetMotionPlan Service"| PROC_MV
 ```
 
@@ -159,8 +162,8 @@ flowchart TB
 | トピック名 | 型 | 方向 | 発行者 | 購読者 | 内容 |
 |---|---|---|---|---|---|
 | `/tomato_harvest/scene_snapshot` | `std_msgs/String` (JSON) | sim → robot | SimulatorNode | RobotNode | シーン状態 全フィールド |
-| `/tomato_harvest/control` | `std_msgs/String` | robot → sim | RobotNode (UI) | SimulatorNode | `start` / `stop` / `reset` |
-| `/tomato_harvest/motion_command` | `std_msgs/String` (JSON) | robot → sim | RobotNode | SimulatorNode | gripper 開閉・ウェイポイント |
+| `/tomato_harvest/control` | `std_msgs/String` | sim → sim · robot | IsaacControlPanelWindow (SIM プロセス UI) | SimulatorNode · RobotNode | `start` / `stop` / `reset` |
+| `/tomato_harvest/motion_command` | `std_msgs/String` (JSON) | robot → sim · cpp | RobotNode | SimulatorNode (gripper) · MotionCommandExecutor (arm trajectory) | gripper 開閉 / phase_motion_plan（arm 軌道を含む） |
 | `/tomato_harvest/target_estimate` | `std_msgs/String` (JSON) | robot → world | RobotNode | (監視用) | 検出トマト位置 |
 | `/camera/fixed/image_raw` | `sensor_msgs/Image` | sim → robot | SimulatorNode | RobotNode | 固定カメラ画像 |
 | `/tf` | `tf2_msgs/TFMessage` | sim → robot | SimulatorNode | RobotNode | base / camera / tomato TF |
@@ -173,7 +176,7 @@ flowchart TB
 
 | アクション名 | 型 | クライアント | サーバー | 内容 |
 |---|---|---|---|---|
-| `/joint_trajectory_controller/follow_joint_trajectory` | `control_msgs/FollowJointTrajectory` | Ros2ActionTrajectoryPort | JointTrajectoryController | アーム軌道追従 |
+| `/joint_trajectory_controller/follow_joint_trajectory` | `control_msgs/FollowJointTrajectory` | MotionCommandExecutor (CPP 内部) | JointTrajectoryController | アーム軌道追従（CPP 内部の内部 I/F）|
 
 ### Services
 
@@ -214,7 +217,7 @@ flowchart TB
     SCR -->|camera frame| PUB_CAM
     SCR -->|TF| PUB_TF
     SUB_CT -->|ControlCommand| SCR
-    SUB_MC -->|MotionCommand\n(gripper / waypoints)| SCR
+    SUB_MC -->|MotionCommand\n(gripper のみ)| SCR
   end
 ```
 
@@ -240,26 +243,24 @@ flowchart TB
     BP["BehaviorPlanner\nphase state machine\nPLANNING 以降の phase を管理"]
     PLN["MotionPlanner\nMoveIt2 GetMotionPlan 呼び出し"]
     EST["TomatoTargetEstimator\nカメラ + TF → TargetEstimate"]
-    CO["TrajectoryTrackingCoordinator\njoint_trajectory / gripper_closed を管理"]
-    PORT["Ros2ActionTrajectoryPort\nFollowJointTrajectory action client"]
+    CO["TrajectoryTrackingCoordinator\njoint_trajectory / gripper_closed を管理\n軌道は phase_motion_plan に埋め込み → motion_command で送信"]
 
     SUB_SS["Subscriber\n/tomato_harvest/scene_snapshot"]
     SUB_JS["Subscriber\n/joint_states"]
     SUB_TF["Subscriber\n/tf"]
     SUB_CAM["Subscriber\n/camera/fixed/image_raw"]
-    PUB_MC["Publisher\n/tomato_harvest/motion_command"]
+    PUB_MC["Publisher\n/tomato_harvest/motion_command\n(gripper → SIM · arm trajectory → CPP)"]
     PUB_TE["Publisher\n/tomato_harvest/target_estimate"]
 
     TIMER --> RT
     RT --> BP & PLN & EST & CO
-    CO --> PORT
     SUB_SS -->|SceneSnapshot| RT
     SUB_JS -->|JointState| CO
     SUB_TF -->|TfTree| PLN & EST
     SUB_CAM -->|CameraFrame| EST
-    BP -->|MotionCommand| PUB_MC
+    CO -->|MotionCommand\n(phase_motion_plan.joint_trajectory)| PUB_MC
+    BP -->|gripper / phase info| PUB_MC
     EST -->|TargetEstimate| PUB_TE
-    PORT -->|FollowJointTrajectory goal| A_JT["/joint_trajectory_controller\n/follow_joint_trajectory"]
     PLN -->|GetMotionPlan| MV["MoveIt2 move_group"]
   end
 ```
@@ -269,21 +270,29 @@ flowchart TB
 - カメラ・TF からトマト位置を推定（EST）
 - BehaviorPlanner で上位フェーズを決定（BP）
 - MotionPlanner で軌道を生成（PLN、MoveIt2 経由）
-- `TrajectoryTrackingCoordinator` で JTC へ軌道を送信（CO）
-- gripper コマンドを `/tomato_harvest/motion_command` で SimulatorNode へ送信
+- `TrajectoryTrackingCoordinator` で `phase_motion_plan.joint_trajectory` を管理
+- `/tomato_harvest/motion_command` に軌道 + gripper 情報を載せて送信
+  - gripper 開閉 → SimulatorNode が受け取り finger[7-8] を制御
+  - arm 軌道 (`phase_motion_plan.joint_trajectory`) → franka_ros2_control が受け取り実行
 
 ---
 
 ### franka_ros2_control (`franka_ros2_control` C++ ノード群)
 
-既存 `packages/franka_ros2_control` からの移設のみ。実装変更なし。
+既存 `packages/franka_ros2_control` から移設し、`MotionCommandExecutor` を追加。
 
 | コンポーネント | 型 | 役割 |
 |---|---|---|
 | `ros2_control_node` | C++ プロセス | controller_manager ホスト |
+| `MotionCommandExecutor` | **NEW** rclcpp Node | `/tomato_harvest/motion_command` を subscribe し `phase_motion_plan.joint_trajectory` を JTC へ送信 |
 | `IsaacSimHardwareInterface` | ros2_control HardwareInterface plugin | `/isaac_joint_states` → state, command → `/isaac_joint_commands` |
 | `JointTrajectoryController` | controller plugin | アーム軌道補間・open_loop 追従（panda_joint1–7） |
 | `joint_state_broadcaster` | controller plugin | `/joint_states` を publish |
+
+**`MotionCommandExecutor` の責務:**
+- `/tomato_harvest/motion_command` (JSON) を subscribe
+- `phase_motion_plan` フィールドが存在し `joint_trajectory` を持つ場合、JTC の FollowJointTrajectory action へ goal として送信
+- `phase_motion_plan` が null / `joint_trajectory` が null の場合は何もしない（gripper コマンドは SimulatorNode が処理）
 
 ---
 
@@ -310,14 +319,17 @@ sequenceDiagram
     LAUNCH->>ROB: robot_node.py 起動
     LAUNCH->>MV: move_group 起動
 
-    ROB-->>SIM: /tomato_harvest/control: "start"
+    Note over SIM: UI ボタン "Start" 押下
+    SIM-->>ROB: /tomato_harvest/control: "start"
+    SIM-->>SIM: /tomato_harvest/control: "start"
     Note over ROB,SIM: 通常動作ループ開始
     loop 毎 tick
         SIM->>ROB: /tomato_harvest/scene_snapshot
         ROB->>ROB: HarvestRuntime.step()
-        ROB->>SIM: /tomato_harvest/motion_command\n(gripper / phase update)
-        ROB->>CPP: /follow_joint_trajectory goal (arm)
-        CPP->>SIM: /isaac_joint_commands (arm)
+        ROB->>SIM: /tomato_harvest/motion_command\n(gripper のみ)
+        ROB->>CPP: /tomato_harvest/motion_command\n(phase_motion_plan.joint_trajectory)
+        Note over CPP: MotionCommandExecutor が受信\nJTC へ goal 送信 → 軌道補間
+        CPP->>SIM: /isaac_joint_commands (arm[0-6])
     end
 ```
 
@@ -330,8 +342,8 @@ sequenceDiagram
     participant SIM as SimulatorNode
     participant ROB as RobotNode
     participant CO as TrajectoryTrackingCoordinator
-    participant PORT as Ros2ActionTrajectoryPort
-    participant JTC as franka_ros2_control\n(JTC)
+    participant MCE as MotionCommandExecutor\n(franka_ros2_control)
+    participant JTC as JointTrajectoryController\n(franka_ros2_control)
     participant MV as MoveIt2
 
     Note over SIM: Isaac Sim 物理ステップ完了
@@ -343,18 +355,20 @@ sequenceDiagram
     ROB->>ROB: ② BP.step(estimate) → current_phase 確定
     ROB->>MV: ③ GetMotionPlan (task_phase=TARGET_FOUND 時のみ)
     MV-->>ROB: HarvestMotionPlan
-    ROB->>ROB: task_phase = PLANNING
-
-    ROB->>SIM: /tomato_harvest/motion_command\n(gripper_closed / phase info)
-    ROB->>SIM: /tomato_harvest/target_estimate
 
     Note over ROB,CO: ④ Coordinator.run_cycle()
-    CO->>PORT: send_goal (JointTrajectory, arm only)
-    PORT->>JTC: /follow_joint_trajectory goal
+    CO->>CO: phase_motion_plan に joint_trajectory を格納
+
+    ROB->>SIM: /tomato_harvest/motion_command\n(gripper_closed)
+    ROB->>MCE: /tomato_harvest/motion_command\n(phase_motion_plan.joint_trajectory)
+    ROB->>SIM: /tomato_harvest/target_estimate
+
+    Note over MCE: joint_trajectory を抽出
+    MCE->>JTC: FollowJointTrajectory goal\n(/joint_trajectory_controller/follow_joint_trajectory)
     JTC->>JTC: 軌道補間
     JTC->>SIM: /isaac_joint_commands (arm[0-6])
 
-    Note over SIM: motion_command 処理
+    Note over SIM: motion_command 処理（gripper のみ）
     SIM->>SIM: apply_motion_command()\ngripper → IsaacFrankaDriver.set_joint_positions(finger[7-8])
     SIM->>SIM: IsaacJointRos2Bridge → apply_pending_command(arm[0-6])
     Note over SIM: Isaac Sim 次フィズステップへ
@@ -378,7 +392,8 @@ sequenceDiagram
 | `api/bridge.py` `Ros2LoopbackBridge` | **廃止** | topic/action に直接分解 |
 | `api/bridge.py` `InMemoryRos2Bridge` | テスト用として残存 | ユニットテスト専用 |
 | `api/contracts.py` | `tomato_harvest_msgs/` (共有型) に分離 推奨 | JSON シリアライズは当面継続 |
-| `packages/franka_ros2_control/` | **`src/franka_ros2_control/`** に移設 | 実装変更なし |
+| `packages/franka_ros2_control/` | **`src/franka_ros2_control/`** に移設 | `MotionCommandExecutor` を新規追加（`/tomato_harvest/motion_command` subscriber） |
+| `robot/trajectory_tracking/ros2_action_trajectory_port.py` | **廃止** | `franka_ros2_control` 側が直接 `motion_command` を受信するため不要 |
 
 ---
 
@@ -387,6 +402,8 @@ sequenceDiagram
 | 項目 | 現行 | 目標 |
 |---|---|---|
 | simulator と robot の同期 | 同一プロセス内 Python 関数呼び出し | ROS2 topic の非同期通信（1 tick ラグあり） |
-| gripper 制御 | `allow_direct_drive=False` による no-op（未解決） | SimulatorNode が `/tomato_harvest/motion_command` で直接受け取り `finger[7-8]` を制御 |
+| gripper 制御 | `allow_direct_drive=False` による no-op（未解決） | SimulatorNode が `/tomato_harvest/motion_command` で受け取り `finger[7-8]` を制御 |
+| アーム軌道送信 | `Ros2ActionTrajectoryPort` → FollowJointTrajectory action | `motion_command` に `phase_motion_plan.joint_trajectory` を埋め込み `MotionCommandExecutor` が受信・実行 |
+| `Ros2ActionTrajectoryPort` | RobotNode 内に存在 | **廃止** — `franka_ros2_control` 側が直接 motion_command を受信するため不要 |
 | シーン snapshot の輸送 | JSON-over-String（現行の bridge と同じ） | 当面継続、将来は `tomato_harvest_msgs/SceneSnapshot` カスタムメッセージに移行 |
 | テスト | `InMemoryRos2Bridge` を使うユニットテスト群 | 変更なし（robot パッケージ内テストとして継続） |

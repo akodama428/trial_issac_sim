@@ -314,7 +314,7 @@ class BehaviorPlanner:
             f"[Replan] Active motion replan requested. phase={phase.value} reason={reason}",
             (
                 f"[Replan] Published {command.command_name} using planner={motion_plan.planner_name} "
-                f"trajectory={'yes' if command.joint_trajectory is not None else 'no'}"
+                f"trajectory={'yes' if (command.phase_motion_plan is not None and command.phase_motion_plan.joint_trajectory is not None) else 'no'}"
             ),
         )
 

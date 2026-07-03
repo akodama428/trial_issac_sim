@@ -7,6 +7,7 @@ Publishes:
 Subscribes:
   /isaac_joint_commands (sensor_msgs/JointState) — position + velocity targets from C++
     IsaacSimHardwareInterface, applied to Isaac Sim via IsaacFrankaDriver.
+    Accepts arm[0-6] + finger[7-8] (panda_finger_joint1, panda_finger_joint2).
 
 Lifecycle: call step() once per simulation tick so callbacks are processed and
 state is published; call close() on shutdown.
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 class IsaacJointRos2Bridge:
     GRIPPER_OPEN_RAD = 0.04
     GRIPPER_CLOSED_RAD = 0.0
+    FINGER_JOINT_NAMES = ("panda_finger_joint1", "panda_finger_joint2")
 
     def __init__(
         self,
@@ -118,11 +120,12 @@ class IsaacJointRos2Bridge:
         positions_list = list(getattr(msg, "position", []))
         velocities_list = list(getattr(msg, "velocity", []))
 
-        n = len(self._driver.ARM_JOINT_NAMES)
+        all_joint_names = list(self._driver.ARM_JOINT_NAMES) + list(self.FINGER_JOINT_NAMES)
+        n = len(all_joint_names)
         pos = np.zeros(n, dtype=float)
         vel = np.zeros(n, dtype=float)
 
-        for i, joint_name in enumerate(self._driver.ARM_JOINT_NAMES):
+        for i, joint_name in enumerate(all_joint_names):
             if joint_name in names:
                 j = names.index(joint_name)
                 if j < len(positions_list):
@@ -145,10 +148,15 @@ class IsaacJointRos2Bridge:
         if current is None:
             return
 
+        n_arm = len(self._driver.ARM_JOINT_NAMES)
+        n_finger = len(self.FINGER_JOINT_NAMES)
         full_positions = np.asarray(current, dtype=float).copy()
-        full_positions[: len(positions)] = positions
+        # arm[0-6]
+        full_positions[:n_arm] = positions[:n_arm]
+        # finger[7-8] (インデックスはn_arm以降)
+        full_positions[n_arm:n_arm + n_finger] = positions[n_arm:n_arm + n_finger]
         full_velocities = np.zeros_like(full_positions)
-        full_velocities[: len(velocities)] = velocities
+        full_velocities[:n_arm] = velocities[:n_arm]
 
         self._driver.set_joint_velocity_targets_with_debug(
             positions=full_positions,

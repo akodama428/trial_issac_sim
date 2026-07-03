@@ -34,8 +34,7 @@ class Ros2TransportContractTest(unittest.TestCase):
         self.assertEqual(restored.phase, snapshot.phase)
         self.assertEqual(restored.active_camera, snapshot.active_camera)
         self.assertEqual(restored.tomato_pose, snapshot.tomato_pose)
-        self.assertEqual(restored.motion_waypoints, snapshot.motion_waypoints)
-        self.assertEqual(restored.motion_joint_trajectory, snapshot.motion_joint_trajectory)
+        self.assertEqual(restored.active_phase_motion_plan, snapshot.active_phase_motion_plan)
 
     def test_create_bridge_honors_explicit_in_memory_override(self) -> None:
         bridge = create_bridge(transport="in_memory")

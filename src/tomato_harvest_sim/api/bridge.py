@@ -362,7 +362,10 @@ class Ros2LoopbackBridge:
         metadata_message.data = json.dumps(_motion_command_to_dict(command, include_trajectory=False))
         self._motion_metadata_publisher.publish(metadata_message)
 
-        if command.joint_trajectory is None:
+        # Get trajectory from phase_motion_plan if available
+        joint_trajectory = command.phase_motion_plan.joint_trajectory if command.phase_motion_plan is not None else None
+
+        if joint_trajectory is None:
             command_message = String()
             command_message.data = json.dumps(_motion_command_to_dict(command, include_trajectory=True))
             self._motion_command_publisher.publish(command_message)
@@ -377,8 +380,8 @@ class Ros2LoopbackBridge:
             return
 
         goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = list(command.joint_trajectory.joint_names)
-        for point in command.joint_trajectory.points:
+        goal.trajectory.joint_names = list(joint_trajectory.joint_names)
+        for point in joint_trajectory.points:
             trajectory_point = _ros_trajectory_point_from_contract(point)
             goal.trajectory.points.append(trajectory_point)
         future = self._trajectory_action_client.send_goal_async(goal)
@@ -449,14 +452,22 @@ class Ros2LoopbackBridge:
             planner_name="ros2_topic_action_fallback",
         )
         trajectory = _joint_trajectory_from_ros_msg(getattr(goal_handle.request, "trajectory", None))
+        # Embed the trajectory into phase_motion_plan if metadata has one, otherwise ignore
+        phase_motion_plan = metadata.phase_motion_plan
+        if phase_motion_plan is not None and trajectory is not None:
+            from tomato_harvest_sim.api.contracts import PhaseMotionPlan
+            phase_motion_plan = PhaseMotionPlan(
+                phase_id=phase_motion_plan.phase_id,
+                phase_goal_pose=phase_motion_plan.phase_goal_pose,
+                active_waypoints=phase_motion_plan.active_waypoints,
+                joint_trajectory=trajectory,
+            )
         self.state.pending_motion_command = MotionCommand(
             command_name=metadata.command_name,
             planner_name=metadata.planner_name,
             target_pose=metadata.target_pose,
             gripper_closed=metadata.gripper_closed,
-            waypoint_poses=metadata.waypoint_poses,
-            joint_trajectory=trajectory,
-            phase_motion_plan=metadata.phase_motion_plan,
+            phase_motion_plan=phase_motion_plan,
         )
         goal_handle.succeed()
         result = FollowJointTrajectory.Result()
@@ -501,15 +512,17 @@ def _camera_spec_from_snapshot(snapshot: SceneSnapshot, camera_name: str) -> tup
 
 
 def _joint_state_from_snapshot(snapshot: SceneSnapshot | None) -> JointStateSnapshot:
-    if snapshot is None or snapshot.motion_joint_trajectory is None or not snapshot.motion_joint_trajectory.points:
+    # motion_joint_trajectory is no longer on SceneSnapshot; use default positions.
+    plan = snapshot.active_phase_motion_plan if snapshot is not None else None
+    if plan is None or plan.joint_trajectory is None or not plan.joint_trajectory.points:
         return JointStateSnapshot(
             joint_names=DEFAULT_JOINT_NAMES,
             positions_rad=DEFAULT_JOINT_POSITIONS_RAD,
         )
 
-    positions = snapshot.motion_joint_trajectory.points[-1].positions_rad
+    positions = plan.joint_trajectory.points[-1].positions_rad
     return JointStateSnapshot(
-        joint_names=snapshot.motion_joint_trajectory.joint_names,
+        joint_names=plan.joint_trajectory.joint_names,
         positions_rad=positions,
     )
 
@@ -721,25 +734,16 @@ def _motion_command_to_dict(command: MotionCommand, *, include_trajectory: bool)
         "planner_name": command.planner_name,
         "target_pose": _pose_to_dict(command.target_pose),
         "gripper_closed": command.gripper_closed,
-        "waypoint_poses": [_pose_to_dict(pose) for pose in command.waypoint_poses],
-        "joint_trajectory": _trajectory_to_dict(command.joint_trajectory) if include_trajectory else None,
         "phase_motion_plan": _phase_motion_plan_to_dict(command.phase_motion_plan),
     }
 
 
 def _motion_command_from_dict(data: dict[str, object]) -> MotionCommand:
-    waypoint_dicts = data.get("waypoint_poses", [])
     return MotionCommand(
         command_name=str(data["command_name"]),
         planner_name=str(data["planner_name"]),
         target_pose=_pose_from_dict(data.get("target_pose")),
         gripper_closed=bool(data["gripper_closed"]) if data.get("gripper_closed") is not None else None,
-        waypoint_poses=tuple(
-            pose
-            for pose in (_pose_from_dict(item if isinstance(item, dict) else None) for item in waypoint_dicts)
-            if pose is not None
-        ),
-        joint_trajectory=_trajectory_from_dict(data.get("joint_trajectory") if isinstance(data.get("joint_trajectory"), dict) else None),
         phase_motion_plan=_phase_motion_plan_from_dict(
             data.get("phase_motion_plan") if isinstance(data.get("phase_motion_plan"), dict) else None
         ),
@@ -774,20 +778,12 @@ def _scene_snapshot_to_dict(snapshot: SceneSnapshot) -> dict[str, object]:
         "tray_pose": _pose_to_dict(snapshot.tray_pose),
         "robot_tool_pose": _pose_to_dict(snapshot.robot_tool_pose),
         "target_tool_pose": _pose_to_dict(snapshot.target_tool_pose),
-        "pregrasp_pose": _pose_to_dict(snapshot.pregrasp_pose),
-        "grasp_pose": _pose_to_dict(snapshot.grasp_pose),
-        "pull_pose": _pose_to_dict(snapshot.pull_pose),
-        "place_pose": _pose_to_dict(snapshot.place_pose),
         "grasp_result_reason": snapshot.grasp_result_reason,
-        "motion_waypoints": [_pose_to_dict(pose) for pose in snapshot.motion_waypoints],
-        "active_waypoint_index": snapshot.active_waypoint_index,
-        "motion_joint_trajectory": _trajectory_to_dict(snapshot.motion_joint_trajectory),
         "active_phase_motion_plan": _phase_motion_plan_to_dict(snapshot.active_phase_motion_plan),
     }
 
 
 def _scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
-    waypoint_dicts = data.get("motion_waypoints", [])
     return SceneSnapshot(
         phase=ScenePhase(str(data["phase"])),
         active_camera=str(data["active_camera"]),
@@ -806,20 +802,7 @@ def _scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
         tray_pose=_pose_from_dict(data.get("tray_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         robot_tool_pose=_pose_from_dict(data.get("robot_tool_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
         target_tool_pose=_pose_from_dict(data.get("target_tool_pose")),
-        pregrasp_pose=_pose_from_dict(data.get("pregrasp_pose")),
-        grasp_pose=_pose_from_dict(data.get("grasp_pose")),
-        pull_pose=_pose_from_dict(data.get("pull_pose")),
-        place_pose=_pose_from_dict(data.get("place_pose")),
         grasp_result_reason=str(data["grasp_result_reason"]) if data.get("grasp_result_reason") is not None else None,
-        motion_waypoints=tuple(
-            pose
-            for pose in (_pose_from_dict(item if isinstance(item, dict) else None) for item in waypoint_dicts)
-            if pose is not None
-        ),
-        active_waypoint_index=int(data["active_waypoint_index"]) if data.get("active_waypoint_index") is not None else None,
-        motion_joint_trajectory=_trajectory_from_dict(
-            data.get("motion_joint_trajectory") if isinstance(data.get("motion_joint_trajectory"), dict) else None
-        ),
         active_phase_motion_plan=_phase_motion_plan_from_dict(
             data.get("active_phase_motion_plan") if isinstance(data.get("active_phase_motion_plan"), dict) else None
         ),

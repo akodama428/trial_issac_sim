@@ -30,8 +30,8 @@ class ExecutionStateStore:
         active_phase_motion_plan = snapshot.active_phase_motion_plan
         active_spec = self._build_execution_phase_spec(active_phase_motion_plan)
         active_target_pose = snapshot.target_tool_pose
-        active_waypoints = snapshot.motion_waypoints
-        active_joint_trajectory = snapshot.motion_joint_trajectory
+        active_waypoints: tuple[Pose3D, ...] = ()
+        active_joint_trajectory: JointTrajectory | None = None
         if active_spec is not None:
             active_target_pose = active_spec.motion.phase_goal_pose
             active_waypoints = active_spec.motion.active_waypoints
@@ -62,7 +62,7 @@ class ExecutionStateStore:
                 self.clear_joint_trajectory_state(clear_raw=False)
             state.target_pose = active_target_pose
             state.motion_waypoints = active_waypoints
-            state.snapshot_active_waypoint_index = snapshot.active_waypoint_index
+            state.snapshot_active_waypoint_index = None
             state.joint_trajectory = active_joint_trajectory
             state.active_phase_motion_plan = active_phase_motion_plan
             state.execution_phase_spec = active_spec
@@ -142,7 +142,7 @@ class ExecutionStateStore:
                 plan.joint_trajectory,
                 plan,
             )
-        return (snapshot.target_tool_pose, snapshot.motion_waypoints, snapshot.motion_joint_trajectory, None)
+        return (snapshot.target_tool_pose, (), None, None)
 
     def _build_execution_phase_spec(self, plan: PhaseMotionPlan | None) -> ExecutionPhaseSpec | None:
         if plan is None:
