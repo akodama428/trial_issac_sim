@@ -43,7 +43,7 @@
     <child link="panda_link4"/>
     <origin xyz="0.0825 0 0" rpy="1.5707963267948966 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-3.0718" upper="-0.0698" effort="87" velocity="2.1750"/>
+    <limit lower="-3.0718" upper="-0.069" effort="87" velocity="2.1750"/>
   </joint>
   <joint name="panda_joint5" type="revolute">
     <parent link="panda_link4"/>

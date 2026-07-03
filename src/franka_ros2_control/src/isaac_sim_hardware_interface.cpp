@@ -2,7 +2,9 @@
 #include "franka_ros2_control/isaac_sim_hardware_interface.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cmath>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "pluginlib/class_list_macros.hpp"
@@ -159,6 +161,22 @@ hardware_interface::return_type IsaacSimHardwareInterface::read(
 hardware_interface::return_type IsaacSimHardwareInterface::write(
   const rclcpp::Time & time, const rclcpp::Duration & /*period*/)
 {
+  // Isaac Sim が接続して最初の joint_state を送るまでは命令を送らない。
+  // 接続前に [0,0,...,0] を送ると JTC が "ゼロでホールド" し、
+  // 接続後に Isaac Sim の実位置との不一致で起動時の意図しない動きが生じるため。
+  if (!state_received_) {
+    return hardware_interface::return_type::OK;
+  }
+
+  // Franka Panda URDF 関節位置上下限 (rad)。URDF の <limit> と一致させること。
+  // panda_joint4 の upper は URDF 変更に合わせて -0.069 にしている。
+  static constexpr std::array<double, 7> LOWER = {
+    -2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973
+  };
+  static constexpr std::array<double, 7> UPPER = {
+     2.8973,  1.7628,  2.8973, -0.069,   2.8973,  3.7525,  2.8973
+  };
+
   auto msg = sensor_msgs::msg::JointState();
   msg.header.stamp = time;
   msg.name.reserve(info_.joints.size());
@@ -167,9 +185,15 @@ hardware_interface::return_type IsaacSimHardwareInterface::write(
 
   for (std::size_t i = 0; i < info_.joints.size(); ++i) {
     msg.name.push_back(info_.joints[i].name);
-    const double pos = std::isnan(position_command_[i])
+    double pos = std::isnan(position_command_[i])
       ? position_state_[i]
       : position_command_[i];
+    // URDF 境界外の命令を Isaac Sim へ送らない。
+    // JTC が起動時に「ゼロでホールド」を命令しても panda_joint4=0 は
+    // 可動域外 [-3.0718, -0.069] であるため、ここでクランプして防ぐ。
+    if (i < LOWER.size()) {
+      pos = std::clamp(pos, LOWER[i], UPPER[i]);
+    }
     msg.position.push_back(pos);
     msg.velocity.push_back(velocity_command_[i]);
   }
@@ -198,6 +222,17 @@ void IsaacSimHardwareInterface::on_joint_state(
         break;
       }
     }
+  }
+
+  if (!state_received_) {
+    // Isaac Sim との初回接続: 実際の関節位置で position_command_ をリシード。
+    // JTC が 0 を "ホールド位置" として保持していた場合でも、
+    // 次の write() は実際の位置を送るため起動時の意図しない動きを防ぐ。
+    position_command_ = position_state_;
+    velocity_command_.assign(n_joints, 0.0);
+    RCLCPP_INFO(
+      rclcpp::get_logger("IsaacSimHardwareInterface"),
+      "Initial joint state received from Isaac Sim. Reseeding command positions.");
   }
   state_received_ = true;
 }

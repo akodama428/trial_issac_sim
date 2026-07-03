@@ -34,9 +34,12 @@ joint_trajectory_controller:
     # Smooth interpolation between waypoints.
     interpolation_method: splines
 
-    # In simulation, use open-loop control: the JTC tracks trajectory internally
-    # rather than comparing commanded vs actual hardware positions.
-    # This prevents path-tolerance aborts caused by PD-controller lag in Isaac Sim.
+    # open_loop_control: true を使う理由:
+    # closed-loop (false) では JTC が「ゼロでホールド」へ速度命令を送り続けるため、
+    # Isaac Sim の物理エンジンが panda_joint4 を 0 まで動かしてしまう（可動域外）。
+    # open_loop_control: true ではポジション命令のみ送るため、Isaac Sim の USD
+    # 関節限界クランプが働き、起動時の意図しない動きが最小になる。
+    # write() 側でも URDF 境界クランプを追加してあるため多重の安全策がある。
     open_loop_control: true
     allow_partial_joints_goal: false
     allow_integration_in_goal_trajectories: true

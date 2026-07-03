@@ -93,6 +93,12 @@ class IsaacJointRos2Bridge:
         self._clock_pub.publish(msg)
 
     def _publish_state(self) -> None:
+        # --simulator-only モードでは TrajectoryTrackingCoordinator を経由しないため
+        # articulation が未初期化のまま残る。ここで初期化することでデッドロックを防ぐ。
+        # (hardware interface は joint_state 受信まで commands を送らず、
+        #  driver は commands 受信まで joint_state を返さない、という循環依存を断ち切る)
+        if not self._driver.initialize_if_needed():
+            return
         positions = self._driver.current_joint_positions()
         if positions is None:
             return
