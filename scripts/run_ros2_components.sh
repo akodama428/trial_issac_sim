@@ -349,14 +349,9 @@ fi
 if [[ "${USE_ISAAC}" == "true" ]]; then
   log "--- Isaac Sim 起動 (SimulatorNode 統合モード) ---"
   log "  オプション: ${HEADLESS_ARGS[*]:-（なし）}"
-  log "  ※ --simulator-only を指定: HarvestRuntime はこのプロセスに含めない"
-
   PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  TOMATO_HARVEST_TRAJECTORY_BACKEND=ros2_control \
   "${REPO_ROOT}/python.sh" \
     "${REPO_ROOT}/scripts/run_harvest_viewer.py" \
-    --backend ros2_control \
-    --simulator-only \
     ${HEADLESS_ARGS[@]+"${HEADLESS_ARGS[@]}"}
 else
   log "--- simulator_node 起動（toy physics モード）---"

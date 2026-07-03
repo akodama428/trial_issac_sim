@@ -19,11 +19,9 @@ class IsaacViewerConfigTest(unittest.TestCase):
         args = parse_args([])
 
         self.assertFalse(args.headless)
-        self.assertFalse(args.auto_start)
         self.assertEqual(args.headless_steps, 64)
         self.assertEqual(args.camera_view, "fixed")
-        self.assertEqual(args.timeout_seconds, 0.0)
-        self.assertEqual(args.transport, "in_memory")
+        self.assertEqual(args.grasp_mode, "success")
 
     def test_build_appframework_argv_includes_viewport_extensions(self) -> None:
         argv = build_appframework_argv(headless=False)

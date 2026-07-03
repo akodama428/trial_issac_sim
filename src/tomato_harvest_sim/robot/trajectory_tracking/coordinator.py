@@ -12,7 +12,6 @@ from tomato_harvest_sim.api.trajectory_execution import (
     TrajectoryExecutionRequest,
 )
 from tomato_harvest_sim.api.contracts import JointStateSnapshot, JointTrajectory, Pose3D, SceneSnapshot
-from tomato_harvest_sim.robot.ros2_control import JointTrajectoryControllerBridge
 from tomato_harvest_sim.robot.api.trajectory_tracking import (
     FrankaExecutionDriverProtocol,
     FrankaMotionProgress,
@@ -74,7 +73,7 @@ class TrajectoryTrackingCoordinator:
         *,
         driver: FrankaExecutionDriverProtocol,
         hardware_control_port: HardwareControlPort,
-        trajectory_execution_port: TrajectoryExecutionPort | None = None,
+        trajectory_execution_port: TrajectoryExecutionPort,
         position_tolerance_m: float = 0.03,
         max_joint_step_rad: float = 0.05,
         max_gripper_step_rad: float = 0.01,
@@ -84,10 +83,7 @@ class TrajectoryTrackingCoordinator:
         self._driver = driver
         self._hardware_control_port = hardware_control_port
         self._allow_direct_drive = allow_direct_drive
-        resolved_trajectory_execution_port = trajectory_execution_port or JointTrajectoryControllerBridge(
-            hardware=self._hardware_control_port
-        )
-        self._action_client = FollowJointTrajectoryActionClient(port=resolved_trajectory_execution_port)
+        self._action_client = FollowJointTrajectoryActionClient(port=trajectory_execution_port)
         self._execution_monitor = ExecutionMonitor()
         self._position_tolerance_m = position_tolerance_m
         self._joint_tolerance_rad = joint_tolerance_rad

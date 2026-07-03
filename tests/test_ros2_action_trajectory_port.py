@@ -117,6 +117,7 @@ def _make_port() -> "object":
     port._result_future = None
     port._server_ready = True
     port._initialized_here = False
+    port._executor = MagicMock()
 
     # Stub _build_goal to avoid importing builtin_interfaces (not available outside ROS).
     port._build_goal = lambda request: MagicMock()
