@@ -89,4 +89,3 @@ class MoveItStyleMotionPublisher:
             planner_name=plan.planner_name,
             gripper_closed=False,
         )
-

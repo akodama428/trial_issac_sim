@@ -8,9 +8,10 @@
 #   2. franka_ros2_control (controller_manager + JTC + JSB) を background 起動
 #   3. controller_manager の起動待機とコントローラーのスポウン
 #   4. MoveIt2 move_group を background 起動（--moveit 指定時のみ）
-#   5. tomato_harvest_robot_node を background 起動
-#   6. tomato_harvest_simulator_node（または Isaac Sim）を foreground 起動
-#   7. 終了時に全 background プロセスをクリーンアップ
+#   5. tomato_harvest_robot の Python ノード群を background 起動
+#   6. franka_ros2_control の motion_command_executor_node を background 起動
+#   7. tomato_harvest_simulator_node（または Isaac Sim）を foreground 起動
+#   8. 終了時に全 background プロセスをクリーンアップ
 #
 # 使い方:
 #   ./scripts/run_ros2_components.sh [オプション]
@@ -25,7 +26,7 @@
 #   --ros-distro <distro>      ROS2 ディストリビューション（デフォルト: 自動検出）
 #   --ws-dir <path>            colcon ワークスペースのパス（デフォルト: /tmp/franka_ros2_ws）
 #   --controller-log <path>    C++ コントローラのログ出力先（デフォルト: /tmp/franka_controller.log）
-#   --robot-log <path>         robot_node のログ出力先（デフォルト: /tmp/robot_node.log）
+#   --robot-log <path>         robot ノード群のログ出力先（デフォルト: /tmp/robot_node.log）
 
 set -euo pipefail
 
@@ -165,10 +166,18 @@ build_cpp_package() {
 }
 
 needs_build() {
-  [[ "${REBUILD}" == "true" ]] \
-    || [[ ! -f "${WS_SETUP}" ]] \
-    || [[ "${PKG_SRC}/src/isaac_sim_hardware_interface.cpp" \
-          -nt "${WS_DIR}/build/franka_ros2_control/libfranka_ros2_control.so" ]] 2>/dev/null
+  if [[ "${REBUILD}" == "true" ]] || [[ ! -f "${WS_SETUP}" ]]; then
+    return 0
+  fi
+
+  if find "${PKG_SRC}" -type f \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.py' -o -name '*.yaml' -o -name '*.urdf' -o \
+       -name '*.xml' -o -name 'CMakeLists.txt' -o -name 'package.xml' \) \
+    -newer "${WS_SETUP}" -print -quit | grep -q .; then
+    return 0
+  fi
+
+  return 1
 }
 
 if needs_build; then
@@ -207,6 +216,7 @@ cleanup() {
   # ros2_control / spawner の残留プロセスも念のため終了
   pkill -f "ros2_control_node" 2>/dev/null || true
   pkill -f "spawner joint_" 2>/dev/null || true
+  pkill -f "motion_command_executor_node" 2>/dev/null || true
   log "クリーンアップ完了"
 }
 trap cleanup EXIT INT TERM
@@ -214,6 +224,7 @@ trap cleanup EXIT INT TERM
 log "--- 既存プロセスのクリーンアップ ---"
 pkill -f "ros2_control_node" 2>/dev/null || true
 pkill -f "tomato_harvest_sim\." 2>/dev/null || true  # 全 tomato_harvest_sim ノード
+pkill -f "motion_command_executor_node" 2>/dev/null || true
 pkill -f "run_harvest_viewer" 2>/dev/null || true
 pkill -f "moveit_ros_move_group" 2>/dev/null || true
 pkill -f "robot_state_publisher" 2>/dev/null || true
@@ -331,21 +342,23 @@ start_bg "trajectory_planner_node" \
 
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
 start_bg "trajectory_monitor_node" \
-  python3 -m tomato_harvest_sim.robot.trajectory_monitor_node \
+  python3 -m tomato_harvest_sim.robot.execute_manager.trajectory_monitor \
   >> "${ROBOT_LOG}" 2>&1
 
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
 start_bg "motion_command_node" \
-  python3 -m tomato_harvest_sim.robot.motion_command_node \
-  >> "${ROBOT_LOG}" 2>&1
-
-PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-start_bg "motion_command_executor_node" \
-  python3 -m tomato_harvest_sim.robot.motion_command_executor_node \
+  python3 -m tomato_harvest_sim.robot.execute_manager.motion_command \
   >> "${ROBOT_LOG}" 2>&1
 
 # ---------------------------------------------------------------------------- #
-# 6. auto-start コマンド送信タスク（background）
+# 6. franka_ros2_control の motion_command_executor_node 起動（background）
+# ---------------------------------------------------------------------------- #
+start_bg "motion_command_executor_node" \
+  ros2 run franka_ros2_control motion_command_executor_node \
+  >> "${CONTROLLER_LOG}" 2>&1
+
+# ---------------------------------------------------------------------------- #
+# 7. auto-start コマンド送信タスク（background）
 # ---------------------------------------------------------------------------- #
 if [[ "${AUTO_START}" == "true" ]]; then
   # --moveit 使用時は move_group 起動待機（最大60秒）があるため、
@@ -370,7 +383,7 @@ if [[ "${AUTO_START}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------- #
-# 7. simulator_node 起動（foreground）
+# 8. simulator_node 起動（foreground）
 # ---------------------------------------------------------------------------- #
 if [[ "${USE_ISAAC}" == "true" ]]; then
   log "--- Isaac Sim 起動 (SimulatorNode 統合モード) ---"

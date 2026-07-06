@@ -142,7 +142,7 @@ footer { color: var(--fg-muted); font-size: 0.8rem; margin-top: 60px; }
 </li>
 <li><a href="#ch5">tomato_harvest_robot（ROS2ノード群）</a>
   <ol>
-    <li><a href="#ch5-1">6ノードの入出力一覧</a></li>
+    <li><a href="#ch5-1">5ノードの入出力一覧</a></li>
     <li><a href="#ch5-2">HarvestTaskPhase 状態遷移</a></li>
     <li><a href="#ch5-3">motion_command 生成仕様</a></li>
     <li><a href="#ch5-4">trajectory_planner_node と MoveIt2</a></li>
@@ -184,7 +184,7 @@ footer { color: var(--fg-muted); font-size: 0.8rem; margin-top: 60px; }
 </p>
 <div class="note">
 <b>本書全体を通じての注意（2026-07-07 更新）</b>
-「単一プロセス構成（<code>robot_node.py</code> / <code>HarvestRuntime</code>）→ 6ノードの ROS2 マルチノード構成」への移行は完了した。旧構成の残骸（<code>api/</code>・<code>app/</code>・<code>robot_node.py</code>・<code>runtime.py</code>・<code>robot/trajectory_tracking/</code>）は削除済み。さらに 2026-07-07 に robot/ 配下をコンポーネント毎のサブパッケージへ再編し（<a href="#ch5">5章</a>）、各サブパッケージが自前の <code>tests/</code> を持つ構成になった。設計文書 <code>robot/docs/</code> は本書へ統合して削除した。本書は<b>実装コードを一次情報として</b>整理している。
+「単一プロセス構成（<code>robot_node.py</code> / <code>HarvestRuntime</code>）→ マルチノード構成」への移行は完了した。旧構成の残骸（<code>api/</code>・<code>app/</code>・<code>robot_node.py</code>・<code>runtime.py</code>・<code>robot/trajectory_tracking/</code>）は削除済み。さらに 2026-07-07 に robot/ 配下をコンポーネント毎のサブパッケージへ再編し（<a href="#ch5">5章</a>）、各サブパッケージが自前の <code>tests/</code> を持つ構成になった。加えて同日に <code>motion_command_executor_node</code> は Python パッケージから <code>src/franka_ros2_control/</code> の C++ ノードへ移設された。本書は<b>実装コードを一次情報として</b>整理している。
 </div>
 
 </section>
@@ -206,9 +206,9 @@ footer { color: var(--fg-muted); font-size: 0.8rem; margin-top: 60px; }
 <h3>ディレクトリマップ</h3>
 <div class="pkgmap">
 <div><code>src/tomato_harvest_sim/simulator/</code><br>Isaac Sim プロセス側。シーン構築・物理判定・UI パネル。</div>
-<div><code>src/tomato_harvest_sim/robot/</code><br>ロボット側 ROS2 ノード群。コンポーネント毎のサブパッケージ構成で、各パッケージが <code>node.py</code>（ノード実装）と <code>tests/</code>（単体テスト）を内包する。</div>
+<div><code>src/tomato_harvest_sim/robot/</code><br>ロボット側 ROS2 Python ノード群。コンポーネント毎のサブパッケージ構成で、各パッケージが <code>node.py</code>（ノード実装）と <code>tests/</code>（単体テスト）を内包する。</div>
 <div><code>src/tomato_harvest_sim/msg/</code><br>simulator / robot 共通のメッセージ型・topic 定数・シリアライズ関数。</div>
-<div><code>src/franka_ros2_control/</code><br>C++ の ros2_control ハードウェアインタフェース（アーム制御のみ）。</div>
+<div><code>src/franka_ros2_control/</code><br>C++ の ros2_control ハードウェアインタフェース（アーム制御のみ）と <code>motion_command_executor_node</code>。</div>
 <div><code>scripts/</code><br>起動スクリプト（<code>run_ros2_components.sh</code> 等）、デバッグ用可視化。</div>
 <div><code>docker/</code><br>本番用 Dockerfile。</div>
 <div><code>config/</code><br><code>scene.yaml</code> など静的シーン構成。</div>
@@ -228,15 +228,15 @@ flowchart TB
   subgraph SIM["tomato_harvest_simulator （Isaac Simプロセス・Python）"]
     SIMNODE["SimulatorNode\nIsaacSceneRuntime / physics_harvest\nIsaacFrankaDriver / IsaacJointRos2Bridge\ncontrol_panel（UI）"]
   end
-  subgraph ROBOT["tomato_harvest_robot （6つの独立ROS2 Pythonノード）"]
+  subgraph ROBOT["tomato_harvest_robot （5つの独立ROS2 Pythonノード）"]
     R1["① tomato_detector_node"]
     R2["② behavior_planner_node"]
     R3["③ trajectory_planner_node"]
     R4["④ trajectory_monitor_node"]
     R5["⑤ motion_command_node"]
-    R6["⑥ motion_command_executor_node"]
   end
   subgraph CPP["franka_ros2_control （C++、アーム7軸のみ）"]
+    MCE["motion_command_executor_node\nC++ executor + gripper_closed publish"]
     HWI["IsaacSimHardwareInterface\n（フィンガー関節は扱わない）"]
     JTC["JointTrajectoryController"]
     JSB["joint_state_broadcaster"]
@@ -246,9 +246,9 @@ flowchart TB
   end
 
   SIM -->|"/tomato_harvest/scene_snapshot\n/camera/fixed/image_raw, /tf"| ROBOT
-  ROBOT -->|"/tomato_harvest/motion_command"| R6
-  R6 -->|"FollowJointTrajectory action"| JTC
-  R6 -.->|"/tomato_harvest/gripper_closed\n（HWIを経由しない直接配線）"| SIM
+  R5 -->|"/tomato_harvest/motion_command"| MCE
+  MCE -->|"FollowJointTrajectory action"| JTC
+  MCE -.->|"/tomato_harvest/gripper_closed\n（HWIを経由しない直接配線）"| SIM
   JTC <-->|"arm 7軸 cmd/state"| HWI
   HWI <-->|"/isaac_joint_states, /isaac_joint_commands\n（arm 7軸のみ）"| SIM
   JSB -->|"/joint_states"| ROBOT
@@ -256,9 +256,9 @@ flowchart TB
 </div>
 
 <div class="warn">
-<b>最重要ポイント：グリッパー制御は C++ 側を一切経由しない</b>
+<b>最重要ポイント：グリッパー制御は HWI を経由しない</b>
 <code>franka_ros2_control</code> の URDF（<code>franka_ros2_control.urdf</code>）にはフィンガー関節（<code>panda_finger_joint1/2</code>）が定義されておらず、<code>IsaacSimHardwareInterface</code> はアーム7軸の command/state interface しか持たない。<span class="tag fact">事実</span><br>
-実際のグリッパー開閉は <code>motion_command_executor_node.py</code> が <code>/tomato_harvest/gripper_closed</code>（<code>std_msgs/String</code>、"true"/"false"）を独立 publish し、これを simulator 側の <code>IsaacJointRos2Bridge</code> が直接 subscribe してフィンガー関節を Isaac Sim の articulation へ直接書き込む、という「robotノード → simulatorノード」の直接配線で実現している。設計文書 <code>ROS2_COMPONENT_ARCHITECTURE.md</code> が記す「C++ <code>MotionCommandExecutor</code> が finger 指令を HWI 経由で送る」という構成とは異なる。<span class="tag gap">乖離</span>
+実際のグリッパー開閉は <code>franka_ros2_control</code> 内の <code>motion_command_executor_node</code> が <code>/tomato_harvest/gripper_closed</code>（<code>std_msgs/String</code>、"true"/"false"）を独立 publish し、これを simulator 側の <code>IsaacJointRos2Bridge</code> が直接 subscribe してフィンガー関節を Isaac Sim の articulation へ直接書き込む、という「C++ executor → simulatorノード」の直接配線で実現している。executor の C++ 移行自体は完了したが、finger 指令の HWI 統合までは未実装である。<span class="tag gap">乖離</span>
 </div>
 
 <h3>起動経路が2系統存在する</h3>
@@ -385,7 +385,7 @@ flowchart LR
 
 <section class="chapter" id="ch5">
 <h2 class="chapter-title"><span class="num">5.</span> tomato_harvest_robot（ROS2ノード群）</h2>
-<p><span class="tag fact">事実</span> 現行実装は6つの独立した ROS2 Python ノードで構成される（<code>pyproject.toml</code> の console_scripts と一致）。設計上は5ノード+C++実行体という構成だが、実際には6つ目の <code>motion_command_executor_node</code> もPythonノードとして実装済みである（C++ 移行計画については<a href="#ch6">6章</a>参照）。</p>
+<p><span class="tag fact">事実</span> 現行実装のアプリ層は5つの独立した ROS2 Python ノードで構成される（<code>src/tomato_harvest_sim/robot/setup.py</code> の entry_points と一致）。<code>motion_command_executor_node</code> は 2026-07-07 に <code>franka_ros2_control</code> の C++ ノードへ移設され、<code>/tomato_harvest/motion_command</code> が Python 層と C++ 制御層の境界になった（詳細は<a href="#ch6">6章</a>）。</p>
 
 <h3>パッケージ構成（2026-07-07 リファクタ後）</h3>
 <p><span class="tag fact">事実</span> 各コンポーネントは <code>robot/</code> 配下のサブパッケージとして分離されており、ノード実装（<code>node.py</code>）・ライブラリ・単体テスト（<code>tests/</code>）を1パッケージに同居させる。ノードと機能ライブラリが対応するもの（behavior_planner / perception / motion_planner）は同一パッケージへ統合されている。</p>
@@ -393,14 +393,13 @@ flowchart LR
 ├── behavior_planner/            # フェーズ状態機械ノード + BehaviorPlanner ライブラリ + tests/
 ├── perception/                  # トマト検出ノード + TomatoTargetEstimator + tests/
 ├── motion_planner/              # MoveIt2 計画ノード + プランナーライブラリ + tests/
-├── motion_command_node/         # motion_command 生成ノード + tests/
-├── motion_command_executor_node/# JTC action 実行ノード + tests/
-├── trajectory_monitor_node/     # ステータス変換ノード + tests/
+├── execute_manager/             # motion_command / trajectory_monitor ノード + tests/
 ├── msg/                         # robot 内部の Protocol 型定義
-├── geometry.py / motion.py      # 共有ユーティリティ
+├── perception/frame_transform.py
+├── behavior_planner/phase_motion.py
 ├── launch/ · config/ · moveit_config/ · resource/
 └── package.xml · setup.py       # ament パッケージ (tomato_harvest_robot)</code></pre>
-<p>起動は <code>python3 -m tomato_harvest_sim.robot.&lt;パッケージ名&gt;</code>（各パッケージの <code>__main__.py</code> 経由）。テストは <code>pytest src/tomato_harvest_sim/robot/&lt;パッケージ名&gt;/tests</code> でサブパッケージ単位に実行できる（<code>pyproject.toml</code> の <code>testpaths</code> に登録済み）。</p>
+<p>起動は <code>python3 -m tomato_harvest_sim.robot.&lt;パッケージ名またはモジュール&gt;</code> で行う。<code>execute_manager</code> だけは 1 サブパッケージ内に <code>motion_command.py</code> と <code>trajectory_monitor.py</code> の 2 ノード実装を持つ。テストは <code>pytest src/tomato_harvest_sim/robot/&lt;サブパッケージ&gt;/tests</code> または <code>pytest src/tomato_harvest_sim/simulator/tests</code> でサブパッケージ単位に実行できる（<code>pyproject.toml</code> の <code>testpaths</code> に登録済み）。JTC action 実行ノードは robot パッケージから外れ、<code>src/franka_ros2_control/src/motion_command_executor_node.cpp</code> に置かれている。</p>
 
 <div class="mermaid">
 flowchart LR
@@ -409,7 +408,7 @@ flowchart LR
   TP["③ trajectory_planner_node\nMoveIt2呼び出し → harvest_motion_plan"]
   TM["④ trajectory_monitor_node\nexecution_status監視 → trajectory_status"]
   MC["⑤ motion_command_node\nphase+plan → motion_command"]
-  MCE["⑥ motion_command_executor_node\nJTC action実行 + gripper_closed publish"]
+  MCE["franka_ros2_control::motion_command_executor_node\nJTC action実行 + gripper_closed publish"]
 
   DET -->|target_estimate| BP
   DET -->|target_estimate| TP
@@ -422,7 +421,7 @@ flowchart LR
   MCE -->|execution_status| TM
 </div>
 
-<h3 id="ch5-1">5.1 6ノードの入出力一覧</h3>
+<h3 id="ch5-1">5.1 5ノードの入出力一覧</h3>
 
 <h4>① tomato_detector_node</h4>
 <table>
@@ -469,23 +468,7 @@ flowchart LR
 <p>詳細は<a href="#ch5-3">5.3</a>参照。</p>
 <div class="warn"><span class="tag gap">乖離</span> <code>trajectory_status</code> を subscribe してはいるが、<code>build_motion_command()</code> の呼び出し引数には渡されておらず、実際の出力ロジックには一切使われていない。設計文書の「phase・plan・trajectory_statusを合成」という説明は不正確で、実際は phase と plan と現在jointだけで決定的に決まる。</div>
 
-<h4>⑥ motion_command_executor_node</h4>
-<table>
-<thead><tr><th>方向</th><th>Topic/Action</th><th>内容</th></tr></thead>
-<tbody>
-<tr><td>Sub</td><td><code>/tomato_harvest/motion_command</code>（JSON）</td><td></td></tr>
-<tr><td>Action Client</td><td><code>/joint_trajectory_controller/follow_joint_trajectory</code></td><td>ローカル定数としてハードコード。<code>msg/topics.py</code> の <code>FOLLOW_JOINT_TRAJECTORY_ACTION</code> は未使用（デッドコード）</td></tr>
-<tr><td>Pub</td><td><code>/tomato_harvest/execution_status</code></td><td>プレーン文字列 "idle"/"running"/"succeeded"/"aborted"（JSONではない）</td></tr>
-<tr><td>Pub</td><td><code>/tomato_harvest/gripper_closed</code></td><td>ローカル定数としてハードコード（<code>msg/topics.py</code>未定義）。<code>simulator/isaac_joint_ros2_bridge.py</code> 側も同一リテラル文字列を直書きしており文字列一致に依存</td></tr>
-</tbody>
-</table>
-<p>1回の motion_command 受信につき、goal送信直前に <code>"running"</code>、結果確定後に <code>"succeeded"</code> または <code>"aborted"</code> を publish する（意図的キャンセル時は何も publish しない）。<code>control_msgs</code> が import できない環境では trajectory 送信は無効化されるが、gripper_closed の publish は独立して継続する。</p>
-<p><span class="tag fact">事実</span> 移動コマンド（<code>move_*</code> / <code>pull_*</code>）で <code>joint_trajectory</code> が null の場合は、計画失敗とみなして即座に <code>"aborted"</code> を publish し再計画を促す（2026-07-06 追加。以前は黙って無視していたため、計画失敗時にシステム全体がデッドロックしていた）。停止コマンド（<code>hold_*</code>）は軌道 null が正常のため何も publish しない。この判定は <code>command_name</code> の接頭辞で行う。</p>
-
-<div class="warn">
-<b>launch構成に含まれていない</b><span class="tag gap">乖離</span><br>
-<code>robot/launch/robot_nodes.launch.py</code> は①〜⑤の5ノードのみを起動し、<b>⑥ <code>motion_command_executor_node</code> を含んでいない</b>。この launch ファイル単体では <code>motion_command</code> を JTC action に変換する主体が起動されず、システムとして完結しない。<code>scripts/run_ros2_components.sh</code> は6ノードすべてを起動するため、実運用ではこちらが使われていると考えられる（推測）。
-</div>
+<p><span class="tag fact">事実</span> <code>motion_command_executor_node</code> は本章の Python ノード群には含まれず、現在は <code>franka_ros2_control</code> 側の C++ ノードとして起動される。入出力と実装詳細は<a href="#ch6">6章</a>を参照。</p>
 
 <h3 id="ch5-2">5.2 HarvestTaskPhase 状態遷移（実装の事実）</h3>
 <p><code>HarvestTaskPhase</code> は <code>msg/contracts.py</code> で16状態が定義されているが、<code>behavior_planner_node.py</code> のベタ書きステートマシンが実際に遷移させるのは以下のみ（<code>PLANNING</code> / <code>PREGRASP_REACHED</code> / <code>DETACHED</code> は未使用の列挙値）。</p>
@@ -548,7 +531,7 @@ stateDiagram-v2
   DETECTING --> IDLE: reset
 </div>
 
-<h3 id="ch5-3">5.3 motion_command 生成仕様（<code>motion_command_node.py</code>）</h3>
+<h3 id="ch5-3">5.3 motion_command 生成仕様（<code>execute_manager/motion_command.py</code>）</h3>
 <div class="scrollx">
 <table>
 <caption>build_motion_command() のフェーズ別出力（実装の事実）</caption>
@@ -579,13 +562,13 @@ stateDiagram-v2
 </div>
 
 <h3 id="ch5-5">5.5 レガシーコードの削除履歴</h3>
-<p><span class="tag fact">事実</span> 旧アーキテクチャの軌道追従ライブラリ <code>robot/trajectory_tracking/</code>（coordinator / tracker / action_client 等）は、現行6ノードからの参照ゼロを確認したうえで <b>2026-07-07 に削除済み</b>。旧単一プロセス構成の <code>api/</code>・<code>app/</code>・<code>robot_node.py</code>・<code>runtime.py</code> も削除済み。<code>robot/msg/trajectory_tracking.py</code>（型定義モジュール）だけは <code>simulator/isaac_franka_driver.py</code> が参照するため残存している。</p>
+<p><span class="tag fact">事実</span> 旧アーキテクチャの軌道追従ライブラリ <code>robot/trajectory_tracking/</code>（coordinator / tracker / action_client 等）は、現行構成からの参照ゼロを確認したうえで <b>2026-07-07 に削除済み</b>。旧単一プロセス構成の <code>api/</code>・<code>app/</code>・<code>robot_node.py</code>・<code>runtime.py</code> も削除済み。<code>robot/msg/trajectory_tracking.py</code>（型定義モジュール）だけは <code>simulator/isaac_franka_driver.py</code> が参照するため残存している。</p>
 
 </section>
 
 <section class="chapter" id="ch6">
 <h2 class="chapter-title"><span class="num">6.</span> franka_ros2_control（C++側）</h2>
-<p><span class="tag fact">事実</span> <code>hardware_interface::SystemInterface</code> を継承した <code>IsaacSimHardwareInterface</code>（<code>franka_ros2_control_plugin.xml</code> で pluginlib 登録）が中核。<b>アーム7軸のみ</b>を扱い、グリッパー関節は扱わない（<a href="#ch3">3章</a>参照）。</p>
+<p><span class="tag fact">事実</span> C++ 側は <code>hardware_interface::SystemInterface</code> を継承した <code>IsaacSimHardwareInterface</code>（<code>franka_ros2_control_plugin.xml</code> で pluginlib 登録）と、<code>/tomato_harvest/motion_command</code> を JTC action へ変換する <code>motion_command_executor_node</code> で構成される。HWI は<b>アーム7軸のみ</b>を扱い、グリッパー関節は扱わない（<a href="#ch3">3章</a>参照）。</p>
 
 <table>
 <caption>IsaacSimHardwareInterface の入出力</caption>
@@ -610,18 +593,31 @@ stateDiagram-v2
 <li>ゴール判定許容値（<code>constraints</code>）: 位置ゴール判定は全関節 <code>goal: 0.0</code> で無効化。<code>stopped_velocity_tolerance: 0.05</code> は「腕が実際に到着して停止した」ことの確認として機能しており、<b>0.0（無効化）にしてはならない</b> — 無効化すると軌道時間経過だけで即 success となり、腕の到着前にグリッパーが閉じて把持が空振りする（2026-07-07 の実験で確認済み、yaml コメントに記録）。トマト把持中の残留振動による abort は behavior_planner 側の成果ベース遷移（<a href="#ch5-2">5.2</a>）で救済する。</li>
 </ul>
 
-<h3>将来計画: MotionCommandExecutor の C++ 移行</h3>
-<p><span class="tag guess">推測</span> 現在 Python で実装されている <code>motion_command_executor_node</code>（<a href="#ch5-1">5.1⑥</a>）は、設計上は franka_ros2_control 内の C++ ノード <code>MotionCommandExecutor</code>（未実装）へ置き換える計画である。<code>/tomato_harvest/motion_command</code> トピックはその際の「アプリケーション層（robot・Python）→ ロボット制御層（franka_ros2_control・C++）」の境界として設計されている。移行のメリットは性能ではなくレイヤ分離にある:</p>
+<h3>motion_command_executor_node</h3>
+<p><span class="tag fact">事実</span> 2026-07-07 に <code>src/tomato_harvest_sim/robot/motion_command_executor_node/</code> から <code>src/franka_ros2_control/src/motion_command_executor_node.cpp</code> へ移設済み。<code>/tomato_harvest/motion_command</code> トピックは、現在は「アプリケーション層（robot・Python）→ ロボット制御層（franka_ros2_control・C++）」の境界として実装されている。移行の主眼は性能ではなくレイヤ分離にある:</p>
 <ul>
 <li><b>依存方向の整理</b>: robot 側 Python から <code>control_msgs</code> / FollowJointTrajectory アクションといった ros2_control の知識が消え、アプリ層は「コマンドの意味」だけを、制御層は「実行手段」だけを知る構造になる。</li>
 <li><b>sim / 実機切替の局所化</b>: シミュレータ（IsaacSimHardwareInterface）と実機ハードウェアの差し替えが franka_ros2_control 内で完結し、アプリ側は変更不要になる。</li>
-<li><b>gripper 制御の正規化</b>: 現在の「robot ノード → simulator への直接配線」（<a href="#ch3">3章</a>の乖離参照）を、HWI 経由の finger 指令に一本化できる。</li>
+<li><b>責務の固定</b>: <code>motion_command_node</code> は command JSON の生成のみに集中し、JTC action client は C++ executor に閉じ込められる。</li>
 </ul>
-<p>この計画がある限り、<code>motion_command_node</code> と <code>motion_command_executor_node</code> を統合してはならない（境界そのものが消えるため）。計画を放棄する場合は先に本書のこの節を更新すること。</p>
+<table>
+<thead><tr><th>方向</th><th>Topic/Action</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/motion_command</code>（JSON）</td><td><code>command_name</code> / <code>gripper_closed</code> / <code>phase_motion_plan.joint_trajectory</code> を YAML parser で読み取り</td></tr>
+<tr><td>Action Client</td><td><code>/joint_trajectory_controller/follow_joint_trajectory</code></td><td>軌道点の position と <code>time_from_start_sec</code> を JTC action goal へ変換</td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/execution_status</code></td><td>プレーン文字列 <code>"idle"</code>/<code>"running"</code>/<code>"succeeded"</code>/<code>"aborted"</code></td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/gripper_closed</code></td><td><code>"true"</code>/<code>"false"</code> を simulator 側へ直接 publish</td></tr>
+</tbody>
+</table>
+<p>移動コマンド（<code>move_*</code> / <code>pull_*</code>）で <code>joint_trajectory</code> が null の場合は、計画失敗とみなして即座に <code>"aborted"</code> を publish し再計画を促す。停止コマンド（<code>hold_*</code>）は軌道 null が正常のため何も publish しない。この判定は <code>command_name</code> の接頭辞で行う。</p>
+<div class="warn">
+<b>残っている乖離</b><span class="tag gap">乖離</span><br>
+executor の C++ 移行は完了したが、グリッパー指令は依然として <code>/tomato_harvest/gripper_closed</code> の直接 publish であり、<code>IsaacSimHardwareInterface</code> の command interface には統合されていない。すなわち「Python → simulator の直接配線」は解消したが、「finger 指令を HWI 経由へ一本化する」という最終形は未達である。
+</div>
 
 <h3>launch構成</h3>
 <ul>
-<li><code>franka_ros2_control.launch.py</code>: <code>ros2_control_node</code> → <code>joint_state_broadcaster</code> spawner → <code>joint_trajectory_controller</code> spawner の3ノードを起動。</li>
+<li><code>franka_ros2_control.launch.py</code>: <code>ros2_control_node</code> → <code>joint_state_broadcaster</code> spawner → <code>joint_trajectory_controller</code> spawner → <code>motion_command_executor_node</code> の4ノードを起動。</li>
 <li><code>move_group.launch.py</code>: URDF/SRDF/kinematics/ompl/joint_limitsをロードし <code>move_group</code> ノードを起動（<code>/plan_kinematic_path</code>, <code>/apply_planning_scene</code> を提供）。</li>
 </ul>
 <p>その他設定ファイル：<code>joint_limits.yaml</code>（MoveIt2用の速度・加速度上書き）、<code>kinematics.yaml</code>（KDL）、<code>ompl_planning.yaml</code>（RRTConnect等）、<code>panda.srdf</code>（<code>panda_arm</code>グループ、自己衝突無効化ペア）。</p>
@@ -721,7 +717,7 @@ sequenceDiagram
   participant SH as run_ros2_components.sh
   participant CPP as franka_ros2_control
   participant MV as MoveIt2 move_group（任意）
-  participant ROB as robotノード群（6つ）
+  participant ROB as robotノード群（5つ）
   participant SIM as simulator_node / Isaac Sim
 
   SH->>CPP: robot_state_publisher 起動
@@ -738,7 +734,7 @@ sequenceDiagram
   SH->>ROB: trajectory_planner_node起動
   SH->>ROB: trajectory_monitor_node起動
   SH->>ROB: motion_command_node起動
-  SH->>ROB: motion_command_executor_node起動
+  SH->>CPP: motion_command_executor_node起動
   opt --auto-start 指定時
     SH->>SIM: scene_snapshot出現待ち後 "start" を自動publish
   end
@@ -831,7 +827,7 @@ PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2
 <tr><td><code>scripts/BOOT_SEQUENCE.md</code></td><td>viewerプロセス内で<code>HarvestRuntime</code>まで組み上げる旧アーキテクチャの説明が残存し、現行<code>isaac_viewer.py</code>と不一致</td></tr>
 </tbody>
 </table>
-<p>2026-07-07 に解消済み: <code>robot_nodes.launch.py</code> の executor 欠落（6ノード化）、<code>robot/package.xml</code>・<code>setup.py</code> の削除済み <code>robot_node.py</code> 参照（6ノードの entry_points に更新）、設計文書 <code>robot/docs/ROS2_COMPONENT_ARCHITECTURE.md</code> との乖離（内容を本書へ統合し原本を削除）。</p>
+<p>2026-07-07 に解消済み: <code>motion_command_executor_node</code> の Python 実装残存（<code>franka_ros2_control</code> へ C++ 移設）、<code>robot/package.xml</code> / <code>setup.py</code> の executor 依存、設計文書 <code>robot/docs/ROS2_COMPONENT_ARCHITECTURE.md</code> との乖離（内容を本書へ統合し原本を削除）。</p>
 
 </section>
 
@@ -845,7 +841,7 @@ PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2
 <tr><td>HWI</td><td>IsaacSimHardwareInterface</td><td>ros2_control のC++ハードウェア抽象化層（アーム7軸のみ）</td></tr>
 <tr><td>JTC</td><td>JointTrajectoryController</td><td>ros2_control のアーム軌道追従コントローラ</td></tr>
 <tr><td>JSB</td><td>joint_state_broadcaster</td><td><code>/joint_states</code>をpublishするコントローラ</td></tr>
-<tr><td>MCE</td><td>motion_command_executor_node</td><td>motion_commandをJTC actionへ変換するPythonノード</td></tr>
+<tr><td>MCE</td><td>motion_command_executor_node</td><td>motion_commandをJTC actionへ変換するC++ノード</td></tr>
 <tr><td>IK</td><td>Inverse Kinematics</td><td>逆運動学。<code>LulaKinematicsSolver</code>で使用</td></tr>
 </tbody>
 </table>

@@ -5,10 +5,9 @@
   <version>0.1.0</version>
   <description>
     ROS2 robot nodes for tomato harvest simulation.
-    Six component nodes (perception / behavior_planner / motion_planner /
-    trajectory_monitor / motion_command / motion_command_executor) that
-    communicate with the simulator node and franka_ros2_control
-    via ROS2 topics and actions.
+    Five component nodes (perception / behavior_planner / motion_planner /
+    trajectory_monitor / motion_command) that communicate with the simulator
+    node and the C++ motion_command_executor in franka_ros2_control.
   </description>
   <maintainer email="kodamaatsushi428@gmail.com">atsushi</maintainer>
   <license>Apache-2.0</license>
@@ -19,8 +18,6 @@
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>tf2_msgs</depend>
-  <depend>control_msgs</depend>
-  <depend>trajectory_msgs</depend>
   <depend>geometry_msgs</depend>
 
   <export>

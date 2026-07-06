@@ -1,6 +1,8 @@
 """IsaacJointRos2Bridge がグリッパー開閉状態を毎ステップ適用するテスト"""
 from __future__ import annotations
+
 import unittest
+
 import numpy as np
 
 
@@ -13,7 +15,7 @@ class _DriverStub:
     def __init__(self) -> None:
         self.positions = np.zeros(9, dtype=float)
         self.last_velocity_call: tuple | None = None
-        self.last_finger_positions_only_call: tuple | None = None  # (finger_positions, joint_indices)
+        self.last_finger_positions_only_call: tuple | None = None
         self._initialized = True
 
     def initialize_if_needed(self) -> bool:
@@ -41,11 +43,10 @@ class IsaacJointRos2BridgeFingerTest(unittest.TestCase):
         bridge = IsaacJointRos2Bridge.__new__(IsaacJointRos2Bridge)
         bridge._driver = driver
         bridge._pending_command = None
-        bridge._gripper_closed = False  # デフォルト: 開
+        bridge._gripper_closed = False
         return bridge
 
     def test_joint_command_stores_only_arm_positions(self) -> None:
-        """_on_joint_command はアーム7関節のみ _pending_command に保存する。"""
         driver = _DriverStub()
         bridge = self._make_bridge(driver)
 
@@ -65,46 +66,36 @@ class IsaacJointRos2BridgeFingerTest(unittest.TestCase):
         self.assertAlmostEqual(float(arm_pos[3]), -1.5)
 
     def test_combined_command_applies_open_gripper_via_finger_positions_only(self) -> None:
-        """JTCコマンドなし・gripper_closed=False のとき、
-        set_finger_positions_only で GRIPPER_OPEN_RAD=0.04 が適用される。"""
         driver = _DriverStub()
         bridge = self._make_bridge(driver)
         bridge._gripper_closed = False
 
         bridge._apply_combined_command()
 
-        # set_finger_positions_only が呼ばれる（JTCなし）
         self.assertIsNotNone(driver.last_finger_positions_only_call)
         finger_pos, indices = driver.last_finger_positions_only_call
         self.assertEqual(indices, [7, 8])
         self.assertAlmostEqual(float(finger_pos[0]), 0.04)
         self.assertAlmostEqual(float(finger_pos[1]), 0.04)
-        # positions配列にも反映
         self.assertAlmostEqual(float(driver.positions[7]), 0.04)
         self.assertAlmostEqual(float(driver.positions[8]), 0.04)
 
     def test_combined_command_applies_closed_gripper_via_finger_positions_only(self) -> None:
-        """JTCコマンドなし・gripper_closed=True のとき、
-        set_finger_positions_only で GRIPPER_CLOSED_RAD=0.0 が適用される。"""
         driver = _DriverStub()
         bridge = self._make_bridge(driver)
         bridge._gripper_closed = True
 
         bridge._apply_combined_command()
 
-        # set_finger_positions_only が呼ばれる（JTCなし）
         self.assertIsNotNone(driver.last_finger_positions_only_call)
         finger_pos, indices = driver.last_finger_positions_only_call
         self.assertEqual(indices, [7, 8])
         self.assertAlmostEqual(float(finger_pos[0]), 0.0)
         self.assertAlmostEqual(float(finger_pos[1]), 0.0)
-        # positions配列にも反映
         self.assertAlmostEqual(float(driver.positions[7]), 0.0)
         self.assertAlmostEqual(float(driver.positions[8]), 0.0)
 
     def test_combined_command_applies_arm_from_pending_and_finger_from_gripper_state(self) -> None:
-        """JTCコマンドあり・gripper_closed=True のとき、
-        set_joint_velocity_targets_with_debug でアームとフィンガーを一緒に適用する。"""
         driver = _DriverStub()
         bridge = self._make_bridge(driver)
         bridge._gripper_closed = True
@@ -118,38 +109,25 @@ class IsaacJointRos2BridgeFingerTest(unittest.TestCase):
         bridge._on_joint_command(_Msg())
         bridge._apply_combined_command()
 
-        # JTCコマンドありなので set_joint_velocity_targets_with_debug を使う
         self.assertIsNotNone(driver.last_velocity_call)
-        # アーム: JTCコマンドから
         self.assertAlmostEqual(float(driver.positions[1]), -0.4)
         self.assertAlmostEqual(float(driver.positions[3]), -2.1)
-        # フィンガー: gripper_closed=True → CLOSED (0.0)
         self.assertAlmostEqual(float(driver.positions[7]), 0.0)
         self.assertAlmostEqual(float(driver.positions[8]), 0.0)
 
     def test_combined_command_uses_finger_positions_only_without_jtc_command(self) -> None:
-        """JTCコマンドなし（AT_GRASP/GRASP_EVALUATION）では set_finger_positions_only を使う。
-
-        これによりアーム関節は変更されず、フィンガーのみが position-only で駆動される。
-        velocity=0 指定がアームドリフトやJTC goal rejection を引き起こすのを防ぐ。
-        """
         driver = _DriverStub()
-        driver.positions[:7] = [0.1, -0.5, 0.0, -2.0, 0.1, 1.5, 0.8]  # AT_GRASP 相当
+        driver.positions[:7] = [0.1, -0.5, 0.0, -2.0, 0.1, 1.5, 0.8]
         bridge = self._make_bridge(driver)
         bridge._gripper_closed = True
-        # pending_command なし = JTCからコマンドが届いていない
 
         bridge._apply_combined_command()
 
-        # set_finger_positions_only が呼ばれる
         self.assertIsNotNone(driver.last_finger_positions_only_call)
-        # アームは変更されない
         self.assertAlmostEqual(float(driver.positions[0]), 0.1)
         self.assertAlmostEqual(float(driver.positions[1]), -0.5)
-        # フィンガーは closed (0.0)
         self.assertAlmostEqual(float(driver.positions[7]), 0.0)
         self.assertAlmostEqual(float(driver.positions[8]), 0.0)
-        # velocity_targets は呼ばれない（アームへの干渉なし）
         self.assertIsNone(driver.last_velocity_call)
 
 

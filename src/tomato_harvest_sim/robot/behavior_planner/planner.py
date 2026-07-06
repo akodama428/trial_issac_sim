@@ -14,7 +14,10 @@ from tomato_harvest_sim.msg.contracts import (
     TomatoStatus,
 )
 from tomato_harvest_sim.robot.behavior_planner.intent_builder import PhaseExecutionIntentBuilder
-from tomato_harvest_sim.robot.motion import MoveItStyleMotionPublisher, phase_motion_from_harvest_plan
+from tomato_harvest_sim.robot.behavior_planner.phase_motion import (
+    MoveItStyleMotionPublisher,
+    phase_motion_from_harvest_plan,
+)
 from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
 
 

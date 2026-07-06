@@ -1,4 +1,4 @@
-"""robot_nodes.launch.py — tomato_harvest_robot パッケージの 6 ノードを一括起動する。"""
+"""robot_nodes.launch.py — tomato_harvest_robot パッケージの 5 ノードを一括起動する。"""
 from __future__ import annotations
 
 from launch import LaunchDescription
@@ -43,18 +43,10 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
     )
 
-    motion_command_executor = Node(
-        package=package,
-        executable="motion_command_executor_node",
-        name="motion_command_executor_node",
-        output="screen",
-    )
-
     return LaunchDescription([
         tomato_detector,
         behavior_planner,
         trajectory_planner,
         trajectory_monitor,
         motion_command,
-        motion_command_executor,
     ])

@@ -13,12 +13,6 @@ from tomato_harvest_sim.msg.contracts import (
     MotionCommand,
     PhaseId,
     PhaseMotionPlan,
-    Pose3D,
-)
-
-_STOP_TRAJECTORY_JOINT_NAMES = (
-    "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
-    "panda_joint5", "panda_joint6", "panda_joint7",
 )
 
 
@@ -43,8 +37,6 @@ def build_motion_command(
     アーキテクチャ仕様のフェーズ別出力仕様に従い、joint_trajectory と
     gripper_closed を決定する。joint_trajectory は常に非 null。
     """
-    pose = Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
-
     if phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
         return _make_command("move_to_pregrasp", PhaseId.MOVING_TO_PREGRASP,
                              plan.pregrasp_pose, plan.pregrasp_joint_trajectory, True, plan)
@@ -149,18 +141,13 @@ def _make_stop_command(
 
 def main() -> None:
     import rclpy
-    import json
     from std_msgs.msg import String
     from rclpy.node import Node
     from tomato_harvest_sim.msg.topics import (
         PHASE_TOPIC, HARVEST_MOTION_PLAN_TOPIC, TRAJECTORY_STATUS_TOPIC,
         MOTION_COMMAND_TOPIC, JOINT_STATES_TOPIC,
     )
-    from tomato_harvest_sim.msg.serialization import (
-        motion_command_to_json,
-        trajectory_from_dict,
-        phase_motion_plan_from_dict,
-    )
+    from tomato_harvest_sim.msg.serialization import motion_command_to_json
 
     rclpy.init()
 

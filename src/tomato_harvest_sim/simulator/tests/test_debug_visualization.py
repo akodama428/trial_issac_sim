@@ -23,7 +23,6 @@ def _pose(x: float, y: float, z: float) -> Pose3D:
 
 
 def _snapshot() -> SceneSnapshot:
-    # motion_waypoints are now in active_phase_motion_plan
     waypoints = (_pose(0.50, 0.0, 0.62), _pose(0.52, 0.0, 0.60))
     plan = PhaseMotionPlan(
         phase_id=PhaseId.MOVING_TO_PREGRASP,
@@ -100,7 +99,6 @@ class DebugVisualizationStateTest(unittest.TestCase):
 
         self.assertEqual(state.pregrasp_path_points, preview_path)
         self.assertEqual(state.tracking_path_points, preview_path)
-        # active_waypoint_pose は active_phase_motion_plan の waypoints[1] から取得
         snapshot = _snapshot()
         plan_waypoints = snapshot.active_phase_motion_plan.active_waypoints
         self.assertEqual(state.active_waypoint_pose, plan_waypoints[1])
@@ -137,7 +135,6 @@ class DebugVisualizationStateTest(unittest.TestCase):
         self.assertEqual(state.perception_ray_points, (_snapshot().fixed_camera_pose, estimate.target_world_pose))
         self.assertEqual(state.grasp_path_points, plan.grasp_waypoints)
         self.assertEqual(state.place_path_points, plan.place_waypoints)
-        # tracking_path_points comes from active_phase_motion_plan waypoints
         snapshot = _snapshot()
         self.assertEqual(state.tracking_path_points, snapshot.active_phase_motion_plan.active_waypoints)
 

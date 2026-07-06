@@ -24,9 +24,8 @@ setup(
             "tomato_detector_node = tomato_harvest_sim.robot.perception:main",
             "behavior_planner_node = tomato_harvest_sim.robot.behavior_planner:main",
             "trajectory_planner_node = tomato_harvest_sim.robot.motion_planner:main",
-            "trajectory_monitor_node = tomato_harvest_sim.robot.trajectory_monitor_node:main",
-            "motion_command_node = tomato_harvest_sim.robot.motion_command_node:main",
-            "motion_command_executor_node = tomato_harvest_sim.robot.motion_command_executor_node:main",
+            "trajectory_monitor_node = tomato_harvest_sim.robot.execute_manager:main_trajectory_monitor",
+            "motion_command_node = tomato_harvest_sim.robot.execute_manager:main_motion_command",
         ],
     },
 )

@@ -1,9 +1,9 @@
-"""trajectory_monitor_node の execution_status → trajectory_status 変換ロジックのテスト。"""
+"""execute_manager の execution_status → trajectory_status 変換ロジックのテスト。"""
 from __future__ import annotations
 
 import unittest
 
-from tomato_harvest_sim.robot.trajectory_monitor_node import (
+from tomato_harvest_sim.robot.execute_manager import (
     trajectory_status_from_execution_status,
 )
 

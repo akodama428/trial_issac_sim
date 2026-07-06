@@ -18,12 +18,13 @@ where = ["src"]
 tomato_detector_node = "tomato_harvest_sim.robot.perception:main"
 behavior_planner_node = "tomato_harvest_sim.robot.behavior_planner:main"
 trajectory_planner_node = "tomato_harvest_sim.robot.motion_planner:main"
-trajectory_monitor_node = "tomato_harvest_sim.robot.trajectory_monitor_node:main"
-motion_command_node = "tomato_harvest_sim.robot.motion_command_node:main"
-motion_command_executor_node = "tomato_harvest_sim.robot.motion_command_executor_node:main"
+trajectory_monitor_node = "tomato_harvest_sim.robot.execute_manager:main_trajectory_monitor"
+motion_command_node = "tomato_harvest_sim.robot.execute_manager:main_motion_command"
 tomato_harvest_simulator_node = "tomato_harvest_sim.simulator.simulator_node:main"
 
 [tool.pytest.ini_options]
 # サブパッケージ毎の tests/ も収集対象にする。
-# 個別実行例: pytest src/tomato_harvest_sim/robot/motion_planner/tests
-testpaths = ["tests", "src/tomato_harvest_sim/robot"]
+# 個別実行例:
+#   pytest src/tomato_harvest_sim/robot/motion_planner/tests
+#   pytest src/tomato_harvest_sim/simulator/tests
+testpaths = ["tests", "src/tomato_harvest_sim/robot", "src/tomato_harvest_sim/simulator"]

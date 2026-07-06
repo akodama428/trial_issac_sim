@@ -4,7 +4,6 @@ import unittest
 
 from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
 from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBridge, PhysicsHarvestScenePaths
-from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
 
 
 class PhysicsGraspRuntimeTest(unittest.TestCase):
@@ -219,6 +218,7 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
                 tomato_pose=Pose3D(4.70, 0.12, -3900.0, 0.0, 0.0, 0.0),
             )
         )
+
 
 if __name__ == "__main__":
     unittest.main()

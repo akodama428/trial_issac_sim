@@ -38,8 +38,16 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
     )
 
+    motion_command_executor = Node(
+        package="franka_ros2_control",
+        executable="motion_command_executor_node",
+        name="motion_command_executor_node",
+        output="screen",
+    )
+
     return LaunchDescription([
         controller_manager_node,
         joint_state_broadcaster_spawner,
         joint_trajectory_controller_spawner,
+        motion_command_executor,
     ])
