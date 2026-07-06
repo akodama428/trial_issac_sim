@@ -16,6 +16,8 @@
   <link name="panda_link6"/>
   <link name="panda_link7"/>
   <link name="panda_hand"/>
+  <link name="panda_leftfinger"/>
+  <link name="panda_rightfinger"/>
 
   <joint name="panda_joint1" type="revolute">
     <parent link="panda_link0"/>
@@ -71,12 +73,27 @@
     <child link="panda_hand"/>
     <origin xyz="0 0 0.107" rpy="0 0 -0.7853981633974483"/>
   </joint>
+  <joint name="panda_finger_joint1" type="prismatic">
+    <parent link="panda_hand"/>
+    <child link="panda_leftfinger"/>
+    <origin xyz="0 0 0.0584" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="0.0" upper="0.04" effort="20" velocity="0.2"/>
+  </joint>
+  <joint name="panda_finger_joint2" type="prismatic">
+    <parent link="panda_hand"/>
+    <child link="panda_rightfinger"/>
+    <origin xyz="0 0 0.0584" rpy="0 0 0"/>
+    <axis xyz="0 -1 0"/>
+    <limit lower="0.0" upper="0.04" effort="20" velocity="0.2"/>
+  </joint>
 
   <ros2_control name="IsaacSimHardwareInterface" type="system">
     <hardware>
       <plugin>franka_ros2_control/IsaacSimHardwareInterface</plugin>
       <param name="isaac_joint_states_topic">/isaac_joint_states</param>
       <param name="isaac_joint_commands_topic">/isaac_joint_commands</param>
+      <param name="gripper_closed_topic">/tomato_harvest/gripper_closed</param>
     </hardware>
     <joint name="panda_joint1">
       <command_interface name="position"/>
@@ -115,6 +132,18 @@
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint7">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_finger_joint1">
+      <command_interface name="position"/>
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="panda_finger_joint2">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
       <state_interface name="position"/>

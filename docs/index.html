@@ -136,7 +136,7 @@ footer { color: var(--fg-muted); font-size: 0.8rem; margin-top: 60px; }
   <ol>
     <li><a href="#ch4-1">SimulatorNode</a></li>
     <li><a href="#ch4-2">IsaacSceneRuntime / physics_harvest</a></li>
-    <li><a href="#ch4-3">IsaacJointRos2Bridge（gripper制御の実体）</a></li>
+    <li><a href="#ch4-3">IsaacJointRos2Bridge</a></li>
     <li><a href="#ch4-4">control_panel / isaac_viewer</a></li>
   </ol>
 </li>
@@ -235,9 +235,9 @@ flowchart TB
     R4["④ trajectory_monitor_node"]
     R5["⑤ motion_command_node"]
   end
-  subgraph CPP["franka_ros2_control （C++、アーム7軸のみ）"]
+  subgraph CPP["franka_ros2_control （C++、arm 7軸 + finger 2軸）"]
     MCE["motion_command_executor_node\nC++ executor + gripper_closed publish"]
-    HWI["IsaacSimHardwareInterface\n（フィンガー関節は扱わない）"]
+    HWI["IsaacSimHardwareInterface\n（finger command を HWI へ統合）"]
     JTC["JointTrajectoryController"]
     JSB["joint_state_broadcaster"]
   end
@@ -248,17 +248,17 @@ flowchart TB
   SIM -->|"/tomato_harvest/scene_snapshot\n/camera/fixed/image_raw, /tf"| ROBOT
   R5 -->|"/tomato_harvest/motion_command"| MCE
   MCE -->|"FollowJointTrajectory action"| JTC
-  MCE -.->|"/tomato_harvest/gripper_closed\n（HWIを経由しない直接配線）"| SIM
+  MCE -.->|"/tomato_harvest/gripper_closed\n（scene state + HWI finger intent）"| HWI
   JTC <-->|"arm 7軸 cmd/state"| HWI
-  HWI <-->|"/isaac_joint_states, /isaac_joint_commands\n（arm 7軸のみ）"| SIM
+  HWI <-->|"/isaac_joint_states, /isaac_joint_commands\n（arm 7軸 + finger 2軸）"| SIM
   JSB -->|"/joint_states"| ROBOT
   R3 -->|"planning request"| MV
 </div>
 
 <div class="warn">
-<b>最重要ポイント：グリッパー制御は HWI を経由しない</b>
-<code>franka_ros2_control</code> の URDF（<code>franka_ros2_control.urdf</code>）にはフィンガー関節（<code>panda_finger_joint1/2</code>）が定義されておらず、<code>IsaacSimHardwareInterface</code> はアーム7軸の command/state interface しか持たない。<span class="tag fact">事実</span><br>
-実際のグリッパー開閉は <code>franka_ros2_control</code> 内の <code>motion_command_executor_node</code> が <code>/tomato_harvest/gripper_closed</code>（<code>std_msgs/String</code>、"true"/"false"）を独立 publish し、これを simulator 側の <code>IsaacJointRos2Bridge</code> が直接 subscribe してフィンガー関節を Isaac Sim の articulation へ直接書き込む、という「C++ executor → simulatorノード」の直接配線で実現している。executor の C++ 移行自体は完了したが、finger 指令の HWI 統合までは未実装である。<span class="tag gap">乖離</span>
+<b>最重要ポイント：グリッパー制御は HWI を経由する</b>
+<code>franka_ros2_control</code> の URDF（<code>franka_ros2_control.urdf</code>）にはフィンガー関節（<code>panda_finger_joint1/2</code>）が追加され、<code>IsaacSimHardwareInterface</code> は arm 7軸 + finger 2軸の command/state interface を持つ。<span class="tag fact">事実</span><br>
+<code>motion_command_executor_node</code> は引き続き <code>/tomato_harvest/gripper_closed</code>（<code>std_msgs/String</code>、"true"/"false"）を publish するが、現在この topic を finger 指令として受けるのは simulator 直結ではなく <code>IsaacSimHardwareInterface</code> である。HWI が finger 目標値（open=<code>0.04</code>, closed=<code>0.0</code>）を command vector へ反映し、<code>/isaac_joint_commands</code> を 9関節まとめて publish し、<code>IsaacJointRos2Bridge</code> はその joint command をそのまま Isaac Sim articulation へ適用する。<span class="tag fact">事実</span>
 </div>
 
 <h3>起動経路が2系統存在する</h3>
@@ -283,7 +283,7 @@ flowchart TB
   RUNTIME["scene_runtime.py\nIsaacSceneRuntime（論理状態の正本）"]
   PHYS["physics_harvest.py\nPhysX把持/detach/place判定"]
   DRIVER["isaac_franka_driver.py\nIsaacFrankaDriver（articulation I/O・IK）"]
-  BRIDGE["isaac_joint_ros2_bridge.py\nIsaacJointRos2Bridge（C++との橋渡し＋gripper制御）"]
+  BRIDGE["isaac_joint_ros2_bridge.py\nIsaacJointRos2Bridge（C++との橋渡し）"]
   NODE["simulator_node.py\nSimulatorNode（ROS2通信本体）"]
   PANEL["control_panel.py\nUIパネル（Start/Stop/Reset/カメラ切替）"]
 
@@ -337,35 +337,32 @@ flowchart TB
 <code>scene_runtime_view.py</code>（USD表示反映）、<code>debug_visualization.py</code>（デバッグマーカー計算）、<code>isaac_ros2_control_system.py</code>（HardwareControlPort実装）は、現行の <code>isaac_viewer.py</code> メインループからは import されていないことを確認した。README のモジュール構成図には登場するが、ROS2コンポーネント分離のリファクタリング途中で呼び出し元が失われた可能性が高い（推測）。
 </div>
 
-<h3 id="ch4-3">4.3 IsaacJointRos2Bridge（<code>isaac_joint_ros2_bridge.py</code>） — gripper制御の実体</h3>
-<p><span class="tag fact">事実</span> Isaac Sim Python API と C++ <code>franka_ros2_control</code> の間の橋渡し役。<b>現行実装における gripper（フィンガー）制御の主経路</b>でもある。</p>
+<h3 id="ch4-3">4.3 IsaacJointRos2Bridge（<code>isaac_joint_ros2_bridge.py</code>）</h3>
+<p><span class="tag fact">事実</span> Isaac Sim Python API と C++ <code>franka_ros2_control</code> の間の橋渡し役。現在は <code>IsaacSimHardwareInterface</code> が生成した 9関節 command/state を中継する責務に限定され、bridge 自身が <code>gripper_closed</code> から finger 値を決めることはしない。</p>
 <table>
 <caption>IsaacJointRos2Bridge の入出力</caption>
 <thead><tr><th>方向</th><th>Topic</th><th>型</th><th>内容</th></tr></thead>
 <tbody>
-<tr><td>Pub</td><td><code>/isaac_joint_states</code></td><td>sensor_msgs/JointState</td><td>アーム7軸の position/velocity</td></tr>
+<tr><td>Pub</td><td><code>/isaac_joint_states</code></td><td>sensor_msgs/JointState</td><td>arm 7軸 + finger 2軸の position/velocity</td></tr>
 <tr><td>Pub</td><td><code>/clock</code></td><td>rosgraph_msgs/Clock</td><td>Isaac Sim の timeline 時刻</td></tr>
-<tr><td>Sub</td><td><code>/isaac_joint_commands</code></td><td>sensor_msgs/JointState</td><td>C++ HWI からのアーム関節コマンド</td></tr>
-<tr><td>Sub</td><td><code>/tomato_harvest/gripper_closed</code></td><td>String</td><td>直接subscribeもしているが、後述の理由で届きにくい</td></tr>
+<tr><td>Sub</td><td><code>/isaac_joint_commands</code></td><td>sensor_msgs/JointState</td><td>C++ HWI からの arm 7軸 + finger 2軸コマンド</td></tr>
 </tbody>
 </table>
 <div class="mermaid">
 sequenceDiagram
   participant MCE as motion_command_executor_node
   participant SIMN as SimulatorNode
+  participant HWI as IsaacSimHardwareInterface
   participant BR as IsaacJointRos2Bridge
-  participant VIEW as isaac_viewer._step()
   participant DRV as IsaacFrankaDriver
 
   MCE->>SIMN: /tomato_harvest/gripper_closed ("true"/"false")
+  MCE->>HWI: /tomato_harvest/gripper_closed ("true"/"false")
   SIMN->>SIMN: scene_runtime.close_gripper()/open_gripper()
-  Note over VIEW: 毎ステップ
-  VIEW->>SIMN: node.tick(joint_state=...)
-  VIEW->>BR: apply_gripper_state(scene_runtime.state.gripper_closed)
-  Note over BR: /isaac_joint_commandsのspin_onceキュー溢れで<br/>直接subscribeが届きにくいため、明示同期で補う
-  BR->>DRV: set_finger_positions_only(open=0.04rad / closed=0.0rad)
+  HWI->>BR: /isaac_joint_commands (9 joints)
+  BR->>DRV: set_joint_velocity_targets_with_debug(positions/velocities)
 </div>
-<p>フィンガー角度はJTCコマンドの有無と無関係に、毎ステップ <code>gripper_closed</code> フラグから直接決定される（<code>GRIPPER_OPEN_RAD=0.04</code> / <code>GRIPPER_CLOSED_RAD=0.0</code>）。これは AT_GRASP / GRASP_EVALUATION フェーズのようにアーム軌道が停止軌道でもグリッパー保持を継続するための設計、とコードコメントに明記されている。<span class="tag fact">事実</span></p>
+<p><span class="tag fact">事実</span> <code>_publish_state()</code> は <code>/isaac_joint_states</code> へ 9関節名を publish し、<code>_on_joint_command()</code> / <code>_apply_pending_command()</code> は <code>/isaac_joint_commands</code> で受けた 9関節 command をそのまま articulation へ渡す。2026-07-07 時点で <code>apply_gripper_state()</code> と <code>set_finger_positions_only()</code> を使った direct finger override は削除済み。</p>
 
 <h3 id="ch4-4">4.4 control_panel / isaac_viewer（UIと同期処理）</h3>
 <p><span class="tag fact">事実</span> <code>control_panel.py</code> の <code>IsaacControlPanelWindow</code> は <code>Tomato Harvest Controls</code> という3DView上のUIウィンドウで、<b>Start / Stop / Reset / Fixed Camera / Hand Camera</b> ボタンを提供する。ボタン操作は <code>scene_runtime</code> を直接叩くのではなく、<code>/tomato_harvest/control</code> へ publish するワンクッションを置いた設計になっている（同一プロセス内でも ROS2 pub/sub を経由）。</p>
@@ -374,11 +371,10 @@ sequenceDiagram
 flowchart LR
   A["① isaac_joint_bridge.step()\nstate publish・command適用"] --> B["② scene_runtime.sync_robot_tool_pose()"]
   B --> C["③ node.tick(joint_state)\nROS2 spin・snapshot publish"]
-  C --> D["④ apply_gripper_state()"]
-  D --> E["⑤ control_controller.step_runtime()"]
-  E --> F["⑥ physics_bridge.begin_physics_step()"]
-  F --> G["⑦ simulation_app.update()\n実際の物理ステップ"]
-  G --> H["⑧ physics_bridge.finalize_physics_step()\n接触判定確定"]
+  C --> D["④ control_controller.step_runtime()"]
+  D --> E["⑤ physics_bridge.begin_physics_step()"]
+  E --> F["⑥ simulation_app.update()\n実際の物理ステップ"]
+  F --> G["⑦ physics_bridge.finalize_physics_step()\n接触判定確定"]
 </div>
 
 </section>
@@ -568,14 +564,15 @@ stateDiagram-v2
 
 <section class="chapter" id="ch6">
 <h2 class="chapter-title"><span class="num">6.</span> franka_ros2_control（C++側）</h2>
-<p><span class="tag fact">事実</span> C++ 側は <code>hardware_interface::SystemInterface</code> を継承した <code>IsaacSimHardwareInterface</code>（<code>franka_ros2_control_plugin.xml</code> で pluginlib 登録）と、<code>/tomato_harvest/motion_command</code> を JTC action へ変換する <code>motion_command_executor_node</code> で構成される。HWI は<b>アーム7軸のみ</b>を扱い、グリッパー関節は扱わない（<a href="#ch3">3章</a>参照）。</p>
+<p><span class="tag fact">事実</span> C++ 側は <code>hardware_interface::SystemInterface</code> を継承した <code>IsaacSimHardwareInterface</code>（<code>franka_ros2_control_plugin.xml</code> で pluginlib 登録）と、<code>/tomato_harvest/motion_command</code> を JTC action へ変換する <code>motion_command_executor_node</code> で構成される。HWI は現在 <b>arm 7軸 + finger 2軸</b> を扱い、JTC は arm 7軸のみを制御しつつ、finger 指令は <code>/tomato_harvest/gripper_closed</code> から HWI 内で command vector へ統合される。</p>
 
 <table>
 <caption>IsaacSimHardwareInterface の入出力</caption>
 <thead><tr><th>方向</th><th>Topic</th><th>内容</th></tr></thead>
 <tbody>
 <tr><td>Sub</td><td><code>/isaac_joint_states</code></td><td>simulator側 <code>IsaacJointRos2Bridge</code> から。名前一致でstateへマッピング</td></tr>
-<tr><td>Pub</td><td><code>/isaac_joint_commands</code></td><td>URDF上下限でクランプ済みのcommandを送信</td></tr>
+<tr><td>Sub</td><td><code>/tomato_harvest/gripper_closed</code></td><td><code>"true"</code>/<code>"false"</code> を finger target へ変換し、内部 command vector へ反映</td></tr>
+<tr><td>Pub</td><td><code>/isaac_joint_commands</code></td><td>URDF上下限でクランプ済みの arm 7軸 + finger 2軸 command を送信</td></tr>
 </tbody>
 </table>
 
@@ -589,7 +586,7 @@ stateDiagram-v2
 <ul>
 <li><code>controller_manager</code>: <code>update_rate: 100</code>Hz。<code>use_sim_time</code> は意図的に未設定（<code>/clock</code>配信より先にactivateが試行されるため、とコメントあり）。</li>
 <li><code>joint_state_broadcaster</code>: <code>/joint_states</code> をpublish。</li>
-<li><code>joint_trajectory_controller</code>: <code>panda_joint1〜7</code>、position+velocity interface、<code>interpolation_method: splines</code>、<code>open_loop_control: true</code>（closed-loopだと <code>panda_joint4</code> が可動域外の0へ動く問題を回避するためのコメントあり）。</li>
+<li><code>joint_trajectory_controller</code>: <code>panda_joint1〜7</code>、position+velocity interface、<code>interpolation_method: splines</code>、<code>open_loop_control: true</code>（closed-loopだと <code>panda_joint4</code> が可動域外の0へ動く問題を回避するためのコメントあり）。finger 2軸は controller の joints リストには含めず、HWI が独立に上書きする。</li>
 <li>ゴール判定許容値（<code>constraints</code>）: 位置ゴール判定は全関節 <code>goal: 0.0</code> で無効化。<code>stopped_velocity_tolerance: 0.05</code> は「腕が実際に到着して停止した」ことの確認として機能しており、<b>0.0（無効化）にしてはならない</b> — 無効化すると軌道時間経過だけで即 success となり、腕の到着前にグリッパーが閉じて把持が空振りする（2026-07-07 の実験で確認済み、yaml コメントに記録）。トマト把持中の残留振動による abort は behavior_planner 側の成果ベース遷移（<a href="#ch5-2">5.2</a>）で救済する。</li>
 </ul>
 
@@ -606,13 +603,13 @@ stateDiagram-v2
 <tr><td>Sub</td><td><code>/tomato_harvest/motion_command</code>（JSON）</td><td><code>command_name</code> / <code>gripper_closed</code> / <code>phase_motion_plan.joint_trajectory</code> を YAML parser で読み取り</td></tr>
 <tr><td>Action Client</td><td><code>/joint_trajectory_controller/follow_joint_trajectory</code></td><td>軌道点の position と <code>time_from_start_sec</code> を JTC action goal へ変換</td></tr>
 <tr><td>Pub</td><td><code>/tomato_harvest/execution_status</code></td><td>プレーン文字列 <code>"idle"</code>/<code>"running"</code>/<code>"succeeded"</code>/<code>"aborted"</code></td></tr>
-<tr><td>Pub</td><td><code>/tomato_harvest/gripper_closed</code></td><td><code>"true"</code>/<code>"false"</code> を simulator 側へ直接 publish</td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/gripper_closed</code></td><td><code>"true"</code>/<code>"false"</code> を publish。<code>SimulatorNode</code> は scene state 用に、<code>IsaacSimHardwareInterface</code> は finger command 用に購読する</td></tr>
 </tbody>
 </table>
 <p>移動コマンド（<code>move_*</code> / <code>pull_*</code>）で <code>joint_trajectory</code> が null の場合は、計画失敗とみなして即座に <code>"aborted"</code> を publish し再計画を促す。停止コマンド（<code>hold_*</code>）は軌道 null が正常のため何も publish しない。この判定は <code>command_name</code> の接頭辞で行う。</p>
 <div class="warn">
-<b>残っている乖離</b><span class="tag gap">乖離</span><br>
-executor の C++ 移行は完了したが、グリッパー指令は依然として <code>/tomato_harvest/gripper_closed</code> の直接 publish であり、<code>IsaacSimHardwareInterface</code> の command interface には統合されていない。すなわち「Python → simulator の直接配線」は解消したが、「finger 指令を HWI 経由へ一本化する」という最終形は未達である。
+<b>現状の整理</b><span class="tag fact">事実</span><br>
+finger 指令の HWI 統合は 2026-07-07 に実装済み。<code>/tomato_harvest/gripper_closed</code> は依然 topic として残るが、これは「scene の論理状態を伝える経路」と「HWI へ finger intent を渡す経路」の兼用であり、simulator の articulation を直接書き換える経路ではない。
 </div>
 
 <h3>launch構成</h3>
@@ -640,7 +637,7 @@ executor の C++ 移行は完了したが、グリッパー指令は依然とし
 <tr><td><code>/tomato_harvest/motion_command</code></td><td>String(JSON)</td><td>motion_command_node</td><td>motion_command_executor_node</td></tr>
 <tr><td><code>/tomato_harvest/execution_status</code></td><td>String（プレーン文字列）</td><td>motion_command_executor_node</td><td>trajectory_monitor_node</td></tr>
 <tr><td><code>/tomato_harvest/trajectory_status</code></td><td>String</td><td>trajectory_monitor_node</td><td>behavior_planner_node, trajectory_planner_node</td></tr>
-<tr><td><code>/tomato_harvest/gripper_closed</code></td><td>String("true"/"false")</td><td>motion_command_executor_node</td><td>SimulatorNode, IsaacJointRos2Bridge（<code>msg/topics.py</code>未定数化）</td></tr>
+<tr><td><code>/tomato_harvest/gripper_closed</code></td><td>String("true"/"false")</td><td>motion_command_executor_node</td><td>SimulatorNode, IsaacSimHardwareInterface</td></tr>
 <tr><td><code>/camera/fixed/image_raw</code>, <code>/camera/hand/image_raw</code></td><td>sensor_msgs/Image</td><td>SimulatorNode</td><td>tomato_detector_node（fixedのみ実質使用）</td></tr>
 <tr><td><code>/tf</code></td><td>tf2_msgs/TFMessage</td><td>SimulatorNode</td><td>tomato_detector_node</td></tr>
 <tr><td><code>/joint_states</code></td><td>sensor_msgs/JointState</td><td>joint_state_broadcaster（C++）</td><td>trajectory_planner_node, motion_command_node</td></tr>
@@ -750,6 +747,8 @@ sequenceDiagram
   participant TP as trajectory_planner_node
   participant MC as motion_command_node
   participant MCE as motion_command_executor_node
+  participant HWI as IsaacSimHardwareInterface
+  participant BR as IsaacJointRos2Bridge
   participant TM as trajectory_monitor_node
   participant MV as MoveIt2
 
@@ -762,9 +761,10 @@ sequenceDiagram
   TP->>MC: harvest_motion_plan
   BP->>MC: phase (MOVING_TO_PREGRASP)
   MC->>MCE: motion_command (pregrasp軌道, gripper_closed=true)
+  MCE->>HWI: /tomato_harvest/gripper_closed ("true")
+  HWI->>BR: /isaac_joint_commands (finger close含む)
   MCE->>TM: execution_status (running→succeeded)
   TM->>BP: trajectory_status (ok)
-  MCE-->>SIM: /tomato_harvest/gripper_closed (直接配線)
   BP->>MC: phase (MOVING_TO_GRASP)
   Note over MCE,TM: abort発生時
   MCE->>TM: execution_status (aborted)
@@ -838,7 +838,7 @@ PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2
 <table>
 <thead><tr><th>略語</th><th>正式名</th><th>意味</th></tr></thead>
 <tbody>
-<tr><td>HWI</td><td>IsaacSimHardwareInterface</td><td>ros2_control のC++ハードウェア抽象化層（アーム7軸のみ）</td></tr>
+<tr><td>HWI</td><td>IsaacSimHardwareInterface</td><td>ros2_control のC++ハードウェア抽象化層（arm 7軸 + finger 2軸）</td></tr>
 <tr><td>JTC</td><td>JointTrajectoryController</td><td>ros2_control のアーム軌道追従コントローラ</td></tr>
 <tr><td>JSB</td><td>joint_state_broadcaster</td><td><code>/joint_states</code>をpublishするコントローラ</td></tr>
 <tr><td>MCE</td><td>motion_command_executor_node</td><td>motion_commandをJTC actionへ変換するC++ノード</td></tr>

@@ -5,8 +5,8 @@ Publishes:
   /isaac_joint_states  (sensor_msgs/JointState) — positions + velocities read from Isaac Sim
 
 Subscribes:
-  /isaac_joint_commands (sensor_msgs/JointState) — position + velocity targets from C++
-    IsaacSimHardwareInterface, applied to Isaac Sim via IsaacFrankaDriver.
+  /isaac_joint_commands (sensor_msgs/JointState) — position + velocity targets from
+    C++ IsaacSimHardwareInterface, applied to Isaac Sim via IsaacFrankaDriver.
     Accepts arm[0-6] + finger[7-8] (panda_finger_joint1, panda_finger_joint2).
 
 Lifecycle: call step() once per simulation tick so callbacks are processed and
@@ -23,10 +23,7 @@ if TYPE_CHECKING:
 
 
 class IsaacJointRos2Bridge:
-    GRIPPER_OPEN_RAD = 0.04
-    GRIPPER_CLOSED_RAD = 0.0
     FINGER_JOINT_NAMES = ("panda_finger_joint1", "panda_finger_joint2")
-    _gripper_closed: bool = False  # クラス変数: __new__ 経由でも参照可能
 
     def __init__(
         self,
@@ -69,24 +66,14 @@ class IsaacJointRos2Bridge:
         )
 
         self._pending_command: tuple[np.ndarray, np.ndarray] | None = None
-        self._gripper_closed: bool = False  # デフォルトは開（False=open）
         self._JointState = JointState
         self._Clock = Clock
-
-        # motion_command_executor_node からのグリッパー状態を購読する
-        from std_msgs.msg import String as StringMsg
-        self._node.create_subscription(
-            StringMsg,
-            "/tomato_harvest/gripper_closed",
-            self._on_gripper_command,
-            10,
-        )
 
     def step(self) -> None:
         self._publish_clock()
         self._publish_state()
         self._rclpy.spin_once(self._node, timeout_sec=self._spin_timeout_sec)
-        self._apply_combined_command()
+        self._apply_pending_command()
 
     def close(self) -> None:
         self._node.destroy_node()
@@ -118,117 +105,67 @@ class IsaacJointRos2Bridge:
         if velocities is None:
             velocities = np.zeros_like(positions)
 
+        joint_names = self._joint_names_for_dof_count(int(positions.shape[0]))
         msg = self._JointState()
         msg.header.stamp = self._node.get_clock().now().to_msg()
-        msg.name = list(self._driver.ARM_JOINT_NAMES)
-        msg.position = [float(v) for v in positions[: len(self._driver.ARM_JOINT_NAMES)]]
-        msg.velocity = [float(v) for v in velocities[: len(self._driver.ARM_JOINT_NAMES)]]
+        msg.name = list(joint_names)
+        msg.position = [float(v) for v in positions[: len(joint_names)]]
+        msg.velocity = [float(v) for v in velocities[: len(joint_names)]]
         self._pub.publish(msg)
 
-    def _on_gripper_command(self, msg: object) -> None:
-        """motion_command_executor_node からの gripper_closed 文字列を受け取る。"""
-        data = str(getattr(msg, "data", "")).strip().lower()
-        prev = self._gripper_closed
-        self._gripper_closed = (data == "true")
-        if prev != self._gripper_closed:
-            print(
-                f"[Bridge] gripper_closed: {prev} → {self._gripper_closed} (msg={data!r})",
-                flush=True,
-            )
-
     def _on_joint_command(self, msg: object) -> None:
-        """JTC からのアーム関節コマンドを保存する（フィンガーは _apply_combined_command で処理）。"""
+        """HWI からの関節コマンドを保存する。"""
         names = list(getattr(msg, "name", []))
         positions_list = list(getattr(msg, "position", []))
         velocities_list = list(getattr(msg, "velocity", []))
 
-        n_arm = len(self._driver.ARM_JOINT_NAMES)
-        pos = np.zeros(n_arm, dtype=float)
-        vel = np.zeros(n_arm, dtype=float)
+        current = self._driver.current_joint_positions()
+        n_dofs = len(current) if current is not None else len(self._driver.ARM_JOINT_NAMES) + len(self.FINGER_JOINT_NAMES)
+        pos = np.asarray(current, dtype=float).copy() if current is not None else np.zeros(n_dofs, dtype=float)
+        vel = np.zeros(n_dofs, dtype=float)
+        joint_indices = {
+            joint_name: index
+            for index, joint_name in enumerate(self._joint_names_for_dof_count(n_dofs))
+        }
 
-        for i, joint_name in enumerate(self._driver.ARM_JOINT_NAMES):
-            if joint_name in names:
-                j = names.index(joint_name)
-                if j < len(positions_list):
-                    pos[i] = float(positions_list[j])
-                if j < len(velocities_list):
-                    vel[i] = float(velocities_list[j])
+        for message_index, joint_name in enumerate(names):
+            joint_index = joint_indices.get(joint_name)
+            if joint_index is None:
+                continue
+            if message_index < len(positions_list):
+                pos[joint_index] = float(positions_list[message_index])
+            if message_index < len(velocities_list):
+                vel[joint_index] = float(velocities_list[message_index])
 
         self._pending_command = (pos, vel)
 
-    def _apply_combined_command(self) -> None:
-        """アームとフィンガーを毎ステップ適用する。
-
-        アーム: JTCコマンドが届いていればそれを使用、なければ現在位置を維持。
-        フィンガー: 毎ステップ gripper_closed 状態から決定。
-        JTCがコマンド停止後も（AT_GRASP/GRASP_EVALUATION など）グリッパーを維持するため、
-        フィンガー制御をJTCコマンドに依存させない。
-        """
+    def _apply_pending_command(self) -> None:
+        """HWI から受けた最新の関節コマンドを articulation へ適用する。"""
+        if self._pending_command is None:
+            return
         if not self._driver.initialize_if_needed():
             return
         current = self._driver.current_joint_positions()
         if current is None:
             return
 
-        n_arm = len(self._driver.ARM_JOINT_NAMES)
-        n_finger = len(self.FINGER_JOINT_NAMES)
-        finger_target = self.GRIPPER_CLOSED_RAD if self._gripper_closed else self.GRIPPER_OPEN_RAD
-
+        pending_positions, pending_velocities = self._pending_command
         full_positions = np.asarray(current, dtype=float).copy()
         full_velocities = np.zeros_like(full_positions)
+        copy_length = min(len(full_positions), len(pending_positions))
+        full_positions[:copy_length] = pending_positions[:copy_length]
+        full_velocities[:copy_length] = pending_velocities[:copy_length]
+        self._pending_command = None
 
-        # アーム: JTCコマンドが届いていればそれを適用、なければ現在位置を維持
-        has_jtc_command = self._pending_command is not None
-        if has_jtc_command:
-            arm_pos, arm_vel = self._pending_command
-            self._pending_command = None
-            full_positions[:n_arm] = arm_pos[:n_arm]
-            full_velocities[:n_arm] = arm_vel[:n_arm]
+        self._driver.set_joint_velocity_targets_with_debug(
+            positions=full_positions,
+            velocities=full_velocities,
+            context="isaac_joint_command",
+        )
 
-        # フィンガー: 常に gripper_closed 状態から決定（JTCコマンドに依存しない）
-        n_total = len(full_positions)
-        has_finger_dofs = n_total > n_arm and n_total >= n_arm + n_finger
-        if has_finger_dofs:
-            full_positions[n_arm:n_arm + n_finger] = finger_target
-        else:
-            # アーティキュレーションがフィンガーDOFを持たない場合
-            print(
-                f"[Bridge] WARNING: articulation has {n_total} DOFs (< {n_arm + n_finger}), "
-                f"finger joints not in articulation. gripper_closed={self._gripper_closed}",
-                flush=True,
-            )
-
-        if has_jtc_command:
-            # JTCコマンドあり → 速度+位置でアーム制御（フィンガーも同じアクションに含める）
-            self._driver.set_joint_velocity_targets_with_debug(
-                positions=full_positions,
-                velocities=full_velocities,
-                context="combined_command",
-            )
-        elif has_finger_dofs:
-            # JTCコマンドなし（AT_GRASP/GRASP_EVALUATION など）
-            # フィンガーのみ position-only action で駆動し、アーム関節は変更しない。
-            # joint_indices を使うことで velocity=0 がアームに干渉するのを防ぐ。
-            finger_indices = list(range(n_arm, n_arm + n_finger))
-            self._driver.set_finger_positions_only(
-                full_positions[n_arm:n_arm + n_finger],
-                joint_indices=finger_indices,
-            )
-
-    def apply_gripper_state(self, closed: bool) -> None:
-        """scene_runtime 経由で受け取ったグリッパー状態を _gripper_closed フラグへ同期する。
-
-        spin_once のキューが /isaac_joint_commands で溢れているため
-        _on_gripper_command サブスクリプション経由では確実に届かない。
-        node.tick() 後に scene_runtime.state.gripper_closed を直接渡すことで回避する。
-
-        フィンガーの実際の適用は次の bridge.step() → _apply_combined_command() で行う。
-        ここで apply_action を呼ぶと、アーム JTC コマンドをアーム現在位置+速度ゼロで
-        上書きしてしまい、軌跡追従が停止するため避ける。
-        """
-        if closed != self._gripper_closed:
-            print(
-                f"[Bridge] gripper_closed sync: {self._gripper_closed} → {closed}",
-                flush=True,
-            )
-        self._gripper_closed = closed
+    def _joint_names_for_dof_count(self, dof_count: int) -> tuple[str, ...]:
+        arm_joint_names = tuple(self._driver.ARM_JOINT_NAMES)
+        if dof_count <= len(arm_joint_names):
+            return arm_joint_names[:dof_count]
+        finger_count = min(dof_count - len(arm_joint_names), len(self.FINGER_JOINT_NAMES))
+        return arm_joint_names + self.FINGER_JOINT_NAMES[:finger_count]

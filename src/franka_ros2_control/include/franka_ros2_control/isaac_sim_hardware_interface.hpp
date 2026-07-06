@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_lifecycle/state.hpp"
 #include "sensor_msgs/msg/joint_state.hpp"
+#include "std_msgs/msg/string.hpp"
 
 namespace franka_ros2_control
 {
@@ -40,9 +42,12 @@ public:
 
 private:
   void on_joint_state(const sensor_msgs::msg::JointState::SharedPtr msg);
+  void on_gripper_command(const std_msgs::msg::String::SharedPtr msg);
+  void apply_gripper_command_to_fingers();
 
   std::shared_ptr<rclcpp::Node> node_;
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gripper_closed_sub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_cmd_pub_;
 
   std::mutex state_mutex_;
@@ -53,6 +58,8 @@ private:
 
   std::string isaac_joint_states_topic_;
   std::string isaac_joint_commands_topic_;
+  std::string gripper_closed_topic_;
+  std::optional<bool> gripper_closed_command_;
   bool state_received_{false};
 };
 

@@ -222,27 +222,6 @@ class IsaacFrankaDriver:
             return None
         return self.expand_joint_targets(np.asarray(target_joint_positions, dtype=float))
 
-    def set_finger_positions_only(self, finger_positions: np.ndarray, *, joint_indices: list[int]) -> None:
-        """指定した関節インデックスにのみ position-only action を適用する。
-
-        velocity=0 指定ではアーティキュレーションがフィンガーを動かさないため、
-        joint_indices を使って ARM 関節を変更せずにフィンガーのみ駆動する。
-        """
-        if self._articulation is None:
-            return
-        if not hasattr(self._articulation, "apply_action"):
-            return
-        try:
-            from isaacsim.core.utils.types import ArticulationAction
-            import numpy as np
-            action = ArticulationAction(
-                joint_positions=np.asarray(finger_positions, dtype=float),
-                joint_indices=np.asarray(joint_indices, dtype=int),
-            )
-            self._articulation.apply_action(action)
-        except Exception as exc:
-            print(f"[Driver] set_finger_positions_only failed: {exc}", flush=True)
-
     def set_joint_positions_with_debug(self, positions: np.ndarray, *, context: str) -> None:
         if self._articulation is None:
             return

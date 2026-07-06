@@ -629,11 +629,6 @@ def _run_simulator_node_main_loop(
         joint_state = franka_driver.current_joint_state_snapshot()
         node.tick(joint_state=joint_state)
 
-        # /isaac_joint_commands が spin_once キューを溢れさせるため
-        # _on_gripper_command サブスクリプションは届かない。
-        # node.tick() で更新された scene_runtime 経由で確実に同期する。
-        isaac_joint_bridge.apply_gripper_state(scene_runtime.state.gripper_closed)
-
         status = control_controller.step_runtime()
         if control_window is not None:
             control_window.refresh_status(status)

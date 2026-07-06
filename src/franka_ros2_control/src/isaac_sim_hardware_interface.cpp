@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 
@@ -12,6 +13,16 @@
 
 namespace franka_ros2_control
 {
+
+namespace
+{
+
+constexpr char kFingerJoint1[] = "panda_finger_joint1";
+constexpr char kFingerJoint2[] = "panda_finger_joint2";
+constexpr double kGripperOpenPosition = 0.04;
+constexpr double kGripperClosedPosition = 0.0;
+
+}  // namespace
 
 hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_init(
   const hardware_interface::HardwareInfo & info)
@@ -31,6 +42,11 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_init(
     info_.hardware_parameters.count("isaac_joint_commands_topic")
     ? info_.hardware_parameters.at("isaac_joint_commands_topic")
     : "/isaac_joint_commands";
+
+  gripper_closed_topic_ =
+    info_.hardware_parameters.count("gripper_closed_topic")
+    ? info_.hardware_parameters.at("gripper_closed_topic")
+    : "/tomato_harvest/gripper_closed";
 
   const std::size_t n_joints = info_.joints.size();
   position_state_.resize(n_joints, 0.0);
@@ -74,10 +90,19 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_configure(
     isaac_joint_commands_topic_,
     rclcpp::SystemDefaultsQoS());
 
+  gripper_closed_sub_ = node_->create_subscription<std_msgs::msg::String>(
+    gripper_closed_topic_,
+    rclcpp::SystemDefaultsQoS(),
+    [this](const std_msgs::msg::String::SharedPtr msg) {
+      on_gripper_command(msg);
+    });
+
   RCLCPP_INFO(
     rclcpp::get_logger("IsaacSimHardwareInterface"),
-    "Configured: subscribing to '%s', publishing to '%s'",
-    isaac_joint_states_topic_.c_str(), isaac_joint_commands_topic_.c_str());
+    "Configured: subscribing to '%s' and '%s', publishing to '%s'",
+    isaac_joint_states_topic_.c_str(),
+    gripper_closed_topic_.c_str(),
+    isaac_joint_commands_topic_.c_str());
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -103,6 +128,7 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_activate(
   {
     std::lock_guard<std::mutex> lock(state_mutex_);
     position_command_ = position_state_;
+    apply_gripper_command_to_fingers();
   }
   velocity_command_.assign(n_joints, 0.0);
 
@@ -176,12 +202,17 @@ hardware_interface::return_type IsaacSimHardwareInterface::write(
   static constexpr std::array<double, 7> UPPER = {
      2.8973,  1.7628,  2.8973, -0.069,   2.8973,  3.7525,  2.8973
   };
+  static constexpr std::array<double, 2> FINGER_LOWER = {0.0, 0.0};
+  static constexpr std::array<double, 2> FINGER_UPPER = {0.04, 0.04};
 
   auto msg = sensor_msgs::msg::JointState();
   msg.header.stamp = time;
   msg.name.reserve(info_.joints.size());
   msg.position.reserve(info_.joints.size());
   msg.velocity.reserve(info_.joints.size());
+
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  apply_gripper_command_to_fingers();
 
   for (std::size_t i = 0; i < info_.joints.size(); ++i) {
     msg.name.push_back(info_.joints[i].name);
@@ -193,6 +224,9 @@ hardware_interface::return_type IsaacSimHardwareInterface::write(
     // 可動域外 [-3.0718, -0.069] であるため、ここでクランプして防ぐ。
     if (i < LOWER.size()) {
       pos = std::clamp(pos, LOWER[i], UPPER[i]);
+    } else if (i - LOWER.size() < FINGER_LOWER.size()) {
+      const auto finger_index = i - LOWER.size();
+      pos = std::clamp(pos, FINGER_LOWER[finger_index], FINGER_UPPER[finger_index]);
     }
     msg.position.push_back(pos);
     msg.velocity.push_back(velocity_command_[i]);
@@ -230,11 +264,51 @@ void IsaacSimHardwareInterface::on_joint_state(
     // 次の write() は実際の位置を送るため起動時の意図しない動きを防ぐ。
     position_command_ = position_state_;
     velocity_command_.assign(n_joints, 0.0);
+    apply_gripper_command_to_fingers();
     RCLCPP_INFO(
       rclcpp::get_logger("IsaacSimHardwareInterface"),
       "Initial joint state received from Isaac Sim. Reseeding command positions.");
   }
   state_received_ = true;
+}
+
+void IsaacSimHardwareInterface::on_gripper_command(
+  const std_msgs::msg::String::SharedPtr msg)
+{
+  std::string data = msg->data;
+  std::transform(data.begin(), data.end(), data.begin(), [](unsigned char c) {
+    return static_cast<char>(std::tolower(c));
+  });
+
+  if (data != "true" && data != "false") {
+    RCLCPP_WARN(
+      rclcpp::get_logger("IsaacSimHardwareInterface"),
+      "Ignoring unsupported gripper command: '%s'",
+      msg->data.c_str());
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(state_mutex_);
+  gripper_closed_command_ = data == "true";
+  apply_gripper_command_to_fingers();
+}
+
+void IsaacSimHardwareInterface::apply_gripper_command_to_fingers()
+{
+  if (!gripper_closed_command_.has_value()) {
+    return;
+  }
+
+  const double finger_target =
+    *gripper_closed_command_ ? kGripperClosedPosition : kGripperOpenPosition;
+
+  for (std::size_t i = 0; i < info_.joints.size(); ++i) {
+    const auto & joint_name = info_.joints[i].name;
+    if (joint_name == kFingerJoint1 || joint_name == kFingerJoint2) {
+      position_command_[i] = finger_target;
+      velocity_command_[i] = 0.0;
+    }
+  }
 }
 
 }  // namespace franka_ros2_control

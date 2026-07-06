@@ -171,9 +171,10 @@ def main(args: list[str] | None = None) -> None:
     _PANDA_JOINT_NAMES = [
         "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
         "panda_joint5", "panda_joint6", "panda_joint7",
+        "panda_finger_joint1", "panda_finger_joint2",
     ]
     # Franka Panda "ready" 姿勢 (panda_joint4=-2.356 は limits [-3.07, -0.07] 内)
-    _PANDA_READY_POSITIONS = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
+    _PANDA_READY_POSITIONS = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04]
 
     isaac_js_pub = node.create_publisher(JointState, "/isaac_joint_states", 10)
 
