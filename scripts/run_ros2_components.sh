@@ -316,17 +316,17 @@ log "  ログ: ${ROBOT_LOG}"
 # 各ノードのログを同じファイルへ集約（識別のためノード名を先頭に付加）
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
 start_bg "tomato_detector_node" \
-  python3 -m tomato_harvest_sim.robot.tomato_detector_node \
+  python3 -m tomato_harvest_sim.robot.perception \
   >> "${ROBOT_LOG}" 2>&1
 
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
 start_bg "behavior_planner_node" \
-  python3 -m tomato_harvest_sim.robot.behavior_planner_node \
+  python3 -m tomato_harvest_sim.robot.behavior_planner \
   >> "${ROBOT_LOG}" 2>&1
 
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
 start_bg "trajectory_planner_node" \
-  python3 -m tomato_harvest_sim.robot.trajectory_planner_node \
+  python3 -m tomato_harvest_sim.robot.motion_planner \
   >> "${ROBOT_LOG}" 2>&1
 
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \

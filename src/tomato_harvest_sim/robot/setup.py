@@ -21,7 +21,12 @@ setup(
     license="Apache-2.0",
     entry_points={
         "console_scripts": [
-            "tomato_harvest_robot_node = tomato_harvest_sim.robot.robot_node:main",
+            "tomato_detector_node = tomato_harvest_sim.robot.perception:main",
+            "behavior_planner_node = tomato_harvest_sim.robot.behavior_planner:main",
+            "trajectory_planner_node = tomato_harvest_sim.robot.motion_planner:main",
+            "trajectory_monitor_node = tomato_harvest_sim.robot.trajectory_monitor_node:main",
+            "motion_command_node = tomato_harvest_sim.robot.motion_command_node:main",
+            "motion_command_executor_node = tomato_harvest_sim.robot.motion_command_executor_node:main",
         ],
     },
 )
