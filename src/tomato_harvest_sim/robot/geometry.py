@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 
-from tomato_harvest_sim.api.contracts import Pose3D
+from tomato_harvest_sim.msg.contracts import Pose3D
 
 
 def world_point_to_local(world_pose: Pose3D, frame_pose: Pose3D) -> Pose3D:

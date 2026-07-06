@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     ControlCommand,
     PhaseMotionPlan,
     Pose3D,

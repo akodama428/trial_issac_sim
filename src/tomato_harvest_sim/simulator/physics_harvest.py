@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from tomato_harvest_sim.api.contracts import Pose3D, TomatoStatus
+from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
 
 
 @dataclass(frozen=True)
@@ -22,11 +22,15 @@ class IsaacPhysicsHarvestBridge:
     STEM_BREAK_TORQUE_NM = 50.0
     TOMATO_MASS_KG = 0.03
     DETACH_DISTANCE_M = 0.02
-    PLACE_DISTANCE_M = 0.06
+    # place_pose はトレイ中心の 0.12m 上空（pregrasp_planner の place_vertical_offset_m）
+    # で、behavior_planner の到達許容が 0.05m あるため、正常リリース時の
+    # tool-tray 距離は最大 0.17m になる。0.06 だと正常な設置でも必ず FALLEN 判定
+    # になるため（run14 で実測）、リリース高さ + 到達許容 + 余裕で 0.18 とする。
+    PLACE_DISTANCE_M = 0.18
     CONTACT_LATCH_GRACE_STEPS = 3
     HAND_TO_TOMATO_DISTANCE_TOLERANCE_M = 0.12
     MAX_ATTACHED_TOMATO_DEVIATION_M = 0.15
-    FINGER_MIDPOINT_TO_TOMATO_TOLERANCE_M = 0.012
+    FINGER_MIDPOINT_TO_TOMATO_TOLERANCE_M = 0.020  # MoveIt EE frame vs panda_hand prim 間の ~1.43cm X オフセットを吸収
     FINGER_CONTACT_POINT_OFFSET_Z_M = 0.0447
     FINGER_GAP_MIN_M = 0.015
     FINGER_GAP_MAX_M = 0.065

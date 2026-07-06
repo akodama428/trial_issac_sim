@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
@@ -16,6 +16,7 @@ from tomato_harvest_sim.api.contracts import (
 )
 from tomato_harvest_sim.robot.motion_planner import MoveIt2PlanningResult, MoveIt2ServiceBridgePlanner, build_planner
 from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
+    _clamp_joint_state_to_bounds,
     _moveit_link_target_pose_from_runtime_tool_pose,
     _trajectory_is_noop,
     _tomato_planning_scene_ops,
@@ -129,6 +130,35 @@ class _RejectingValidator:
         )
 
 
+class _PartialValidator:
+    """pregrasp/grasp/pull は成功するが place は失敗するバリデータ。"""
+
+    def plan_phase_trajectories(
+        self,
+        *,
+        joint_state: JointStateSnapshot,
+        tf_tree: TfTreeSnapshot,
+        scene_snapshot: SceneSnapshot,
+        plan: object,
+    ) -> MoveIt2PlanningResult:
+        trajectory = JointTrajectory(
+            joint_names=joint_state.joint_names,
+            points=(
+                JointTrajectoryPoint(joint_state.positions_rad, 0.0),
+                JointTrajectoryPoint((0.1, -0.3, 0.05, -2.0, 0.1, 1.75, 0.85), 1.0),
+            ),
+        )
+        return MoveIt2PlanningResult(
+            success=False,
+            backend_name="moveit2_service_bridge_partial",
+            reason="pre_place_plan_failed",
+            pregrasp_joint_trajectory=trajectory,
+            grasp_joint_trajectory=trajectory,
+            pull_joint_trajectory=trajectory,
+            place_joint_trajectory=None,
+        )
+
+
 class MoveItPlannerBackendTest(unittest.TestCase):
     def test_world_tomato_is_added_before_robot_attach(self) -> None:
         ops = _tomato_planning_scene_ops(
@@ -218,6 +248,57 @@ class MoveItPlannerBackendTest(unittest.TestCase):
 
         self.assertEqual(plan.planner_name, "moveit2_service_bridge_fallback")
         self.assertIsNone(plan.pregrasp_joint_trajectory)
+
+    def test_partial_result_preserves_pregrasp_grasp_pull_when_place_fails(self) -> None:
+        """place 計画失敗時、pregrasp/grasp/pull 軌道が保持されること。
+
+        pre_place_plan_failed の場合でもロボットが pregrasp まで動けるよう、
+        partial result が pregrasp_joint_trajectory を保持していることを検証する。
+        """
+        planner = MoveIt2ServiceBridgePlanner(bridge=_PartialValidator())
+
+        plan = planner.plan(_target_estimate(), _joint_state(), _tf_tree(), _scene_snapshot())
+
+        self.assertEqual(plan.planner_name, "moveit2_service_bridge_partial")
+        self.assertIsNotNone(plan.pregrasp_joint_trajectory)
+        self.assertIsNotNone(plan.grasp_joint_trajectory)
+        self.assertIsNotNone(plan.pull_joint_trajectory)
+        self.assertIsNone(plan.place_joint_trajectory)
+
+    def test_joint_state_clamped_when_out_of_bounds(self) -> None:
+        """Isaac Sim が 0.0 スタートの場合 panda_joint4 が上限外になるのでクランプされること。
+
+        panda_joint4 の URDF 上限は -0.069 rad。Isaac Sim はデフォルトで全関節 0.0 rad
+        で初期化するため、0.0 > -0.069 となり MoveIt2 が CheckStartStateBounds でリジェクトする。
+        クランプ後は -0.069 になり、他の関節はそのままであることを確認する。
+        """
+        all_zero_state = JointStateSnapshot(
+            joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+            positions_rad=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        )
+
+        clamped = _clamp_joint_state_to_bounds(all_zero_state)
+
+        self.assertAlmostEqual(clamped.positions_rad[0], 0.0, places=6)   # joint1: 0.0 within bounds
+        self.assertAlmostEqual(clamped.positions_rad[3], -0.069, places=6) # joint4: clamped to upper bound
+        self.assertAlmostEqual(clamped.positions_rad[4], 0.0, places=6)   # joint5: 0.0 within bounds
+
+    def test_joint_state_within_bounds_unchanged(self) -> None:
+        """有効な関節状態はクランプで変化しないこと。"""
+        home_state = JointStateSnapshot(
+            joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+            positions_rad=(0.0, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8),
+        )
+
+        clamped = _clamp_joint_state_to_bounds(home_state)
+
+        self.assertEqual(clamped.positions_rad, home_state.positions_rad)
 
     def test_noop_trajectory_is_detected(self) -> None:
         self.assertTrue(

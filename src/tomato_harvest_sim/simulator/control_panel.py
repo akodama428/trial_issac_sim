@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
-from tomato_harvest_sim.api.contracts import ControlCommand, JointStateSnapshot, Pose3D, SceneSnapshot, TomatoStatus
+from tomato_harvest_sim.msg.contracts import ControlCommand, JointStateSnapshot, Pose3D, SceneSnapshot, TomatoStatus
 
 
 class ControlPanelSystem(Protocol):

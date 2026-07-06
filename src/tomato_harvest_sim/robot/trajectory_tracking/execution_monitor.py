@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.contracts import JointTrajectory
-from tomato_harvest_sim.api.trajectory_execution import (
+from tomato_harvest_sim.msg.contracts import JointTrajectory
+from tomato_harvest_sim.msg.trajectory_execution import (
     TrajectoryExecutionFeedback,
     TrajectoryExecutionResult,
     TrajectoryExecutionState,

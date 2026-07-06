@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     MotionCommand,
     PhaseId,

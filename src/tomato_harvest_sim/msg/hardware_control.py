@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from tomato_harvest_sim.api.contracts import JointStateSnapshot, Pose3D
+from tomato_harvest_sim.msg.contracts import JointStateSnapshot, Pose3D
 
 
 @dataclass(frozen=True)

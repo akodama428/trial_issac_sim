@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.contracts import CameraFrame, TargetEstimate, TfTreeSnapshot
+from tomato_harvest_sim.msg.contracts import CameraFrame, TargetEstimate, TfTreeSnapshot
 from tomato_harvest_sim.robot.geometry import world_point_to_local
 
 

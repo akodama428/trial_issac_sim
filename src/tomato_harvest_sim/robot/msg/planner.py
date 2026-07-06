@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from tomato_harvest_sim.api.contracts import HarvestMotionPlan, JointTrajectory, JointStateSnapshot, SceneSnapshot, TargetEstimate, TfTreeSnapshot
+from tomato_harvest_sim.msg.contracts import (
+    HarvestMotionPlan,
+    JointStateSnapshot,
+    JointTrajectory,
+    SceneSnapshot,
+    TargetEstimate,
+    TfTreeSnapshot,
+)
 
 
 @dataclass(frozen=True)

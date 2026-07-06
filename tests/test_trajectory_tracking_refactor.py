@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
@@ -15,8 +15,8 @@ from tomato_harvest_sim.api.contracts import (
     SceneSnapshot,
     TomatoStatus,
 )
-from tomato_harvest_sim.api.hardware_control import HardwareControlPort, HardwareStateSample
-from tomato_harvest_sim.api.trajectory_execution import (
+from tomato_harvest_sim.msg.hardware_control import HardwareControlPort, HardwareStateSample
+from tomato_harvest_sim.msg.trajectory_execution import (
     TrajectoryExecutionFeedback,
     TrajectoryExecutionPort,
     TrajectoryExecutionRequest,
@@ -104,7 +104,7 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
                 return True
 
             def get_observation(self):
-                from tomato_harvest_sim.robot.api.trajectory_tracking import ObservationData
+                from tomato_harvest_sim.robot.msg.trajectory_tracking import ObservationData
 
                 return ObservationData(
                     joint_positions=self.positions.copy(),
@@ -269,7 +269,7 @@ class TrajectoryTrackingRefactorTest(unittest.TestCase):
                 return True
 
             def get_observation(self):
-                from tomato_harvest_sim.robot.api.trajectory_tracking import ObservationData
+                from tomato_harvest_sim.robot.msg.trajectory_tracking import ObservationData
 
                 return ObservationData(
                     joint_positions=self.positions.copy(),

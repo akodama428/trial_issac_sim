@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import JointTrajectory, JointTrajectoryPoint
-from tomato_harvest_sim.robot.api.trajectory_tracking import TrajectoryReferenceState, TrajectorySegment
+from tomato_harvest_sim.msg.contracts import JointTrajectory, JointTrajectoryPoint
+from tomato_harvest_sim.robot.msg.trajectory_tracking import TrajectoryReferenceState, TrajectorySegment
 
 
 def step_toward_joint_positions(

@@ -1,4 +1,4 @@
-from tomato_harvest_sim.robot.api.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
+from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
 from tomato_harvest_sim.robot.motion_planner.moveit_service import (
     ISAAC_PANDA_URDF,
     MoveItServiceManager,

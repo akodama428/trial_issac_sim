@@ -1,3 +1,7 @@
+"""ROS2 ブリッジ。simulator / robot 境界のメッセージ輸送を担う。
+
+api/bridge.py から移設。import を msg.contracts に統一済み。
+"""
 from __future__ import annotations
 
 import json
@@ -6,7 +10,7 @@ import os
 from dataclasses import dataclass
 from typing import Protocol
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     CameraFrame,
     ControlCommand,
     PhaseId,
@@ -22,26 +26,34 @@ from tomato_harvest_sim.api.contracts import (
     TfTreeSnapshot,
     TomatoStatus,
 )
-
-
-CONTROL_TOPIC = "/tomato_harvest/control"
-SCENE_SNAPSHOT_TOPIC = "/tomato_harvest/scene_snapshot"
-MOTION_COMMAND_TOPIC = "/tomato_harvest/motion_command"
-MOTION_METADATA_TOPIC = "/tomato_harvest/motion_metadata"
-TARGET_ESTIMATE_TOPIC = "/tomato_harvest/target_estimate"
-FIXED_CAMERA_TOPIC = "/camera/fixed/image_raw"
-HAND_CAMERA_TOPIC = "/camera/hand/image_raw"
-FOLLOW_JOINT_TRAJECTORY_ACTION = "/tomato_harvest/follow_joint_trajectory"
-DEFAULT_JOINT_NAMES = (
-    "panda_joint1",
-    "panda_joint2",
-    "panda_joint3",
-    "panda_joint4",
-    "panda_joint5",
-    "panda_joint6",
-    "panda_joint7",
+from tomato_harvest_sim.msg.topics import (
+    CONTROL_TOPIC,
+    FIXED_CAMERA_TOPIC,
+    FOLLOW_JOINT_TRAJECTORY_ACTION,
+    HAND_CAMERA_TOPIC,
+    MOTION_COMMAND_TOPIC,
+    MOTION_METADATA_TOPIC,
+    SCENE_SNAPSHOT_TOPIC,
+    TARGET_ESTIMATE_TOPIC,
+    DEFAULT_JOINT_NAMES,
+    DEFAULT_JOINT_POSITIONS_RAD,
 )
-DEFAULT_JOINT_POSITIONS_RAD = (0.0, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8)
+
+__all__ = [
+    "BridgeProtocol",
+    "BridgeState",
+    "InMemoryRos2Bridge",
+    "Ros2LoopbackBridge",
+    "create_bridge",
+    "CONTROL_TOPIC",
+    "FIXED_CAMERA_TOPIC",
+    "HAND_CAMERA_TOPIC",
+    "SCENE_SNAPSHOT_TOPIC",
+    "MOTION_COMMAND_TOPIC",
+    "TARGET_ESTIMATE_TOPIC",
+    "DEFAULT_JOINT_NAMES",
+    "DEFAULT_JOINT_POSITIONS_RAD",
+]
 
 
 class BridgeProtocol(Protocol):
@@ -359,22 +371,21 @@ class Ros2LoopbackBridge:
         self.state.last_motion_command = command
 
         metadata_message = String()
-        metadata_message.data = json.dumps(_motion_command_to_dict(command, include_trajectory=False))
+        metadata_message.data = json.dumps(_motion_command_to_dict(command))
         self._motion_metadata_publisher.publish(metadata_message)
 
-        # Get trajectory from phase_motion_plan if available
         joint_trajectory = command.phase_motion_plan.joint_trajectory if command.phase_motion_plan is not None else None
 
         if joint_trajectory is None:
             command_message = String()
-            command_message.data = json.dumps(_motion_command_to_dict(command, include_trajectory=True))
+            command_message.data = json.dumps(_motion_command_to_dict(command))
             self._motion_command_publisher.publish(command_message)
             self.spin_once()
             return
 
         if not self._ensure_trajectory_server_ready():
             command_message = String()
-            command_message.data = json.dumps(_motion_command_to_dict(command, include_trajectory=True))
+            command_message.data = json.dumps(_motion_command_to_dict(command))
             self._motion_command_publisher.publish(command_message)
             self.spin_once()
             return
@@ -452,10 +463,8 @@ class Ros2LoopbackBridge:
             planner_name="ros2_topic_action_fallback",
         )
         trajectory = _joint_trajectory_from_ros_msg(getattr(goal_handle.request, "trajectory", None))
-        # Embed the trajectory into phase_motion_plan if metadata has one, otherwise ignore
         phase_motion_plan = metadata.phase_motion_plan
         if phase_motion_plan is not None and trajectory is not None:
-            from tomato_harvest_sim.api.contracts import PhaseMotionPlan
             phase_motion_plan = PhaseMotionPlan(
                 phase_id=phase_motion_plan.phase_id,
                 phase_goal_pose=phase_motion_plan.phase_goal_pose,
@@ -503,6 +512,10 @@ def create_bridge(*, transport: str | None = None) -> BridgeProtocol:
     return Ros2LoopbackBridge()
 
 
+# ---------------------------------------------------------------------------
+# Private helpers (available for import by simulator_node.py etc.)
+# ---------------------------------------------------------------------------
+
 def _camera_spec_from_snapshot(snapshot: SceneSnapshot, camera_name: str) -> tuple[Pose3D, str, str]:
     if camera_name == "fixed_camera":
         return snapshot.fixed_camera_pose, FIXED_CAMERA_TOPIC, "fixed_camera_frame"
@@ -512,14 +525,12 @@ def _camera_spec_from_snapshot(snapshot: SceneSnapshot, camera_name: str) -> tup
 
 
 def _joint_state_from_snapshot(snapshot: SceneSnapshot | None) -> JointStateSnapshot:
-    # motion_joint_trajectory is no longer on SceneSnapshot; use default positions.
     plan = snapshot.active_phase_motion_plan if snapshot is not None else None
     if plan is None or plan.joint_trajectory is None or not plan.joint_trajectory.points:
         return JointStateSnapshot(
             joint_names=DEFAULT_JOINT_NAMES,
             positions_rad=DEFAULT_JOINT_POSITIONS_RAD,
         )
-
     positions = plan.joint_trajectory.points[-1].positions_rad
     return JointStateSnapshot(
         joint_names=plan.joint_trajectory.joint_names,
@@ -643,26 +654,16 @@ def _joint_trajectory_from_ros_msg(message: object) -> JointTrajectory | None:
 def _pose_to_dict(pose: Pose3D | None) -> dict[str, float] | None:
     if pose is None:
         return None
-    return {
-        "x": pose.x,
-        "y": pose.y,
-        "z": pose.z,
-        "roll": pose.roll,
-        "pitch": pose.pitch,
-        "yaw": pose.yaw,
-    }
+    return {"x": pose.x, "y": pose.y, "z": pose.z,
+            "roll": pose.roll, "pitch": pose.pitch, "yaw": pose.yaw}
 
 
 def _pose_from_dict(data: dict[str, object] | None) -> Pose3D | None:
     if data is None:
         return None
     return Pose3D(
-        x=float(data["x"]),
-        y=float(data["y"]),
-        z=float(data["z"]),
-        roll=float(data["roll"]),
-        pitch=float(data["pitch"]),
-        yaw=float(data["yaw"]),
+        x=float(data["x"]), y=float(data["y"]), z=float(data["z"]),
+        roll=float(data["roll"]), pitch=float(data["pitch"]), yaw=float(data["yaw"]),
     )
 
 
@@ -672,11 +673,8 @@ def _trajectory_to_dict(trajectory: JointTrajectory | None) -> dict[str, object]
     return {
         "joint_names": list(trajectory.joint_names),
         "points": [
-            {
-                "positions_rad": list(point.positions_rad),
-                "time_from_start_sec": point.time_from_start_sec,
-            }
-            for point in trajectory.points
+            {"positions_rad": list(p.positions_rad), "time_from_start_sec": p.time_from_start_sec}
+            for p in trajectory.points
         ],
     }
 
@@ -686,15 +684,13 @@ def _trajectory_from_dict(data: dict[str, object] | None) -> JointTrajectory | N
         return None
     points = []
     for point in data.get("points", []):
-        point_data = point if isinstance(point, dict) else {}
-        points.append(
-            JointTrajectoryPoint(
-                positions_rad=tuple(float(value) for value in point_data.get("positions_rad", [])),
-                time_from_start_sec=float(point_data.get("time_from_start_sec", 0.0)),
-            )
-        )
+        pd = point if isinstance(point, dict) else {}
+        points.append(JointTrajectoryPoint(
+            positions_rad=tuple(float(v) for v in pd.get("positions_rad", [])),
+            time_from_start_sec=float(pd.get("time_from_start_sec", 0.0)),
+        ))
     return JointTrajectory(
-        joint_names=tuple(str(name) for name in data.get("joint_names", [])),
+        joint_names=tuple(str(n) for n in data.get("joint_names", [])),
         points=tuple(points),
     )
 
@@ -705,7 +701,7 @@ def _phase_motion_plan_to_dict(plan: PhaseMotionPlan | None) -> dict[str, object
     return {
         "phase_id": plan.phase_id.value,
         "phase_goal_pose": _pose_to_dict(plan.phase_goal_pose),
-        "active_waypoints": [_pose_to_dict(pose) for pose in plan.active_waypoints],
+        "active_waypoints": [_pose_to_dict(p) for p in plan.active_waypoints],
         "joint_trajectory": _trajectory_to_dict(plan.joint_trajectory),
     }
 
@@ -713,22 +709,22 @@ def _phase_motion_plan_to_dict(plan: PhaseMotionPlan | None) -> dict[str, object
 def _phase_motion_plan_from_dict(data: dict[str, object] | None) -> PhaseMotionPlan | None:
     if data is None:
         return None
-    waypoint_dicts = data.get("active_waypoints", [])
+    waypoints = [
+        pose
+        for pose in (_pose_from_dict(w if isinstance(w, dict) else None) for w in data.get("active_waypoints", []))
+        if pose is not None
+    ]
     return PhaseMotionPlan(
         phase_id=PhaseId(str(data["phase_id"])),
         phase_goal_pose=_pose_from_dict(data.get("phase_goal_pose") if isinstance(data.get("phase_goal_pose"), dict) else None),
-        active_waypoints=tuple(
-            pose
-            for pose in (_pose_from_dict(item if isinstance(item, dict) else None) for item in waypoint_dicts)
-            if pose is not None
-        ),
+        active_waypoints=tuple(waypoints),
         joint_trajectory=_trajectory_from_dict(
             data.get("joint_trajectory") if isinstance(data.get("joint_trajectory"), dict) else None
         ),
     )
 
 
-def _motion_command_to_dict(command: MotionCommand, *, include_trajectory: bool) -> dict[str, object]:
+def _motion_command_to_dict(command: MotionCommand) -> dict[str, object]:
     return {
         "command_name": command.command_name,
         "planner_name": command.planner_name,
@@ -784,6 +780,7 @@ def _scene_snapshot_to_dict(snapshot: SceneSnapshot) -> dict[str, object]:
 
 
 def _scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
+    _zero = Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     return SceneSnapshot(
         phase=ScenePhase(str(data["phase"])),
         active_camera=str(data["active_camera"]),
@@ -793,14 +790,14 @@ def _scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
         robot_home=bool(data["robot_home"]),
         cycle_id=int(data["cycle_id"]),
         robot_model=str(data["robot_model"]),
-        robot_base_pose=_pose_from_dict(data.get("robot_base_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        fixed_camera_pose=_pose_from_dict(data.get("fixed_camera_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        hand_camera_pose=_pose_from_dict(data.get("hand_camera_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        branch_pose=_pose_from_dict(data.get("branch_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        stem_pose=_pose_from_dict(data.get("stem_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        tomato_pose=_pose_from_dict(data.get("tomato_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        tray_pose=_pose_from_dict(data.get("tray_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        robot_tool_pose=_pose_from_dict(data.get("robot_tool_pose")) or Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        robot_base_pose=_pose_from_dict(data.get("robot_base_pose")) or _zero,
+        fixed_camera_pose=_pose_from_dict(data.get("fixed_camera_pose")) or _zero,
+        hand_camera_pose=_pose_from_dict(data.get("hand_camera_pose")) or _zero,
+        branch_pose=_pose_from_dict(data.get("branch_pose")) or _zero,
+        stem_pose=_pose_from_dict(data.get("stem_pose")) or _zero,
+        tomato_pose=_pose_from_dict(data.get("tomato_pose")) or _zero,
+        tray_pose=_pose_from_dict(data.get("tray_pose")) or _zero,
+        robot_tool_pose=_pose_from_dict(data.get("robot_tool_pose")) or _zero,
         target_tool_pose=_pose_from_dict(data.get("target_tool_pose")),
         grasp_result_reason=str(data["grasp_result_reason"]) if data.get("grasp_result_reason") is not None else None,
         active_phase_motion_plan=_phase_motion_plan_from_dict(

@@ -4,7 +4,7 @@ import math
 import os
 from dataclasses import dataclass, replace
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     JointStateSnapshot,
     JointTrajectory,
@@ -14,7 +14,7 @@ from tomato_harvest_sim.api.contracts import (
     TargetEstimate,
     TfTreeSnapshot,
 )
-from tomato_harvest_sim.robot.api.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
+from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
 from tomato_harvest_sim.robot.motion_planner.pregrasp_planner import MoveItStylePreGraspPlanner
 from tomato_harvest_sim.robot.motion_planner.ros_python import ensure_ros_python_modules_available
 
@@ -56,14 +56,15 @@ class MoveIt2ServiceBridgePlanner(MotionPlanner):
             scene_snapshot=scene_snapshot,
             plan=fallback_plan,
         )
+        # MoveIt2 が None を返したフェーズはフォールバック（幾何学的）軌道で補完する
         return replace(
             fallback_plan,
             planner_name=result.backend_name,
-            pregrasp_joint_trajectory=result.pregrasp_joint_trajectory,
-            grasp_joint_trajectory=result.grasp_joint_trajectory,
-            pull_joint_trajectory=result.pull_joint_trajectory,
-            place_joint_trajectory=result.place_joint_trajectory,
-            planning_scene_object_ids=result.planning_scene_object_ids,
+            pregrasp_joint_trajectory=result.pregrasp_joint_trajectory or fallback_plan.pregrasp_joint_trajectory,
+            grasp_joint_trajectory=result.grasp_joint_trajectory or fallback_plan.grasp_joint_trajectory,
+            pull_joint_trajectory=result.pull_joint_trajectory or fallback_plan.pull_joint_trajectory,
+            place_joint_trajectory=result.place_joint_trajectory or fallback_plan.place_joint_trajectory,
+            planning_scene_object_ids=result.planning_scene_object_ids or fallback_plan.planning_scene_object_ids,
         )
 
     def plan_place_from_joint_state(
@@ -173,7 +174,7 @@ class Ros2MoveIt2PlannerBridge:
 
         base_frame_id = tf_tree.robot_base_frame_id
         planning_scene_object_ids = _planning_scene_object_ids()
-        current_joint_state = joint_state
+        current_joint_state = _clamp_joint_state_to_bounds(joint_state)
 
         pregrasp_trajectory = self._plan_phase(
             clients=clients,
@@ -222,7 +223,16 @@ class Ros2MoveIt2PlannerBridge:
                 attach_tomato=True,
             )
             if approach_trajectory is None:
-                return self._fallback_result("pre_place_plan_failed")
+                return MoveIt2PlanningResult(
+                    success=False,
+                    backend_name="moveit2_service_bridge_partial",
+                    reason="pre_place_plan_failed",
+                    pregrasp_joint_trajectory=pregrasp_trajectory,
+                    grasp_joint_trajectory=grasp_trajectory,
+                    pull_joint_trajectory=pull_trajectory,
+                    place_joint_trajectory=None,
+                    planning_scene_object_ids=planning_scene_object_ids,
+                )
             current_joint_state = _joint_state_from_trajectory(approach_trajectory)
         else:
             approach_trajectory = None
@@ -236,7 +246,18 @@ class Ros2MoveIt2PlannerBridge:
             attach_tomato=True,
         )
         if place_trajectory is None:
-            return self._fallback_result("place_plan_failed")
+            # place は失敗したが pregrasp/grasp/pull は成功済み → 部分結果を返す
+            # MoveIt2ServiceBridgePlanner.plan() がフォールバック軌道で補完する
+            return MoveIt2PlanningResult(
+                success=False,
+                backend_name="moveit2_service_bridge_partial",
+                reason="place_plan_failed",
+                pregrasp_joint_trajectory=pregrasp_trajectory,
+                grasp_joint_trajectory=grasp_trajectory,
+                pull_joint_trajectory=pull_trajectory,
+                place_joint_trajectory=None,
+                planning_scene_object_ids=planning_scene_object_ids,
+            )
 
         if approach_trajectory is not None:
             place_trajectory = _concatenate_trajectories(approach_trajectory, place_trajectory)
@@ -274,7 +295,7 @@ class Ros2MoveIt2PlannerBridge:
             return self._fallback_result("service_unavailable")
 
         base_frame_id = tf_tree.robot_base_frame_id
-        current_joint_state = joint_state
+        current_joint_state = _clamp_joint_state_to_bounds(joint_state)
 
         pre_place_pose = plan.place_waypoints[0] if plan.place_waypoints else None
         if pre_place_pose is not None:
@@ -634,6 +655,40 @@ def _trajectory_is_noop(
     ) <= tolerance_rad
 
 
+_PANDA_JOINT_BOUNDS: dict[str, tuple[float, float]] = {
+    "panda_joint1": (-2.8973, 2.8973),
+    "panda_joint2": (-1.7628, 1.7628),
+    "panda_joint3": (-2.8973, 2.8973),
+    "panda_joint4": (-3.0718, -0.069),
+    "panda_joint5": (-2.8973, 2.8973),
+    "panda_joint6": (-0.017, 3.7525),
+    "panda_joint7": (-2.8973, 2.8973),
+}
+
+
+def _clamp_joint_state_to_bounds(joint_state: JointStateSnapshot) -> JointStateSnapshot:
+    """MoveIt2 に送る前に関節位置を URDF 境界内にクランプする。
+
+    Isaac Sim はロボットを全関節 0.0 rad で初期化するが、
+    panda_joint4 の上限は -0.069 rad であり 0.0 は範囲外になる。
+    MoveIt2 の CheckStartStateBounds がプランを拒否しないよう、
+    境界違反があれば最も近い有効値へスナップする。
+    """
+    clamped = list(joint_state.positions_rad)
+    for i, name in enumerate(joint_state.joint_names):
+        if i >= len(clamped):
+            break
+        bounds = _PANDA_JOINT_BOUNDS.get(name)
+        if bounds is None:
+            continue
+        lo, hi = bounds
+        if clamped[i] < lo:
+            clamped[i] = lo
+        elif clamped[i] > hi:
+            clamped[i] = hi
+    return JointStateSnapshot(joint_names=joint_state.joint_names, positions_rad=tuple(clamped))
+
+
 def _joint_state_from_trajectory(trajectory: JointTrajectory) -> JointStateSnapshot:
     last_point = trajectory.points[-1]
     return JointStateSnapshot(joint_names=trajectory.joint_names, positions_rad=last_point.positions_rad)
@@ -645,12 +700,17 @@ def _concatenate_trajectories(traj1: JointTrajectory, traj2: JointTrajectory) ->
     if not traj2.points:
         return traj1
     time_offset = traj1.points[-1].time_from_start_sec
+    # traj2 の最初の点が t=0.0 の場合、time_offset を加算すると traj1 の最後の点と同じ
+    # タイムスタンプになり JTC が拒否する。t=0.0 の点はスタート位置の重複なのでスキップする。
+    traj2_points = traj2.points[1:] if traj2.points[0].time_from_start_sec == 0.0 else traj2.points
+    if not traj2_points:
+        return traj1
     shifted = tuple(
         JointTrajectoryPoint(
             positions_rad=p.positions_rad,
             time_from_start_sec=p.time_from_start_sec + time_offset,
         )
-        for p in traj2.points
+        for p in traj2_points
     )
     return JointTrajectory(joint_names=traj1.joint_names, points=traj1.points + shifted)
 

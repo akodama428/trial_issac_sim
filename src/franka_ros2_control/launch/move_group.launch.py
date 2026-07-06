@@ -66,11 +66,6 @@ def generate_launch_description() -> LaunchDescription:
                 "monitor_dynamics": False,
             },
             {"use_sim_time": False},
-            # Isaac Sim は panda_joint4 を URDF 上限 (-0.0698 rad) と
-            # 浮動小数点レベルで一致する値 (~-0.06979978) で初期化する。
-            # CheckStartStateBounds がこの微小誤差を許容できるよう 1 mrad の
-            # 余裕を設定する。
-            {"start_state_max_bounds_error": 0.001},
         ],
     )
 

@@ -4,8 +4,8 @@ import unittest
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import JointStateSnapshot
-from tomato_harvest_sim.api.hardware_control import HardwareCommandSample
+from tomato_harvest_sim.msg.contracts import JointStateSnapshot
+from tomato_harvest_sim.msg.hardware_control import HardwareCommandSample
 from tomato_harvest_sim.simulator.isaac_ros2_control_system import IsaacRos2ControlSystem
 
 

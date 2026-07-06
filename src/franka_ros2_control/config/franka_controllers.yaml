@@ -45,7 +45,12 @@ joint_trajectory_controller:
     allow_integration_in_goal_trajectories: true
 
     constraints:
-      stopped_velocity_tolerance: 0.01
+      # 0.05: 速度静止判定は「腕が実際に到着して停止した」ことの確認として必須。
+      # 0.0（無効化）にすると軌道時間経過で即 success となり、腕の到着前に
+      # グリッパーが閉じて把持が空振りする（run13 で実測）。
+      # トマト把持中の残留振動による abort は behavior_planner 側の
+      # 成果ベース遷移（tomato_status / 到達距離判定）で救済する。
+      stopped_velocity_tolerance: 0.05
       goal_time: 5.0
       # goal: 0.0 disables the final position tolerance check.
       # In standalone mode (no Isaac Sim), the hardware interface does not

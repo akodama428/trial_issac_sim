@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from tomato_harvest_sim.api.contracts import HarvestTaskPhase, PhaseId, SuccessJudge
+from tomato_harvest_sim.msg.contracts import HarvestTaskPhase, PhaseId, SuccessJudge
 from tomato_harvest_sim.robot.behavior_planner import BehaviorPlanner, PhaseExecutionIntentBuilder
 
 

@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 
-from tomato_harvest_sim.api.hardware_control import HardwareCommandSample, HardwareControlPort, HardwareStateSample
+from tomato_harvest_sim.msg.hardware_control import HardwareCommandSample, HardwareControlPort, HardwareStateSample
 from tomato_harvest_sim.simulator.isaac_franka_driver import IsaacFrankaDriver
 
 

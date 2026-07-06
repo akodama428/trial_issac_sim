@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     AbortPolicy,
     PhaseExecutionIntent,
     PhaseId,

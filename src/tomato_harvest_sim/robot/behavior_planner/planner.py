@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.bridge import BridgeProtocol
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.bridge import BridgeProtocol
+from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     HarvestTaskPhase,
     PhaseExecutionIntent,

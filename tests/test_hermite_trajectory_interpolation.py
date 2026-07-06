@@ -4,8 +4,8 @@ import unittest
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import JointTrajectory, JointTrajectoryPoint
-from tomato_harvest_sim.robot.api.trajectory_tracking import TrajectorySegment
+from tomato_harvest_sim.msg.contracts import JointTrajectory, JointTrajectoryPoint
+from tomato_harvest_sim.robot.msg.trajectory_tracking import TrajectorySegment
 from tomato_harvest_sim.robot.trajectory_tracking.reference_tracking import (
     build_joint_trajectory_segments,
     sample_trajectory_reference_state,

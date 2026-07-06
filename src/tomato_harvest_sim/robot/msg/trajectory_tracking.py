@@ -1,3 +1,4 @@
+"""軌跡追従型定義。robot/api/trajectory_tracking.py から移設。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -5,7 +6,7 @@ from typing import Protocol
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import ExecutionPhaseSpec, JointStateSnapshot, JointTrajectory, PhaseMotionPlan, Pose3D
+from tomato_harvest_sim.msg.contracts import ExecutionPhaseSpec, JointStateSnapshot, JointTrajectory, PhaseMotionPlan, Pose3D
 
 
 @dataclass(frozen=True)

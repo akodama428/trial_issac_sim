@@ -31,7 +31,7 @@ from sensor_msgs.msg import Image, JointState
 from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
-from tomato_harvest_sim.api.bridge import (
+from tomato_harvest_sim.msg.bridge import (
     CONTROL_TOPIC,
     FIXED_CAMERA_TOPIC,
     HAND_CAMERA_TOPIC,
@@ -40,7 +40,7 @@ from tomato_harvest_sim.api.bridge import (
     _build_tf_message,
     _scene_snapshot_to_dict,
 )
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     ControlCommand,
     JointStateSnapshot,
     SceneSnapshot,
@@ -57,11 +57,14 @@ class SimulatorNode(Node):
     Isaac Sim の物理ステップごとに tick() を呼ぶこと。
     """
 
+    _GRIPPER_CLOSED_TOPIC = "/tomato_harvest/gripper_closed"
+
     def __init__(self, scene_runtime: IsaacSceneRuntime) -> None:
         super().__init__("tomato_harvest_simulator_node")
 
         self._scene_runtime = scene_runtime
         self._pending_control: ControlCommand | None = None
+        self._pending_gripper_command: bool | None = None  # None=未受信
 
         self._scene_snapshot_pub = self.create_publisher(String, SCENE_SNAPSHOT_TOPIC, 10)
         self._fixed_camera_pub = self.create_publisher(Image, FIXED_CAMERA_TOPIC, 10)
@@ -70,6 +73,7 @@ class SimulatorNode(Node):
         self._tf_pub = self.create_publisher(TFMessage, "/tf", 10)
 
         self.create_subscription(String, CONTROL_TOPIC, self._on_control, 10)
+        self.create_subscription(String, self._GRIPPER_CLOSED_TOPIC, self._on_gripper_command, 10)
 
         self.get_logger().info("tomato_harvest_simulator_node 起動")
 
@@ -98,6 +102,13 @@ class SimulatorNode(Node):
             self._scene_runtime.apply_control(self._pending_control)
             self._pending_control = None
 
+        if self._pending_gripper_command is True:
+            self._scene_runtime.close_gripper()
+            self._pending_gripper_command = None
+        elif self._pending_gripper_command is False:
+            self._scene_runtime.open_gripper()
+            self._pending_gripper_command = None
+
         snapshot = self._scene_runtime.snapshot()
 
         if joint_state is not None:
@@ -111,6 +122,13 @@ class SimulatorNode(Node):
             self._pending_control = ControlCommand(msg.data.strip().lower())
         except ValueError:
             self.get_logger().warning(f"Unknown control command: {msg.data!r}")
+
+    def _on_gripper_command(self, msg: String) -> None:
+        data = msg.data.strip().lower()
+        if data == "true":
+            self._pending_gripper_command = True
+        elif data == "false":
+            self._pending_gripper_command = False
 
     def _publish_snapshot(self, snapshot: SceneSnapshot) -> None:
         scene_msg = String()

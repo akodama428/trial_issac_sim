@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from tomato_harvest_sim.api.contracts import Pose3D
+from tomato_harvest_sim.msg.contracts import Pose3D
 
 
 @dataclass(frozen=True)

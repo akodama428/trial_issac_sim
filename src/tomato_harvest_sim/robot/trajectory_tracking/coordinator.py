@@ -6,13 +6,13 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from tomato_harvest_sim.api.hardware_control import HardwareControlPort
-from tomato_harvest_sim.api.trajectory_execution import (
+from tomato_harvest_sim.msg.hardware_control import HardwareControlPort
+from tomato_harvest_sim.msg.trajectory_execution import (
     TrajectoryExecutionPort,
     TrajectoryExecutionRequest,
 )
-from tomato_harvest_sim.api.contracts import JointStateSnapshot, JointTrajectory, Pose3D, SceneSnapshot
-from tomato_harvest_sim.robot.api.trajectory_tracking import (
+from tomato_harvest_sim.msg.contracts import JointStateSnapshot, JointTrajectory, Pose3D, SceneSnapshot
+from tomato_harvest_sim.robot.msg.trajectory_tracking import (
     FrankaExecutionDriverProtocol,
     FrankaMotionProgress,
     ObservationData,

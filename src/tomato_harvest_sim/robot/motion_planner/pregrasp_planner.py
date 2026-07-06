@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from tomato_harvest_sim.api.contracts import (
+from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     JointStateSnapshot,
     Pose3D,
@@ -17,8 +17,8 @@ class MoveItStylePreGraspPlanner:
         approach_offset_m: float = 0.12,
         vertical_offset_m: float = 0.09,
         grasp_hover_offset_z_m: float = 0.11,
-        grasp_entry_offset_z_m: float = 0.07,
-        grasp_target_offset_z_m: float = 0.045,
+        grasp_entry_offset_z_m: float = 0.085,
+        grasp_target_offset_z_m: float = 0.060,
         pull_offset_x_m: float = 0.08,
         pull_offset_z_m: float = 0.08,
         pull_lift_offset_x_m: float = 0.02,

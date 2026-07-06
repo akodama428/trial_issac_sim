@@ -27,7 +27,7 @@ __all__ = [
 ]
 
 if TYPE_CHECKING:
-    from tomato_harvest_sim.robot.api.trajectory_tracking import (
+    from tomato_harvest_sim.robot.msg.trajectory_tracking import (
         FrankaExecutionDriverProtocol,
         FrankaMotionProgress,
         ObservationData,

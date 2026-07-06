@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from tomato_harvest_sim.api.contracts import HarvestMotionPlan, JointTrajectory, MotionCommand, Pose3D, SceneSnapshot, TargetEstimate
+from tomato_harvest_sim.msg.contracts import HarvestMotionPlan, JointTrajectory, MotionCommand, Pose3D, SceneSnapshot, TargetEstimate
 
 
 @dataclass(frozen=True)

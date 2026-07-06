@@ -213,11 +213,11 @@ trap cleanup EXIT INT TERM
 
 log "--- 既存プロセスのクリーンアップ ---"
 pkill -f "ros2_control_node" 2>/dev/null || true
-pkill -f "tomato_harvest_sim.robot.robot_node" 2>/dev/null || true
-pkill -f "tomato_harvest_sim.simulator.simulator_node" 2>/dev/null || true
+pkill -f "tomato_harvest_sim\." 2>/dev/null || true  # 全 tomato_harvest_sim ノード
+pkill -f "run_harvest_viewer" 2>/dev/null || true
 pkill -f "moveit_ros_move_group" 2>/dev/null || true
 pkill -f "robot_state_publisher" 2>/dev/null || true
-sleep 2
+sleep 3
 
 # ---------------------------------------------------------------------------- #
 # 3. franka_ros2_control 起動（background）
@@ -308,14 +308,40 @@ if [[ "${USE_MOVEIT}" == "true" ]]; then
 fi
 
 # ---------------------------------------------------------------------------- #
-# 5. tomato_harvest_robot_node 起動（background）
+# 5. tomato_harvest ロボットノード群 起動（background）
 # ---------------------------------------------------------------------------- #
-log "--- robot_node 起動 ---"
+log "--- ロボットノード群 起動 ---"
 log "  ログ: ${ROBOT_LOG}"
 
+# 各ノードのログを同じファイルへ集約（識別のためノード名を先頭に付加）
 PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-start_bg "robot_node" \
-  python3 -m tomato_harvest_sim.robot.robot_node \
+start_bg "tomato_detector_node" \
+  python3 -m tomato_harvest_sim.robot.tomato_detector_node \
+  >> "${ROBOT_LOG}" 2>&1
+
+PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+start_bg "behavior_planner_node" \
+  python3 -m tomato_harvest_sim.robot.behavior_planner_node \
+  >> "${ROBOT_LOG}" 2>&1
+
+PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+start_bg "trajectory_planner_node" \
+  python3 -m tomato_harvest_sim.robot.trajectory_planner_node \
+  >> "${ROBOT_LOG}" 2>&1
+
+PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+start_bg "trajectory_monitor_node" \
+  python3 -m tomato_harvest_sim.robot.trajectory_monitor_node \
+  >> "${ROBOT_LOG}" 2>&1
+
+PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+start_bg "motion_command_node" \
+  python3 -m tomato_harvest_sim.robot.motion_command_node \
+  >> "${ROBOT_LOG}" 2>&1
+
+PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+start_bg "motion_command_executor_node" \
+  python3 -m tomato_harvest_sim.robot.motion_command_executor_node \
   >> "${ROBOT_LOG}" 2>&1
 
 # ---------------------------------------------------------------------------- #

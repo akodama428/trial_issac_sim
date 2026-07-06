@@ -1,10 +1,11 @@
+"""軌跡実行ポート型定義。api/trajectory_execution.py から移設。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from tomato_harvest_sim.api.contracts import ExecutionPhaseSpec, JointTrajectory, Pose3D
+from tomato_harvest_sim.msg.contracts import ExecutionPhaseSpec, JointTrajectory, Pose3D
 
 
 class TrajectoryExecutionState(StrEnum):

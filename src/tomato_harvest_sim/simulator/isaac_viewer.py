@@ -160,6 +160,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _pump_updates(simulation_app.update, frame_count=4)
         _wait_for_first_frame(simulation_app=simulation_app, max_frames=240)
         franka_driver = IsaacFrankaDriver(robot_prim_path=plan.robot_prim_path)
+        _initialize_robot_to_home(simulation_app=simulation_app, franka_driver=franka_driver)
         from tomato_harvest_sim.simulator.isaac_joint_ros2_bridge import IsaacJointRos2Bridge
         isaac_joint_bridge = IsaacJointRos2Bridge(driver=franka_driver)
         _run_simulator_node_main_loop(
@@ -519,14 +520,15 @@ def _run_simulator_node_main_loop(
     """
     import rclpy
     from std_msgs.msg import String
-    from tomato_harvest_sim.api.bridge import CONTROL_TOPIC
+    from tomato_harvest_sim.msg.bridge import CONTROL_TOPIC
     from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
     from tomato_harvest_sim.simulator.simulator_node import SimulatorNode
 
     if not rclpy.ok():
         rclpy.init(args=None)
 
-    scene_runtime = IsaacSceneRuntime()
+    use_physics = artifacts.physics_bridge is not None
+    scene_runtime = IsaacSceneRuntime(physics_grasp_enabled=use_physics)
     node = SimulatorNode(scene_runtime)
     node.boot()
     print("[simulator] SimulatorNode 起動完了。robot_node からの接続を待ちます。", flush=True)
@@ -627,6 +629,11 @@ def _run_simulator_node_main_loop(
         joint_state = franka_driver.current_joint_state_snapshot()
         node.tick(joint_state=joint_state)
 
+        # /isaac_joint_commands が spin_once キューを溢れさせるため
+        # _on_gripper_command サブスクリプションは届かない。
+        # node.tick() で更新された scene_runtime 経由で確実に同期する。
+        isaac_joint_bridge.apply_gripper_state(scene_runtime.state.gripper_closed)
+
         status = control_controller.step_runtime()
         if control_window is not None:
             control_window.refresh_status(status)
@@ -649,6 +656,37 @@ def _run_simulator_node_main_loop(
         _step()
 
     node.destroy_node()
+
+
+def _initialize_robot_to_home(*, simulation_app: object, franka_driver: IsaacFrankaDriver) -> None:
+    """Isaac Sim の Franka をホーム関節位置に初期化する。
+
+    USD アセットはデフォルトで全関節 0.0 rad で読み込まれるが、
+    panda_joint4 の上限が -0.069 rad であるため、0.0 は範囲外となる。
+    シミュレーション開始前にホーム位置へテレポートし、
+    MoveIt2 がスタート状態を有効と判定できるようにする。
+    """
+    import numpy as np
+    from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_POSITIONS_RAD
+
+    for _ in range(120):
+        simulation_app.update()
+        if not franka_driver.initialize_if_needed():
+            continue
+        current = franka_driver.current_joint_positions()
+        if current is None:
+            continue
+        n = len(current)
+        home = np.zeros(n)
+        home[:7] = DEFAULT_JOINT_POSITIONS_RAD
+        if n > 7:
+            home[7:] = 0.04  # finger open
+        franka_driver.set_joint_positions_with_debug(home, context="home_init")
+        for _ in range(10):
+            simulation_app.update()
+        print(f"[Simulator] Robot initialized to home position: {list(home[:7])}", flush=True)
+        return
+    print("[Simulator] WARNING: Could not initialize franka to home position.", flush=True)
 
 
 def _pump_updates(update_fn: object, *, frame_count: int) -> None:

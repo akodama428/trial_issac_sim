@@ -5,8 +5,8 @@ from typing import Callable
 
 import numpy as np
 
-from tomato_harvest_sim.api.contracts import Pose3D
-from tomato_harvest_sim.robot.api.trajectory_tracking import (
+from tomato_harvest_sim.msg.contracts import Pose3D
+from tomato_harvest_sim.robot.msg.trajectory_tracking import (
     ObservationData,
     TrackingCommand,
     TrackingStepResult,

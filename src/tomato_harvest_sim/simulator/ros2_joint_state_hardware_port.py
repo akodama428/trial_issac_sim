@@ -12,8 +12,8 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from tomato_harvest_sim.api.hardware_control import HardwareCommandSample, HardwareStateSample
-from tomato_harvest_sim.api.contracts import Pose3D
+from tomato_harvest_sim.msg.hardware_control import HardwareCommandSample, HardwareStateSample
+from tomato_harvest_sim.msg.contracts import Pose3D
 
 if TYPE_CHECKING:
     from tomato_harvest_sim.simulator.isaac_franka_driver import IsaacFrankaDriver
@@ -91,7 +91,7 @@ class Ros2JointStateHardwarePort:
         if self._driver is not None and self._driver.initialize_if_needed():
             ee_pose = self._driver.current_end_effector_pose()
 
-        from tomato_harvest_sim.api.contracts import JointStateSnapshot
+        from tomato_harvest_sim.msg.contracts import JointStateSnapshot
         joint_state_snapshot = JointStateSnapshot(
             joint_names=self._last_joint_names,
             positions_rad=self._last_positions,

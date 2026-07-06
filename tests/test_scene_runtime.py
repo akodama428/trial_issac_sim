@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from tomato_harvest_sim.api.contracts import Pose3D, TomatoStatus
+from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
 from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
 from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
 

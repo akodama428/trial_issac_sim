@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from tomato_harvest_sim.api.contracts import SceneSnapshot
+from tomato_harvest_sim.msg.contracts import SceneSnapshot
 from tomato_harvest_sim.simulator.debug_visualization import SceneRuntimeDebugState
 from tomato_harvest_sim.simulator.scene_plan import ReviewScenePlan
 
