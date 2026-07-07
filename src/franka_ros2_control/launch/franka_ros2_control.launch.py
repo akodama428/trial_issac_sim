@@ -10,6 +10,9 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description() -> LaunchDescription:
     pkg_share = FindPackageShare("franka_ros2_control")
 
+    # franka_controllers.yaml の controller 名と一致させること。
+    joint_trajectory_controller_name = "joint_trajectory_controller"
+
     urdf_path = PathJoinSubstitution([pkg_share, "config", "franka_ros2_control.urdf"])
     controllers_yaml = PathJoinSubstitution([pkg_share, "config", "franka_controllers.yaml"])
 
@@ -34,7 +37,7 @@ def generate_launch_description() -> LaunchDescription:
     joint_trajectory_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_trajectory_controller", "--controller-manager", "/controller_manager"],
+        arguments=[joint_trajectory_controller_name, "--controller-manager", "/controller_manager"],
         output="screen",
     )
 
@@ -42,6 +45,10 @@ def generate_launch_description() -> LaunchDescription:
         package="franka_ros2_control",
         executable="motion_command_executor_node",
         name="motion_command_executor_node",
+        parameters=[{
+            "follow_joint_trajectory_action":
+                f"/{joint_trajectory_controller_name}/follow_joint_trajectory",
+        }],
         output="screen",
     )
 

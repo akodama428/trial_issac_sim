@@ -1,4 +1,4 @@
-"""motion_command_node — フェーズ・計画・軌道ステータスから motion_command を生成し publish する。
+"""motion_command_node — フェーズ・計画・現在関節状態から motion_command を生成し publish する。
 
 アーキテクチャ仕様: docs/index.html §motion_command_node
 """
@@ -144,7 +144,7 @@ def main() -> None:
     from std_msgs.msg import String
     from rclpy.node import Node
     from tomato_harvest_sim.msg.topics import (
-        PHASE_TOPIC, HARVEST_MOTION_PLAN_TOPIC, TRAJECTORY_STATUS_TOPIC,
+        PHASE_TOPIC, HARVEST_MOTION_PLAN_TOPIC,
         MOTION_COMMAND_TOPIC, JOINT_STATES_TOPIC,
     )
     from tomato_harvest_sim.msg.serialization import motion_command_to_json
@@ -157,11 +157,9 @@ def main() -> None:
             self._phase: HarvestTaskPhase | None = None
             self._plan: HarvestMotionPlan | None = None
             self._joint_state: JointStateSnapshot | None = None
-            self._trajectory_status: str = "ok"
 
             self.create_subscription(String, PHASE_TOPIC, self._on_phase, 10)
             self.create_subscription(String, HARVEST_MOTION_PLAN_TOPIC, self._on_plan, 10)
-            self.create_subscription(String, TRAJECTORY_STATUS_TOPIC, self._on_trajectory_status, 10)
             self.create_subscription(
                 __import__("sensor_msgs.msg", fromlist=["JointState"]).JointState,
                 JOINT_STATES_TOPIC, self._on_joint_state, 10,
@@ -179,9 +177,6 @@ def main() -> None:
             from tomato_harvest_sim.msg.serialization import harvest_motion_plan_from_json
             self._plan = harvest_motion_plan_from_json(msg.data)
             self._try_publish()
-
-        def _on_trajectory_status(self, msg: String) -> None:
-            self._trajectory_status = msg.data
 
         def _on_joint_state(self, msg: object) -> None:
             self._joint_state = JointStateSnapshot(

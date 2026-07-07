@@ -22,7 +22,10 @@ using GoalHandleFollowJointTrajectory =
 constexpr char kMotionCommandTopic[] = "/tomato_harvest/motion_command";
 constexpr char kExecutionStatusTopic[] = "/tomato_harvest/execution_status";
 constexpr char kGripperClosedTopic[] = "/tomato_harvest/gripper_closed";
-constexpr char kJointTrajectoryAction[] = "/joint_trajectory_controller/follow_joint_trajectory";
+// JTC の action 名は controller 名に依存するため parameter で受け取る。
+// 既定値は franka_controllers.yaml の joint_trajectory_controller に対応する。
+constexpr char kDefaultJointTrajectoryAction[] =
+  "/joint_trajectory_controller/follow_joint_trajectory";
 
 class MotionCommandExecutorNode : public rclcpp::Node
 {
@@ -32,8 +35,10 @@ public:
   {
     status_pub_ = create_publisher<std_msgs::msg::String>(kExecutionStatusTopic, 10);
     gripper_pub_ = create_publisher<std_msgs::msg::String>(kGripperClosedTopic, 10);
+    const std::string joint_trajectory_action = declare_parameter<std::string>(
+      "follow_joint_trajectory_action", kDefaultJointTrajectoryAction);
     action_client_ =
-      rclcpp_action::create_client<FollowJointTrajectory>(this, kJointTrajectoryAction);
+      rclcpp_action::create_client<FollowJointTrajectory>(this, joint_trajectory_action);
 
     motion_command_sub_ = create_subscription<std_msgs::msg::String>(
       kMotionCommandTopic,
