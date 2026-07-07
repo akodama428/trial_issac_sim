@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>tomato-harvest-sim テスト要件一覧</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-alt: #f5f6f8;
+  --fg: #1c2127;
+  --fg-muted: #5b6472;
+  --border: #dfe3e8;
+  --accent: #2563eb;
+  --accent-bg: #eef3ff;
+  --warn-bg: #fff6e5;
+  --warn-border: #e8b93a;
+  --warn-fg: #6b4e00;
+  --code-bg: #f0f1f4;
+  --table-head: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --bg-alt: #1b1e24; --fg: #e4e6ea; --fg-muted: #9aa3ad;
+    --border: #2c3138; --accent: #6ea8ff; --accent-bg: #17233d;
+    --warn-bg: #332a10; --warn-border: #8a6d1f; --warn-fg: #f0d78c;
+    --code-bg: #1f2329; --table-head: #202329;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  line-height: 1.7;
+}
+.layout { display: flex; max-width: 1500px; margin: 0 auto; }
+nav.toc {
+  width: 270px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start;
+  max-height: 100vh; overflow-y: auto; padding: 24px 16px;
+  border-right: 1px solid var(--border); font-size: 13px;
+}
+nav.toc ul { list-style: none; padding-left: 14px; margin: 4px 0; }
+nav.toc > ul { padding-left: 0; }
+nav.toc a { color: var(--fg-muted); text-decoration: none; display: block; padding: 2px 6px; border-radius: 4px; }
+nav.toc a:hover { color: var(--accent); background: var(--accent-bg); }
+main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+h1 { font-size: 26px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+h2 { font-size: 21px; margin-top: 48px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+h3 { font-size: 17px; margin-top: 32px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; font-family: "SF Mono", Consolas, "Noto Sans Mono", monospace; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 13.5px; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--table-head); white-space: nowrap; }
+td.num { white-space: nowrap; color: var(--fg-muted); }
+caption { text-align: left; font-weight: 600; padding: 4px 0; caption-side: top; }
+.meta { color: var(--fg-muted); font-size: 13.5px; }
+.note {
+  background: var(--warn-bg); border-left: 4px solid var(--warn-border); color: var(--warn-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; font-size: 13.5px;
+}
+.tag {
+  display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px;
+  border-radius: 10px; margin-right: 6px; vertical-align: middle;
+}
+.tag.py { background: var(--accent-bg); color: var(--accent); }
+.tag.cpp { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-border); }
+.tag.skip { background: var(--code-bg); color: var(--fg-muted); }
+.scrollx { overflow-x: auto; }
+.filehead { font-family: "SF Mono", Consolas, monospace; font-size: 13px; color: var(--fg-muted); }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+<strong>目次</strong>
+<ul>
+  <li><a href="#overview">1. 概要と実行方法</a></li>
+  <li><a href="#summary">2. サブパッケージ別サマリ</a></li>
+  <li><a href="#msg">3. msg（共有契約）</a></li>
+  <li><a href="#simulator">4. simulator</a>
+    <ul>
+      <li><a href="#sim-scene">4.1 scene_runtime</a></li>
+      <li><a href="#sim-viewer">4.2 isaac_viewer</a></li>
+      <li><a href="#sim-physics">4.3 physics_harvest</a></li>
+      <li><a href="#sim-finger">4.4 isaac_joint_ros2_bridge</a></li>
+      <li><a href="#sim-transport">4.5 ROS2 transport 契約</a></li>
+    </ul>
+  </li>
+  <li><a href="#behavior">5. robot/behavior_planner</a></li>
+  <li><a href="#execute">6. robot/execute_manager</a></li>
+  <li><a href="#planner">7. robot/motion_planner</a></li>
+  <li><a href="#perception">8. robot/perception</a></li>
+  <li><a href="#cpp">9. franka_ros2_control（C++）</a></li>
+</ul>
+</nav>
+<main>
+
+<h1>tomato-harvest-sim テスト要件一覧</h1>
+<p class="meta">
+作成日: 2026-07-07 ／ 対象: Python 単体テスト 88 件（15 ファイル）＋ C++ gtest 5 件（1 ファイル）<br>
+本書は現行テストコードから逆起こししたテスト要件を、サブパッケージ毎に「テスト条件（前提・入力）」と「良品条件（合格判定）」で整理したものである。
+</p>
+
+<h2 id="overview">1. 概要と実行方法</h2>
+<table>
+<tbody>
+<tr><th>Python テスト実行</th><td><code>python -m pytest</code>（リポジトリルート。<code>pyproject.toml</code> の <code>testpaths</code> が <code>tests/</code>・<code>robot/</code>・<code>simulator/</code> 配下を収集する）</td></tr>
+<tr><th>C++ テスト実行</th><td>docker コンテナ <code>tomato-harvest-sim-debug</code> 内で <code>colcon build --packages-select franka_ros2_control &amp;&amp; colcon test --packages-select franka_ros2_control</code></td></tr>
+<tr><th>テスト環境の前提</th><td>Python テストは ROS2・Isaac Sim <b>なし</b>で実行可能（rclpy 依存箇所はスタブ/遅延 import で分離）。C++ テストは ROS 2 環境（コンテナは Jazzy）が必要。</td></tr>
+<tr><th>全体良品条件</th><td>Python: 88 passed / 2 skipped（skip は MoveIt2 用 URDF が無い環境のみ）。C++: 100% tests passed。</td></tr>
+</tbody>
+</table>
+<div class="note">
+<b>条件付き skip:</b> 4.5 の <code>test_moveit_service_parameters_include_required_sections</code> と
+<code>test_moveit_service_writes_ros_params_file</code> は、Isaac Sim 付属の Panda URDF
+（<code>ISAAC_PANDA_URDF</code>）が存在しない環境では skip される。Isaac Sim 導入済み環境では実行され、pass が良品条件となる。
+</div>
+
+<h2 id="summary">2. サブパッケージ別サマリ</h2>
+<table>
+<thead><tr><th>サブパッケージ</th><th>テストファイル</th><th>件数</th><th>検証対象の責務</th></tr></thead>
+<tbody>
+<tr><td><code>msg</code>（共有契約）</td><td>tests/test_msg_package.py</td><td>7</td><td>データ契約の export と JSON 直列化</td></tr>
+<tr><td rowspan="5"><code>simulator</code></td><td>test_scene_runtime.py</td><td>6</td><td>scene 状態正本（boot / camera / reset / 把持）</td></tr>
+<tr><td>test_isaac_viewer.py</td><td>8</td><td>viewer 起動設定と scene plan</td></tr>
+<tr><td>test_physics_grasp_runtime.py</td><td>8</td><td>PhysX 接触判定・geometry fallback</td></tr>
+<tr><td>test_isaac_joint_ros2_bridge_finger.py</td><td>5</td><td>finger を含む joint state/command ブリッジ</td></tr>
+<tr><td>test_ros2_transport_contract.py</td><td>6</td><td>bridge 転送契約・MoveIt2 パラメータ生成</td></tr>
+<tr><td rowspan="2"><code>robot/behavior_planner</code></td><td>test_behavior_planner_node_outcomes.py</td><td>9</td><td>成果ベースのフェーズ遷移判定</td></tr>
+<tr><td>test_import.py</td><td>1</td><td>ROS2 なし import 保証</td></tr>
+<tr><td rowspan="3"><code>robot/execute_manager</code></td><td>test_motion_command.py</td><td>16</td><td>フェーズ別 MotionCommand 生成</td></tr>
+<tr><td>test_trajectory_monitor.py</td><td>3</td><td>execution_status → trajectory_status 変換</td></tr>
+<tr><td>test_import.py</td><td>1</td><td>ROS2 なし import 保証</td></tr>
+<tr><td rowspan="3"><code>robot/motion_planner</code></td><td>test_moveit_planner_backend.py</td><td>14</td><td>MoveIt2 ブリッジ計画・planning scene 操作</td></tr>
+<tr><td>test_ros_python.py</td><td>2</td><td>ROS Python パス復旧リトライ</td></tr>
+<tr><td>test_import.py</td><td>1</td><td>ROS2 なし import 保証</td></tr>
+<tr><td><code>robot/perception</code></td><td>test_import.py</td><td>1</td><td>ROS2 なし import 保証</td></tr>
+<tr><td><code>franka_ros2_control</code>（C++）</td><td>test_motion_command_executor_core.cpp</td><td>5</td><td>motion_command JSON パースと abort 判定</td></tr>
+</tbody>
+</table>
+
+<h2 id="msg">3. msg（共有契約） <span class="tag py">Python</span></h2>
+<p class="filehead">tests/test_msg_package.py — 7 件</p>
+<p>robot / simulator 双方が依存するデータ契約（<code>msg/</code> パッケージ）が、期待どおりの型・定数を公開し、JSON 直列化が往復で情報を失わないことを保証する。</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">3-1</td><td><code>test_contracts_exports_core_types</code></td><td><code>msg.contracts</code> から主要 15 型（MotionCommand, HarvestMotionPlan, Pose3D, HarvestTaskPhase, TomatoStatus 等）を import する</td><td>import が例外なく成功し、各型が None でない</td></tr>
+<tr><td class="num">3-2</td><td><code>test_hardware_control_exports_types</code></td><td><code>msg.hardware_control</code> から HardwareCommandSample / HardwareControlPort / HardwareStateSample を import する</td><td>import が成功し、型が定義されている</td></tr>
+<tr><td class="num">3-3</td><td><code>test_topics_exports_constants</code></td><td><code>msg.topics</code> のトピック名定数を参照する</td><td>CONTROL / MOTION_COMMAND / PHASE / HARVEST_MOTION_PLAN / TRAJECTORY_STATUS / EXECUTION_STATUS の各値が <code>/tomato_harvest/…</code> の規定文字列と完全一致する</td></tr>
+<tr><td class="num">3-4</td><td><code>test_serialization_roundtrip_motion_command</code></td><td>command_name="move_to_pregrasp"、gripper_closed=True の MotionCommand を JSON 化 → 復元する</td><td>復元後の command_name と gripper_closed が元の値と一致する</td></tr>
+<tr><td class="num">3-5</td><td><code>test_serialization_roundtrip_target_estimate</code></td><td>world pose (0.1, 0.2, 0.3)、confidence 0.95 の TargetEstimate を JSON 化 → 復元する</td><td>復元後の pose.x が 0.1、confidence が 0.95（浮動小数点許容誤差内）と一致する</td></tr>
+<tr><td class="num">3-6</td><td><code>test_robot_msg_perception_exports_target_estimator</code></td><td><code>robot.msg.perception</code> から TargetEstimator を import する</td><td>import が成功する</td></tr>
+<tr><td class="num">3-7</td><td><code>test_robot_msg_planner_exports_motion_planner</code></td><td><code>robot.msg.planner</code> から MotionPlanner / MoveIt2PlannerBridge / MoveIt2PlanningResult / PlannerBackendInfo を import する</td><td>import が成功する</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="simulator">4. simulator <span class="tag py">Python</span></h2>
+
+<h3 id="sim-scene">4.1 scene_runtime（scene 状態正本）</h3>
+<p class="filehead">src/tomato_harvest_sim/simulator/tests/test_scene_runtime.py — 6 件</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">4.1-1</td><td><code>test_boot_creates_expected_scene_layout</code></td><td><code>IsaacSceneRuntime.boot()</code> を呼ぶ</td><td>snapshot が robot_model="Franka Panda"、active_camera="fixed_camera"、tomato_attached=True で、camera / branch / stem / tomato / tray の各 pose が <code>load_scene_layout_config()</code> の layout 値と一致する</td></tr>
+<tr><td class="num">4.1-2</td><td><code>test_camera_switch_toggles_between_fixed_and_hand_camera</code></td><td>boot 後、<code>set_active_camera("hand_camera")</code> → <code>set_active_camera("fixed_camera")</code> の順に呼ぶ</td><td>各呼び出し直後の snapshot の active_camera が指定したカメラ名になる</td></tr>
+<tr><td class="num">4.1-3</td><td><code>test_reset_restores_scene_deterministically</code></td><td>boot 後に camera 切替・tool pose 変更・tomato pose 変更・<code>detach_tomato()</code> で scene を汚してから <code>reset_scene()</code> を呼ぶ</td><td>active_camera="fixed_camera"、robot_home=True、tomato_attached=True に戻り、stem / tomato pose が layout 初期値と一致する（決定的リセット）</td></tr>
+<tr><td class="num">4.1-4</td><td><code>test_simulator_runtime_runs_without_robot_runtime</code></td><td>robot 側 runtime を接続せず boot → <code>describe_scene()</code> を呼ぶ</td><td>要約文字列に "Franka Panda"・"fixed_camera"・"tomato_attached=True" が含まれる（simulator 単独動作）</td></tr>
+<tr><td class="num">4.1-5</td><td><code>test_apply_finger_positions_closed_triggers_stable_grasp</code></td><td>tool をトマト直上の把持位置（tomato pose + z 0.045、roll 180°）へ置き、両 finger=0.0（全閉）で <code>apply_finger_positions()</code> を呼ぶ</td><td>snapshot.gripper_closed=True かつ tomato_status=HELD（把持成立）</td></tr>
+<tr><td class="num">4.1-6</td><td><code>test_apply_finger_positions_open_after_close_releases_gripper</code></td><td>両 finger=0.0 で閉じた後、両 finger=0.04（全開）で再度呼ぶ</td><td>snapshot.gripper_closed=False（開放が反映される）</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="sim-viewer">4.2 isaac_viewer（起動設定・scene plan）</h3>
+<p class="filehead">src/tomato_harvest_sim/simulator/tests/test_isaac_viewer.py — 8 件</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">4.2-1</td><td><code>test_parse_args_defaults_to_fixed_camera_gui_mode</code></td><td>引数なしで <code>parse_args([])</code> を呼ぶ</td><td>headless=False、headless_steps=64、camera_view="fixed"、grasp_mode="success" が既定値になる</td></tr>
+<tr><td class="num">4.2-2</td><td><code>test_build_appframework_argv_includes_viewport_extensions</code></td><td><code>build_appframework_argv(headless=False)</code>（GUI モード）</td><td>argv に viewport.window / viewport.utility / window.toolbar 拡張が含まれ、<code>--no-window</code> が含まれない</td></tr>
+<tr><td class="num">4.2-3</td><td><code>test_build_appframework_argv_adds_no_window_in_headless_mode</code></td><td><code>build_appframework_argv(headless=True)</code></td><td>argv に <code>--no-window</code> が含まれる</td></tr>
+<tr><td class="num">4.2-4</td><td><code>test_build_simulation_app_config_uses_gui_defaults</code></td><td><code>build_simulation_app_config(headless=False)</code></td><td>headless=False、renderer="RaytracedLighting"、viewport 更新有効、extra_args に hangDetector timeout=300・<code>--empty</code>・viewport.window 拡張が含まれる</td></tr>
+<tr><td class="num">4.2-5</td><td><code>test_build_official_franka_asset_path_appends_known_relative_path</code></td><td>アセットルート URL を与えて <code>build_official_franka_asset_path()</code> を呼ぶ</td><td>ルート URL + 既知の Franka USD 相対パス（<code>OFFICIAL_FRANKA_ASSET_RELATIVE_PATH</code>）の連結になる</td></tr>
+<tr><td class="num">4.2-6</td><td><code>test_review_scene_plan_contains_reviewable_scene_items</code></td><td><code>build_review_scene_plan()</code> で scene plan を生成する</td><td>robot prim="/World/FrankaPanda"、fixed camera prim="/World/Camera_Fixed"、hand camera mount="panda_hand" で、camera pose・焦点距離・tray 寸法・クリッピング範囲が layout 設定と一致し、required_prim_paths に TomatoBranch / TomatoStem / TargetTomato / PlaceTray / RobotToolProxy が含まれる</td></tr>
+<tr><td class="num">4.2-7</td><td><code>test_select_hand_mount_prim_path_prefers_geometry_hand</code></td><td>候補に <code>…/panda_hand</code> と <code>…/Geometry/panda_hand</code> の両方を与える</td><td>Geometry 配下の panda_hand が優先選択される</td></tr>
+<tr><td class="num">4.2-8</td><td><code>test_build_simulation_app_config_adds_no_window_in_headless_mode</code></td><td><code>build_simulation_app_config(headless=True)</code></td><td>extra_args に <code>--no-window</code> が含まれる</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="sim-physics">4.3 physics_harvest（PhysX 接触判定・geometry fallback）</h3>
+<p class="filehead">src/tomato_harvest_sim/simulator/tests/test_physics_grasp_runtime.py — 8 件</p>
+<p>全テスト共通の前提: 標準 prim パス構成（GroundPlane / PlaceTray / TargetTomato / StemAnchor / StemJoint / GraspJoint / panda_hand）と初期トマト pose (0.62, 0.0, 0.54) で <code>IsaacPhysicsHarvestBridge</code> を構築する（stage はダミー、Isaac Sim 不要）。</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">4.3-1</td><td><code>test_contact_batches_are_accumulated_within_one_physics_step</code></td><td>1 物理ステップ内で left → right の接触イベントを別バッチで報告する</td><td>pending contacts が {left, right} に累積される（バッチ分割で接触を取りこぼさない）</td></tr>
+<tr><td class="num">4.3-2</td><td><code>test_contacts_can_be_latched_across_multiple_physics_steps_while_gripper_is_closed</code></td><td>gripper 閉のまま、ステップ 1 で left、ステップ 2 で right を報告し各ステップで promote する</td><td>latched contacts が {left, right} になる（複数ステップにまたがる接触のラッチ）</td></tr>
+<tr><td class="num">4.3-3</td><td><code>test_open_frame_contacts_are_carried_into_the_first_closed_frame</code></td><td>gripper 開の間に両 finger 接触を報告 → 次ステップで gripper 閉として promote する</td><td>閉じた最初のフレームで latched contacts が {left, right} になる（閉じる直前の接触が引き継がれる）</td></tr>
+<tr><td class="num">4.3-4</td><td><code>test_geometry_fallback_infers_both_finger_contacts_when_event_reports_are_missing</code></td><td>接触イベントなし。両 finger がトマト中心から ±0.03 m（把持相当の狭さ）にある幾何配置を与える</td><td><code>_infer_finger_contacts_from_geometry()</code> が {left, right} を返す</td></tr>
+<tr><td class="num">4.3-5</td><td><code>test_geometry_fallback_can_create_contacts_without_recent_physical_contact_when_geometry_is_tight</code></td><td>物理接触ゼロ・gripper 閉・finger 間隔が把持相当（±0.03 m）の状態で <code>_augment_contacts_from_grasp_geometry()</code> を呼ぶ</td><td>latched contacts が {left, right} になる（幾何のみで補完成立）</td></tr>
+<tr><td class="num">4.3-6</td><td><code>test_geometry_fallback_can_complete_the_second_finger_after_one_real_contact</code></td><td>left のみ実接触（grace 2 ステップ残）・gripper 閉・幾何は把持相当</td><td>latched contacts が {left, right} になる（片側実接触＋幾何補完）</td></tr>
+<tr><td class="num">4.3-7</td><td><code>test_geometry_fallback_rejects_a_wide_gripper_even_if_the_hand_mount_is_centered</code></td><td>hand はトマト直上中心だが finger 間隔が ±0.04 m（開きすぎ）の幾何配置</td><td>幾何推定が空集合を返す（誤検知しない）</td></tr>
+<tr><td class="num">4.3-8</td><td><code>test_attached_tomato_pose_is_restored_when_physics_pose_runs_away</code></td><td>tomato_status=ATTACHED の snapshot に対し、物理 pose が (4.70, 0.12, −3900.0) へ発散した状態を与える</td><td><code>_should_restore_attached_tomato_pose()</code> が True を返す（発散検知 → 復元判定）</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="sim-finger">4.4 isaac_joint_ros2_bridge（finger 統合 joint ブリッジ）</h3>
+<p class="filehead">src/tomato_harvest_sim/simulator/tests/test_isaac_joint_ros2_bridge_finger.py — 5 件</p>
+<p>全テスト共通の前提: driver / node / publisher をスタブ化した <code>IsaacJointRos2Bridge</code>。driver 初期状態は arm 7 関節 home ＋ finger 2 関節 0.04（全開）の 9 関節。</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">4.4-1</td><td><code>test_publish_state_includes_finger_joint_names</code></td><td><code>_publish_state()</code> を 1 回呼ぶ</td><td>publish された JointState の name が arm 7 関節＋<code>panda_finger_joint1/2</code> の 9 要素順序どおりで、finger position が 0.04</td></tr>
+<tr><td class="num">4.4-2</td><td><code>test_joint_command_stores_arm_and_finger_positions</code></td><td>arm 7 ＋ finger 2 の 9 関節指令（finger=0.02、joint7 速度=0.1）を <code>_on_joint_command()</code> へ渡す</td><td>pending command に 9 要素が保存され、arm 先頭値・finger 値・joint7 速度が入力どおり</td></tr>
+<tr><td class="num">4.4-3</td><td><code>test_joint_command_preserves_current_finger_positions_when_message_omits_them</code></td><td>arm 7 関節のみ（finger なし）の指令を渡す</td><td>pending command の finger 位置が現在値 0.04 のまま保持される（指の意図しない開閉が起きない）</td></tr>
+<tr><td class="num">4.4-4</td><td><code>test_apply_pending_command_forwards_full_joint_command</code></td><td>9 関節指令（finger=0.0）受信後に <code>_apply_pending_command()</code> を呼ぶ</td><td>driver へ 9 要素の position（finger=0.0 含む）と速度 0、context="isaac_joint_command" が渡り、pending command がクリアされる</td></tr>
+<tr><td class="num">4.4-5</td><td><code>test_apply_pending_command_without_pending_command_is_noop</code></td><td>指令未受信のまま <code>_apply_pending_command()</code> を呼ぶ</td><td>driver への書き込みが発生しない（no-op）</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="sim-transport">4.5 ROS2 transport 契約・MoveIt2 パラメータ</h3>
+<p class="filehead">src/tomato_harvest_sim/simulator/tests/test_ros2_transport_contract.py — 6 件（うち 2 件は URDF 無し環境で skip）</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">4.5-1</td><td><code>test_in_memory_bridge_supports_control_and_scene_roundtrip</code></td><td>InMemoryRos2Bridge に ControlCommand.START と boot 直後の SceneSnapshot を publish する</td><td><code>consume_control_command()</code> が START を、<code>read_scene_snapshot()</code> が publish した snapshot をそのまま返す</td></tr>
+<tr><td class="num">4.5-2</td><td><code>test_scene_snapshot_dict_roundtrip_preserves_transport_fields</code></td><td>boot 直後の SceneSnapshot を dict 化 → 復元する</td><td>phase / active_camera / tomato_pose / active_phase_motion_plan が往復後も一致する</td></tr>
+<tr><td class="num">4.5-3</td><td><code>test_create_bridge_honors_explicit_in_memory_override</code></td><td><code>create_bridge(transport="in_memory")</code> を呼ぶ</td><td>InMemoryRos2Bridge が返る（ROS2 環境でも明示指定が優先）</td></tr>
+<tr><td class="num">4.5-4</td><td><code>test_in_memory_bridge_prefers_explicit_joint_state_over_snapshot_fallback</code></td><td>snapshot を publish 後、明示的な JointStateSnapshot（7 関節の任意値）を publish する</td><td><code>read_joint_state()</code> が snapshot 由来ではなく明示 publish した関節値を返す</td></tr>
+<tr><td class="num">4.5-5</td><td><code>test_moveit_service_parameters_include_required_sections</code> <span class="tag skip">条件付き</span></td><td>Isaac Sim の Panda URDF が存在する環境で <code>build_move_group_parameters()</code> を呼ぶ（URDF が無ければ skip）</td><td>robot_description / semantic / kinematics / planning の各セクションと ompl 設定が含まれ、default_planning_pipeline="ompl"、joint_limits に panda_joint1 の加速度制限が定義されている</td></tr>
+<tr><td class="num">4.5-6</td><td><code>test_moveit_service_writes_ros_params_file</code> <span class="tag skip">条件付き</span></td><td>同上の環境で <code>write_move_group_parameters_file()</code> を呼ぶ（URDF が無ければ skip）</td><td>パラメータファイルが生成され、中身に ros__parameters / robot_description_semantic / robot_description_planning / max_acceleration が含まれる</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="behavior">5. robot/behavior_planner <span class="tag py">Python</span></h2>
+<p class="filehead">src/tomato_harvest_sim/robot/behavior_planner/tests/test_behavior_planner_node_outcomes.py — 9 件 ／ test_import.py — 1 件</p>
+<p>JTC の succeeded/aborted に依存しない<b>成果ベースのフェーズ遷移判定</b>を検証する。トマト把持中は残留振動で JTC がタイムアウト abort するため（run12 実測）、この判定が唯一の前進経路になるケースがある。</p>
+<div class="scrollx">
+<table>
+<caption>detaching_outcome() — DETACHING フェーズの完了判定</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">5-1</td><td><code>test_detached_advances_to_moving_to_place</code></td><td>tomato_status=DETACHED（枝から分離済み）</td><td>MOVING_TO_PLACE を返す</td></tr>
+<tr><td class="num">5-2</td><td><code>test_fallen_fails</code></td><td>tomato_status=FALLEN（落下）</td><td>FAILED を返す</td></tr>
+<tr><td class="num">5-3</td><td><code>test_held_keeps_waiting</code></td><td>tomato_status=HELD（把持中・未分離）</td><td>None を返す（遷移せず引き離し継続）</td></tr>
+<tr><td class="num">5-4</td><td><code>test_attached_keeps_waiting</code></td><td>tomato_status=ATTACHED（枝に付いたまま）</td><td>None を返す（遷移しない）</td></tr>
+</tbody>
+</table>
+</div>
+<div class="scrollx">
+<table>
+<caption>moving_to_place_outcome() — MOVING_TO_PLACE フェーズの完了判定（place_pose=(0.35, −0.35, 0.57)）</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">5-5</td><td><code>test_tool_within_tolerance_advances_to_placed</code></td><td>DETACHED、tool pose が place_pose から 1 cm 誤差</td><td>PLACED を返す（許容距離内到達）</td></tr>
+<tr><td class="num">5-6</td><td><code>test_tool_far_keeps_waiting</code></td><td>DETACHED、tool pose が place_pose から大きく離れている</td><td>None を返す（搬送継続）</td></tr>
+<tr><td class="num">5-7</td><td><code>test_fallen_fails_regardless_of_distance</code></td><td>FALLEN、tool pose は place_pose に完全一致</td><td>FAILED を返す（距離より落下を優先）</td></tr>
+<tr><td class="num">5-8</td><td><code>test_missing_place_pose_keeps_waiting</code></td><td>DETACHED、place_pose=None（plan 未受信）</td><td>None を返す（誤遷移しない）</td></tr>
+<tr><td class="num">5-9</td><td><code>test_missing_tool_pose_keeps_waiting</code></td><td>DETACHED、tool pose=None</td><td>None を返す（誤遷移しない）</td></tr>
+<tr><td class="num">5-10</td><td><code>test_package_importable</code>（test_import.py）</td><td>ROS2 なしの環境で <code>robot.behavior_planner</code> パッケージを import する</td><td>import が成功し、main / detaching_outcome / moving_to_place_outcome が callable である</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="execute">6. robot/execute_manager <span class="tag py">Python</span></h2>
+<p class="filehead">src/tomato_harvest_sim/robot/execute_manager/tests/test_motion_command.py — 16 件 ／ test_trajectory_monitor.py — 3 件 ／ test_import.py — 1 件</p>
+<p><code>build_motion_command(phase, plan, current_joints)</code> がフェーズ・計画・現在関節状態<b>のみ</b>から決定的に MotionCommand を生成することを検証する（docs/index.html §5.3 の生成仕様に対応）。共通入力: 4 軌道すべて有効な HarvestMotionPlan と 1 関節（0.5 rad）の JointStateSnapshot。</p>
+<div class="scrollx">
+<table>
+<caption>gripper_closed のフェーズ別出力</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（フェーズ）</th><th>良品条件（gripper_closed）</th></tr></thead>
+<tbody>
+<tr><td class="num">6-1</td><td><code>test_moving_to_pregrasp_gripper_closed_true</code></td><td>MOVING_TO_PREGRASP</td><td>True（接近中は閉のまま）</td></tr>
+<tr><td class="num">6-2</td><td><code>test_moving_to_grasp_gripper_closed_false</code></td><td>MOVING_TO_GRASP</td><td>False（把持前に開く）</td></tr>
+<tr><td class="num">6-3</td><td><code>test_at_grasp_gripper_closed_true</code></td><td>AT_GRASP</td><td>True（把持位置で閉じる）</td></tr>
+<tr><td class="num">6-4</td><td><code>test_grasp_evaluation_gripper_closed_true</code></td><td>GRASP_EVALUATION</td><td>True（評価中も閉のまま）</td></tr>
+<tr><td class="num">6-5</td><td><code>test_detaching_gripper_closed_true</code></td><td>DETACHING</td><td>True（引き離し中も保持）</td></tr>
+<tr><td class="num">6-6</td><td><code>test_moving_to_place_gripper_closed_true</code></td><td>MOVING_TO_PLACE</td><td>True（搬送中も保持）</td></tr>
+<tr><td class="num">6-7</td><td><code>test_placed_gripper_closed_false</code></td><td>PLACED</td><td>False（設置後に開放）</td></tr>
+<tr><td class="num">6-8</td><td><code>test_returning_home_gripper_closed_false</code></td><td>RETURNING_HOME</td><td>False（帰還中は開）</td></tr>
+</tbody>
+</table>
+</div>
+<div class="scrollx">
+<table>
+<caption>joint_trajectory の選択仕様</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">6-9</td><td><code>test_all_motion_phases_have_non_null_trajectory</code></td><td>対応 8 フェーズすべてで生成する</td><td>すべての MotionCommand で phase_motion_plan と joint_trajectory が非 null（executor が abort しない保証）</td></tr>
+<tr><td class="num">6-10</td><td><code>test_at_grasp_uses_stop_trajectory</code></td><td>AT_GRASP</td><td>軌道が 1 点のみで、その position が現在関節位置と一致する（停止軌道）</td></tr>
+<tr><td class="num">6-11</td><td><code>test_grasp_evaluation_uses_stop_trajectory</code></td><td>GRASP_EVALUATION</td><td>同上（停止軌道）</td></tr>
+<tr><td class="num">6-12</td><td><code>test_placed_uses_stop_trajectory</code></td><td>PLACED</td><td>同上（停止軌道）</td></tr>
+<tr><td class="num">6-13</td><td><code>test_moving_to_pregrasp_uses_plan_trajectory</code></td><td>MOVING_TO_PREGRASP、plan に固有の pregrasp 軌道を設定</td><td>出力軌道が plan.pregrasp_joint_trajectory と同一オブジェクト</td></tr>
+<tr><td class="num">6-14</td><td><code>test_moving_to_grasp_uses_plan_trajectory</code></td><td>MOVING_TO_GRASP、固有の grasp 軌道</td><td>plan.grasp_joint_trajectory がそのまま使われる</td></tr>
+<tr><td class="num">6-15</td><td><code>test_detaching_uses_pull_trajectory</code></td><td>DETACHING、固有の pull 軌道</td><td>plan.pull_joint_trajectory がそのまま使われる</td></tr>
+<tr><td class="num">6-16</td><td><code>test_moving_to_place_uses_plan_trajectory</code></td><td>MOVING_TO_PLACE、固有の place 軌道</td><td>plan.place_joint_trajectory がそのまま使われる</td></tr>
+</tbody>
+</table>
+</div>
+<div class="scrollx">
+<table>
+<caption>trajectory_monitor — execution_status → trajectory_status 変換 ／ import 保証</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">6-17</td><td><code>test_running_maps_to_ok</code></td><td>execution_status="running"</td><td>"ok" を返す（実行中は正常扱い）</td></tr>
+<tr><td class="num">6-18</td><td><code>test_succeeded_maps_to_ok</code></td><td>execution_status="succeeded"</td><td>"ok" を返す</td></tr>
+<tr><td class="num">6-19</td><td><code>test_aborted_maps_to_aborted</code></td><td>execution_status="aborted"</td><td>"aborted" を返す（再計画トリガとして伝搬）</td></tr>
+<tr><td class="num">6-20</td><td><code>test_package_importable</code>（test_import.py）</td><td>ROS2 なしの環境で <code>robot.execute_manager</code> を import する</td><td>import が成功し、main_motion_command / main_trajectory_monitor / build_motion_command / trajectory_status_from_execution_status が callable である</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="planner">7. robot/motion_planner <span class="tag py">Python</span></h2>
+<p class="filehead">src/tomato_harvest_sim/robot/motion_planner/tests/test_moveit_planner_backend.py — 14 件 ／ test_ros_python.py — 2 件 ／ test_import.py — 1 件</p>
+<div class="scrollx">
+<table>
+<caption>planning scene のトマト衝突体操作（_tomato_planning_scene_ops）</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">7-1</td><td><code>test_world_tomato_is_added_before_robot_attach</code></td><td>attach_tomato=False、attach 履歴なし</td><td>world トマトの追加のみ行う（attach 系操作なし）</td></tr>
+<tr><td class="num">7-2</td><td><code>test_attached_tomato_is_removed_only_after_prior_attach</code></td><td>attach_tomato=False、planning scene に attach 済みトマトあり</td><td>world トマト追加＋attached トマト除去を行う（除去は attach 履歴がある場合のみ）</td></tr>
+<tr><td class="num">7-3</td><td><code>test_world_tomato_is_removed_when_switching_to_robot_attach</code></td><td>attach_tomato=True、attach 履歴なし</td><td>attached トマト追加のみ行い、world トマトの追加はしない</td></tr>
+</tbody>
+</table>
+</div>
+<div class="scrollx">
+<table>
+<caption>MoveIt2 サービスブリッジの計画と座標変換</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">7-4</td><td><code>test_moveit_target_pose_is_shifted_from_runtime_tool_pose</code></td><td>tool pose (0.42, 0, 0.54, roll 180°) と link→tool オフセット (0, 0, 0.0584) を与える</td><td>MoveIt 目標 pose が (0.42, 0, 0.5984) になる（panda_hand link 基準への正しいシフト）</td></tr>
+<tr><td class="num">7-5</td><td><code>test_default_end_effector_link_is_panda_hand</code></td><td>既定構成で MoveIt2ServiceBridgePlanner を生成する</td><td>end effector link が "panda_hand"</td></tr>
+<tr><td class="num">7-6</td><td><code>test_orientation_constraint_is_enabled_by_default</code></td><td>同上</td><td>orientation constraint が有効</td></tr>
+<tr><td class="num">7-7</td><td><code>test_geometric_backend_can_be_forced</code></td><td>環境変数 <code>TOMATO_HARVEST_PLANNER_BACKEND=geometric</code> を設定して <code>build_planner()</code> を呼ぶ</td><td>backend 名="geometric_fallback"、moveit2_enabled=False（明示切替が効く）</td></tr>
+<tr><td class="num">7-8</td><td><code>test_moveit2_service_bridge_marks_plan_when_service_validation_succeeds</code></td><td>4 フェーズすべて成功する検証スタブを注入して <code>plan()</code> を呼ぶ（標準 scene / target / joint state / tf を入力）</td><td>planner_name="moveit2_service_bridge"、スタブが 1 回だけ呼ばれ、pregrasp 軌道の終端値がスタブの返した軌道と一致し、planning_scene_object_ids が伝搬する</td></tr>
+<tr><td class="num">7-9</td><td><code>test_moveit2_service_bridge_falls_back_when_service_validation_fails</code></td><td>常に失敗（service_unavailable）を返すスタブを注入する</td><td>planner_name="moveit2_service_bridge_fallback"、pregrasp 軌道は None（幾何 fallback へ委譲）</td></tr>
+<tr><td class="num">7-10</td><td><code>test_partial_result_preserves_pregrasp_grasp_pull_when_place_fails</code></td><td>pregrasp/grasp/pull 成功・place のみ失敗する部分成功スタブを注入する</td><td>planner_name="moveit2_service_bridge_partial" で pregrasp / grasp / pull 軌道が保持され、place 軌道のみ None（部分前進が可能）</td></tr>
+</tbody>
+</table>
+</div>
+<div class="scrollx">
+<table>
+<caption>関節境界クランプ・noop 軌道判定・ROS パス復旧</caption>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">7-11</td><td><code>test_joint_state_clamped_when_out_of_bounds</code></td><td>全関節 0.0 rad の joint state（Isaac Sim 既定初期値。panda_joint4 の URDF 上限 −0.069 rad を超過）を与える</td><td>joint4 のみ −0.069 にクランプされ、境界内の関節は変化しない（MoveIt2 の CheckStartStateBounds リジェクト回避）</td></tr>
+<tr><td class="num">7-12</td><td><code>test_joint_state_within_bounds_unchanged</code></td><td>home 姿勢（全関節が境界内）の joint state</td><td>クランプ後も全値が不変</td></tr>
+<tr><td class="num">7-13</td><td><code>test_noop_trajectory_is_detected</code></td><td>開始関節位置と同一の 1 点のみの軌道、許容誤差 1e-3 rad</td><td>noop と判定される（True）</td></tr>
+<tr><td class="num">7-14</td><td><code>test_nontrivial_trajectory_is_not_noop</code></td><td>開始位置から有意に離れた 1 点の軌道</td><td>noop と判定されない（False）</td></tr>
+<tr><td class="num">7-15</td><td><code>test_module_availability_retries_after_ros_path_restore</code>（test_ros_python.py）</td><td>find_spec が最初 None（未解決）→ パス復旧後に解決するようモックする</td><td><code>ensure_ros_python_modules_available()</code> が True を返し、パス復旧が 1 回だけ呼ばれ、find_spec が計 3 回試行される</td></tr>
+<tr><td class="num">7-16</td><td><code>test_module_availability_returns_false_when_modules_still_missing</code></td><td>パス復旧後も一部モジュールが未解決のままになるようモックする</td><td>False を返す（失敗を握り潰さず報告）</td></tr>
+<tr><td class="num">7-17</td><td><code>test_package_importable</code>（test_import.py）</td><td>ROS2 なしの環境で <code>robot.motion_planner</code> を import する</td><td>import が成功し、main / build_planner が callable である</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="perception">8. robot/perception <span class="tag py">Python</span></h2>
+<p class="filehead">src/tomato_harvest_sim/robot/perception/tests/test_import.py — 1 件</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">8-1</td><td><code>test_package_importable</code></td><td>ROS2 なしの環境で <code>robot.perception</code> を import する</td><td>import が成功し、main / TomatoTargetEstimator が callable である</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="cpp">9. franka_ros2_control（C++） <span class="tag cpp">gtest</span></h2>
+<p class="filehead">src/franka_ros2_control/tests/test_motion_command_executor_core.cpp — 5 件</p>
+<p>motion_command_executor_node の純粋ロジック部（<code>motion_command_executor_core</code>）を対象とする。motion_command JSON のパースと、軌道欠落時の abort 判定を検証する。</p>
+<div class="scrollx">
+<table>
+<thead><tr><th>#</th><th>テスト名</th><th>テスト条件（前提・入力）</th><th>良品条件（合格判定）</th></tr></thead>
+<tbody>
+<tr><td class="num">9-1</td><td><code>ParsesTrajectoryAndGripperState</code></td><td>2 関節・2 点の joint_trajectory と gripper_closed=true を含む完全な motion_command JSON をパースする</td><td>command_name / gripper_closed / phase_motion_plan 有無が正しく読まれ、関節名・軌道点数・第 2 点の position（−0.3 rad）と time_from_start（1.2 s）が入力値と一致する</td></tr>
+<tr><td class="num">9-2</td><td><code>NullPhaseMotionPlanDoesNotRequireTrajectory</code></td><td><code>phase_motion_plan: null</code> の move_home コマンドをパースする</td><td>has_phase_motion_plan=false、joint_trajectory なし、gripper_closed=false が正しく読まれる（null でエラーにしない）</td></tr>
+<tr><td class="num">9-3</td><td><code>HoldCommandsDoNotAbortWithoutTrajectory</code></td><td>command_name="hold_at_grasp" / "hold_placed"（保持系）で軌道なし</td><td><code>should_abort_on_missing_trajectory()</code> が false（保持コマンドは軌道不要）</td></tr>
+<tr><td class="num">9-4</td><td><code>MoveAndPullCommandsAbortWithoutTrajectory</code></td><td>command_name="move_to_place" / "pull_to_detach"（移動系）で軌道なし</td><td>同関数が true（移動系は軌道必須、欠落時は abort 報告）</td></tr>
+<tr><td class="num">9-5</td><td><code>InvalidPayloadThrows</code></td><td>command_name を欠いた不正 JSON をパースする</td><td><code>std::runtime_error</code> が送出される（不正入力を黙って受理しない）</td></tr>
+</tbody>
+</table>
+</div>
+
+</main>
+</div>
+</body>
+</html>

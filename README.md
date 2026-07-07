@@ -2,7 +2,7 @@
 
 Isaac Sim 6.0 と ROS 2 Jazzy を 1 コンテナにまとめ、Franka Panda でトマト収穫シナリオを検証するリポジトリです。
 
-現行の正規 viewer 起動入口は `scripts/run_harvest_viewer.py` です。`poc_code/` は旧 PoC の退避先であり、現行実装の起動には使いません。
+現行の正規起動入口は `scripts/run_ros2_components.sh --isaac --moveit` です。`scripts/run_harvest_viewer.py` はこのスクリプトから Isaac Sim viewer を起動する内部ヘルパーであり、利用者向けの単独起動入口としては扱いません。旧 PoC 実装は削除済みで、現行実装の起動には使いません。
 
 ## 前提
 
@@ -53,57 +53,63 @@ xhost +local:root
 
 ## コンテナ内で実行する代表コマンド
 
-### 1. 3D Viewer を起動する
+### 1. フル ROS2 構成で起動する
 
 ```bash
-PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2
+./scripts/run_ros2_components.sh --isaac --moveit
 ```
 
 期待する結果:
 
 - Isaac Sim の 3DView が開く
+- `franka_ros2_control`、MoveIt2、robot ノード群、SimulatorNode がまとめて起動する
 - `Tomato Harvest Controls` パネルが表示される
 - `Start / Stop / Reset` と `Fixed Camera / Hand Camera` を操作できる
 
 ### 2. 自動開始で一連のシナリオを確認する
 
 ```bash
-PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --auto-start --timeout-seconds 90 --transport ros2
+./scripts/run_ros2_components.sh --isaac --moveit --auto-start
 ```
 
-### 3. MoveIt サービスだけを単独起動する
-
-通常は viewer 側が自動起動しますが、切り分け時は単独起動もできます。
+### 3. headless で E2E 実行する
 
 ```bash
-PYTHONPATH=src ./python.sh scripts/run_moveit_service.py
+./scripts/run_ros2_components.sh --isaac --moveit --headless --headless-steps 600 --auto-start
 ```
 
 ## よくある間違い
 
-- `poc_code/into.sh` に入ってから現行の `scripts/run_harvest_viewer.py` を実行する
-  - 旧 PoC フォルダしかマウントされないため失敗します
 - `./python.sh` が無いと言われる
-  - `poc_code` コンテナに入っている可能性があります
+  - 現行の `./into.sh` で起動したコンテナではない可能性があります
+- `scripts/run_harvest_viewer.py` を単独で正規起動だと思って実行する
+  - 現行構成では `run_ros2_components.sh` が正規入口です。viewer 単独では ros2_control / MoveIt / robot ノード群が揃いません
 - GUI が真っ暗になる
   - `DISPLAY` と X11 ソケットが正しく渡っているかを確認してください
   - `xhost +local:root` 実行漏れを確認してください
 
-## 現行実装でよく使う 2 ターミナル運用
+## 現行実装でよく使う起動例
 
-ターミナル 1:
+GUI あり:
 
 ```bash
 ./into.sh
-PYTHONPATH=src ./python.sh scripts/run_harvest_viewer.py --transport ros2
+cd /workspace/tomato-harvest
+./scripts/run_ros2_components.sh --isaac --moveit
 ```
 
-ターミナル 2:
+自動開始:
 
 ```bash
-docker exec -it tomato-harvest-sim-debug bash
+./into.sh
 cd /workspace/tomato-harvest
-PYTHONPATH=src ./python.sh scripts/run_moveit_service.py
+./scripts/run_ros2_components.sh --isaac --moveit --auto-start
 ```
 
-ただし通常はターミナル 1 の viewer 起動だけで MoveIt サービスも自動起動します。
+headless:
+
+```bash
+./into.sh
+cd /workspace/tomato-harvest
+./scripts/run_ros2_components.sh --isaac --moveit --headless --headless-steps 600 --auto-start
+```

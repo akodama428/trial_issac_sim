@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>変更計画: トマト収穫シミュの物理忠実度レベルアップ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff; --bg-alt: #f5f6f8; --fg: #1c2127; --fg-muted: #5b6472;
+  --border: #dfe3e8; --accent: #2563eb; --accent-bg: #eef3ff;
+  --warn-bg: #fff6e5; --warn-border: #e8b93a; --warn-fg: #6b4e00;
+  --ok-bg: #e8f7ee; --ok-border: #34a866; --ok-fg: #14532d;
+  --code-bg: #f0f1f4; --table-head: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --bg-alt: #1b1e24; --fg: #e4e6ea; --fg-muted: #9aa3ad;
+    --border: #2c3138; --accent: #6ea8ff; --accent-bg: #17233d;
+    --warn-bg: #332a10; --warn-border: #8a6d1f; --warn-fg: #f0d78c;
+    --ok-bg: #10291a; --ok-border: #2c7a4f; --ok-fg: #9fd8b4;
+    --code-bg: #1f2329; --table-head: #202329;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); line-height: 1.75;
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
+.layout { display: flex; max-width: 1500px; margin: 0 auto; }
+nav.toc { width: 280px; flex-shrink: 0; position: sticky; top: 0; align-self: flex-start;
+  max-height: 100vh; overflow-y: auto; padding: 24px 16px; border-right: 1px solid var(--border); font-size: 13px; }
+nav.toc ul { list-style: none; padding-left: 14px; margin: 4px 0; }
+nav.toc > ul { padding-left: 0; }
+nav.toc a { color: var(--fg-muted); text-decoration: none; display: block; padding: 2px 6px; border-radius: 4px; }
+nav.toc a:hover { color: var(--accent); background: var(--accent-bg); }
+main { flex: 1; min-width: 0; padding: 32px 40px 80px; }
+h1 { font-size: 25px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+h2 { font-size: 21px; margin-top: 48px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+h3 { font-size: 17px; margin-top: 30px; }
+h4 { font-size: 15px; margin-top: 22px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
+  font-family: "SF Mono", Consolas, "Noto Sans Mono", monospace; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 13.5px; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--table-head); }
+caption { text-align: left; font-weight: 600; padding: 4px 0; caption-side: top; }
+.meta { color: var(--fg-muted); font-size: 13.5px; }
+.note { background: var(--warn-bg); border-left: 4px solid var(--warn-border); color: var(--warn-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; font-size: 13.5px; }
+.goal { background: var(--ok-bg); border-left: 4px solid var(--ok-border); color: var(--ok-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; font-size: 13.5px; }
+.tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 10px; margin-right: 6px; }
+.tag.phys { background: var(--ok-bg); color: var(--ok-fg); border: 1px solid var(--ok-border); }
+.tag.geo { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-border); }
+.tag.art { background: var(--code-bg); color: var(--fg-muted); border: 1px solid var(--border); }
+.tag.todo { background: var(--accent-bg); color: var(--accent); }
+.scrollx { overflow-x: auto; }
+.mermaid { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px; margin: 14px 0; text-align: center; }
+footer { margin-top: 60px; color: var(--fg-muted); font-size: 12.5px; border-top: 1px solid var(--border); padding-top: 12px; }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+<strong>目次</strong>
+<ul>
+  <li><a href="#ch1">1. 目的とスコープ</a></li>
+  <li><a href="#ch2">2. 現状分析（As-Is）</a></li>
+  <li><a href="#ch3">3. 目標状態（To-Be）</a></li>
+  <li><a href="#ch4">4. ギャップと技術課題</a></li>
+  <li><a href="#ch5">5. 段階的変更計画</a>
+    <ul>
+      <li><a href="#step0">Step 0: 観測基盤</a></li>
+      <li><a href="#step1">Step 1: 物理モデル土台</a></li>
+      <li><a href="#step2">Step 2: 把持力の上限制御</a></li>
+      <li><a href="#step3">Step 3: 摩擦による保持</a></li>
+      <li><a href="#step4">Step 4: 枝の自然分離</a></li>
+      <li><a href="#step5">Step 5: 設置/落下の物理判定</a></li>
+      <li><a href="#step6">Step 6: 統合検証と既定化</a></li>
+    </ul>
+  </li>
+  <li><a href="#ch6">6. 判定ロジック新旧対比</a></li>
+  <li><a href="#ch7">7. テスト戦略</a></li>
+  <li><a href="#ch8">8. リスクと緩和策</a></li>
+  <li><a href="#ch9">9. 未確定事項（要調査）</a></li>
+  <li><a href="#ch10">10. マイルストーンと受け入れ条件</a></li>
+</ul>
+</nav>
+<main>
+
+<h1>変更計画: トマト収穫シミュの物理忠実度レベルアップ</h1>
+<p class="meta">
+作成日: 2026-07-08 ／ 状態: <b>draft（実装前レビュー用）</b> ／ 対象: <code>simulator/physics_harvest.py</code> を中心とした把持・分離・設置判定の物理化<br>
+本計画は「トマトの枝からの分離（DETACH）と finger による把持を、人工拘束・幾何しきい値に頼らず<b>物理状態のみで再現する</b>」ための段階的変更計画である。実装はまだ行っていない。
+</p>
+
+<h2 id="ch1">1. 目的とスコープ</h2>
+<p><b>目的:</b> 現在の収穫サイクルは「把持 = FixedJoint の動的生成」「分離・設置 = 距離しきい値による判定」という<b>疑似物理</b>で成立している。これを PhysX の摩擦・関節破断・自由落下といった<b>物理現象そのもの</b>で置き換え、状態判定（HELD / DETACHED / PLACED / FALLEN）は物理の<b>観測</b>に徹する構成へ引き上げる。</p>
+<p><b>スコープ:</b></p>
+<ul>
+<li><b>対象</b>: <code>physics_harvest.py</code>（判定と拘束）、finger 駆動の力制御化、トマト・finger・トレイの物理マテリアル、シーン物理設定。</li>
+<li><b>対象外</b>: MoveIt2 計画側（planning scene の attached tomato は計画用の近似であり、そのまま維持）、ROS2 ノード構成、C++ 制御層。behavior_planner のフェーズ判定条件は原則変えない（tomato_status の意味は維持し、判定の実現方法だけを差し替える）。</li>
+<li><b>互換性</b>: 既存モード（<code>--grasp-mode success/failure</code>）は温存し、新方式は <code>--grasp-mode physics</code>（新設）のフラグで切り替える。E2E が不安定になった場合は即座に旧モードへ戻せる。</li>
+</ul>
+
+<h2 id="ch2">2. 現状分析（As-Is）— 何が幾何・人工で、何が物理か</h2>
+<p>結論から言うと、<b>「幾何条件のみ」ではないが「物理のみ」でもないハイブリッド</b>である。接触の検出には PhysX の物理イベントを使っているが、把持の保持は人工拘束（FixedJoint）で、分離・設置の判定は距離しきい値の幾何条件である。以下すべて現行コード（<code>physics_harvest.py</code>）で確認した事実。</p>
+<div class="scrollx">
+<table>
+<caption>収穫サイクル各工程の現状実現方法（--grasp-mode success 時）</caption>
+<thead><tr><th>工程</th><th>現状の実現方法</th><th>分類</th><th>コード上の根拠</th></tr></thead>
+<tbody>
+<tr><td>指とトマトの接触検出</td><td>PhysX contact report（接触イベント購読）が一次。ただしイベントが揃わない場合は<b>幾何フォールバック</b>（hand-トマト距離 ≤0.12m・finger ギャップ 0.015〜0.065m・中点距離 ≤0.02m）で「接触した扱い」に補完する</td><td><span class="tag phys">物理</span>+<span class="tag geo">幾何</span></td><td><code>_on_contact_report_event()</code> / <code>_augment_contacts_from_grasp_geometry()</code></td></tr>
+<tr><td>把持の保持（HELD）</td><td>gripper 閉 + 両指接触ラッチが揃った瞬間に、hand↔トマト間へ <b>FixedJoint（TomatoGraspJoint）を動的生成</b>して剛結する。摩擦では保持していない</td><td><span class="tag art">人工拘束</span></td><td><code>_create_grasp_joint()</code></td></tr>
+<tr><td>枝からの分離（DETACHED）</td><td>stem joint には BreakForce 50N / BreakTorque 50Nm が設定済みで物理破断は起こり得るが、<b>DETACHED の判定は「茎アンカーとの距離 ≥ 0.02m」の距離しきい値</b>。破断イベント自体は監視していない</td><td>破断=<span class="tag phys">物理</span>、判定=<span class="tag geo">幾何</span></td><td><code>_create_stem_joint()</code> / <code>finalize_physics_step()</code> の <code>DETACH_DISTANCE_M</code> 判定</td></tr>
+<tr><td>設置/落下（PLACED / FALLEN）</td><td>gripper を開いた<b>瞬間</b>に「tool-トレイ距離 ≤ 0.18m なら PLACED、それ以外は FALLEN」を即決。<b>トマトが実際に落下してトレイに収まったかは見ていない</b></td><td><span class="tag geo">幾何</span></td><td><code>finalize_physics_step()</code> の <code>PLACE_DISTANCE_M</code> 判定</td></tr>
+<tr><td>ATTACHED 中の姿勢安定化</td><td>物理が発散してトマトが初期位置から 0.15m 以上逸脱すると、<b>テレポートで元の位置へ復元</b>し速度をゼロクリアする</td><td><span class="tag art">人工介入</span></td><td><code>_should_restore_attached_tomato_pose()</code></td></tr>
+<tr><td>finger の駆動</td><td>HWI からの位置目標（open=0.04 / closed=0.0）を articulation にそのまま適用。<b>押付け力の上限を明示管理していない</b>（USD アセット既定の drive ゲイン任せ）</td><td><span class="tag art">位置制御</span></td><td><code>isaac_franka_driver.set_joint_velocity_targets_with_debug()</code></td></tr>
+<tr><td>（参考）--grasp-mode failure 時</td><td>PhysX を使わず、tool-トマト距離 ≤ 0.04m（<code>STABLE_GRASP_TOLERANCE_M</code>）の純幾何判定</td><td><span class="tag geo">幾何</span></td><td><code>scene_runtime.py</code></td></tr>
+</tbody>
+</table>
+</div>
+<div class="note">
+<b>なぜこうなっているか（推測を含む）:</b> 半径 0.01m・質量 0.03kg の小さな球体を、位置制御アーム（JTC）+ 残留振動のある指で摩擦把持するのは PhysX 上で最も難しい部類のタスクであり、E2E サイクルを先に完走させるための現実的な近似として FixedJoint 方式が採用された。本計画はこの近似を段階的に外していく取り組みである。
+</div>
+
+<h2 id="ch3">3. 目標状態（To-Be）</h2>
+<div class="goal">
+<b>ゴール定義:</b> <code>--grasp-mode physics</code> において、①〜④がすべて成立すること。<br>
+① <b>把持</b>: grasp joint を生成せず、finger の押付け力とトマト表面の<b>摩擦だけ</b>でトマトを保持・搬送できる。<br>
+② <b>分離</b>: pull 動作の張力が stem joint の破断しきい値を超えたときに<b>PhysX の関節破断</b>で自然に枝から離れる。<br>
+③ <b>設置/落下</b>: リリース後のトマトの<b>実際の落下・静止位置</b>から PLACED / FALLEN を判定する。<br>
+④ <b>判定は観測のみ</b>: 幾何フォールバック・テレポート復元・リリース瞬間の距離即決を physics モードでは使わない。状態判定コードは物理に一切介入しない（読み取り専用）。
+</div>
+<div class="mermaid">
+flowchart LR
+  subgraph ASIS["As-Is（success モード）"]
+    A1["接触検出<br>物理+幾何補完"] --> A2["FixedJoint 生成<br>= HELD"]
+    A2 --> A3["距離 0.02m 超<br>= DETACHED"]
+    A3 --> A4["リリース瞬間の距離<br>= PLACED/FALLEN 即決"]
+  end
+  subgraph TOBE["To-Be（physics モード）"]
+    B1["接触力の観測<br>（イベント+力積）"] --> B2["摩擦保持の継続観測<br>= HELD"]
+    B2 --> B3["stem joint の物理破断検出<br>= DETACHED"]
+    B3 --> B4["落下後の静止位置判定<br>= PLACED/FALLEN"]
+  end
+</div>
+<p>この移行後、<code>TomatoStatus</code> の意味と robot 側ノード（behavior_planner の成果ベース遷移など）のインタフェースは<b>変わらない</b>。変わるのは simulator 内部の「状態をどう確定するか」だけである。</p>
+
+<h2 id="ch4">4. ギャップと技術課題</h2>
+<table>
+<thead><tr><th>#</th><th>課題</th><th>内容</th><th>対応 Step</th></tr></thead>
+<tbody>
+<tr><td>G1</td><td>摩擦パラメータ未定義</td><td>トマト・finger パッド・トレイ・地面に PhysicsMaterial（静摩擦/動摩擦/反発）が明示設定されておらず、既定値任せ。摩擦把持の成立可否を制御できない</td><td>Step 1</td></tr>
+<tr><td>G2</td><td>押付け力が無制御</td><td>finger は位置目標 0.0（全閉）へ向かって drive 既定ゲインで押し込むため、力が過大ならトマトを弾き、過小なら滑る。力の上限（drive の maxForce 相当）を設計する必要がある</td><td>Step 2</td></tr>
+<tr><td>G3</td><td>保持が人工拘束</td><td>grasp joint を外すと、把持の成立・維持を摩擦に委ね、HELD を「観測」で判定する仕組みが必要になる</td><td>Step 3</td></tr>
+<tr><td>G4</td><td>破断イベント未監視</td><td>BreakForce は設定済みだが、破断の発生を検出する手段（joint prim の状態監視 or PhysX イベント）が未実装。しきい値 50N も「絶対切れない」水準で、現実的な茎の強度へ再設計が必要</td><td>Step 4</td></tr>
+<tr><td>G5</td><td>設置判定が瞬時値</td><td>リリース後の自由落下・バウンド・転がりを待って静止位置を評価する「settle 監視」が存在しない</td><td>Step 5</td></tr>
+<tr><td>G6</td><td>残留振動との相性</td><td>把持中は panda_joint7 に約 0.6 rad/s の残留振動が実測されており（run12）、摩擦保持はこの振動で滑る恐れがある。behavior_planner の成果ベース遷移は維持しつつ、物理側の保持余裕を確保する必要がある</td><td>Step 2/3/6</td></tr>
+<tr><td>G7</td><td>判定タイミングの遅延</td><td>物理観測は「Nステップ継続」を要するため、HELD/PLACED の確定が現行より数十ステップ遅れる。behavior_planner の GRASP_EVALUATION タイムアウト（300 ステップ）との整合確認が必要</td><td>Step 3/5</td></tr>
+</tbody>
+</table>
+
+<h2 id="ch5">5. 段階的変更計画</h2>
+<p>6 ステップに分割し、<b>各ステップ単独でテスト可能・ロールバック可能</b>にする。Step 0〜2 は既存モードの挙動を変えない準備工事で、Step 3 以降が <code>--grasp-mode physics</code> の新機能実装となる。CLAUDE.md のワークフローに従い、実装着手前に本計画の Step 3〜5 相当を <code>.codex/docs/RESEARCH.md</code>（9章の要調査項目）と <code>TESTING.md</code> へ反映してから進めることを推奨する。</p>
+<div class="mermaid">
+flowchart LR
+  S0["Step 0<br>観測基盤"] --> S1["Step 1<br>物理モデル土台"] --> S2["Step 2<br>把持力上限"] --> S3["Step 3<br>摩擦保持"] --> S4["Step 4<br>自然分離"] --> S5["Step 5<br>設置物理判定"] --> S6["Step 6<br>統合検証"]
+  S0 -.->|既存挙動を変えない| S2
+  S3 -.->|--grasp-mode physics 配下| S5
+</div>
+
+<h3 id="step0">Step 0: 観測基盤とベースライン確保</h3>
+<p>物理化の各ステップは「数値で良否を語れること」が前提になる。まず現行 success モードの E2E をベースラインとして固定し、チューニングに必要な観測量をログへ出す。</p>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>① contact report のヘッダだけでなく<b>接触力（力積/法線力）</b>を読み取ってデバッグログに出力（現行は第2引数の contact_data を捨てている）。② トマトの速度・hand との相対変位・stem joint への負荷推定を毎ステップログ化。③ 現行 E2E（run15 相当）を 5 回実行し、成功率・各フェーズ所要ステップ数を記録して <code>docs/</code> に残す。</td></tr>
+<tr><th>対象ファイル</th><td><code>physics_harvest.py</code>（ログ追加のみ）、<code>scripts/plot_joint_log.py</code>（必要なら接触力プロット追加）</td></tr>
+<tr><th>テスト / 良品条件</th><td>既存テスト 88 件 + C++ 5 件が全通過（挙動変更ゼロ）。デバッグログに接触力と相対変位が数値で出力される。ベースライン成功率が記録される。</td></tr>
+<tr><th>リスク / 戻し方</th><td>低リスク（ログのみ）。git revert で即戻せる。</td></tr>
+</tbody>
+</table>
+
+<h3 id="step1">Step 1: 物理モデルの土台整備（マテリアル・コリジョン・ソルバ）</h3>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>① <code>UsdPhysics.MaterialAPI</code> でトマト表面（高摩擦: 静摩擦 ~1.2 / 動摩擦 ~1.0 / 反発 ~0.1 を初期値に）、finger パッド（ゴム相当）、トレイ・地面のマテリアルを定義し、摩擦合成モードを設定。② トマトのコリジョンを解析球（半径は <code>scene.yaml</code> の <code>tomato_radius_m</code>=0.01 と一致）で明示し、contact offset / rest offset を小径物体向けに調整。③ physics scene のソルバ反復回数（position/velocity iteration）と物理 dt/substeps を小物体把持向けに引き上げ。④ これらのパラメータはハードコードせず <code>config/scene.yaml</code> に新設する <code>physics:</code> セクションへ集約（前回の教訓: 設定はコードに埋めない）。</td></tr>
+<tr><th>対象ファイル</th><td><code>physics_harvest.py</code>（<code>_define_tomato_physics()</code> 拡張）、<code>config/scene.yaml</code> / <code>scene_config.py</code>（物理パラメータ追加）、<code>isaac_viewer.py</code>（physics scene 設定）</td></tr>
+<tr><th>テスト / 良品条件</th><td>単体: scene_config が新パラメータを読めること。統合（headless）: ATTACHED 状態で 500 ステップ放置してもテレポート復元（<code>_should_restore_attached_tomato_pose</code>）の発動が 0 回（= 物理が発散しない土台の証明）。既存 E2E success モードの成功率がベースラインから劣化しない。</td></tr>
+<tr><th>リスク / 戻し方</th><td>ソルバ設定変更が既存挙動（アーム追従）へ波及する可能性 → physics モード時のみ適用する分岐も検討。yaml の physics セクションを外せば従来挙動。</td></tr>
+</tbody>
+</table>
+
+<h3 id="step2">Step 2: finger 駆動の力制御化（把持力の上限設定）</h3>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>finger 2 関節の drive パラメータ（stiffness / damping / <b>maxForce</b>）を明示設定する。閉指令の位置目標は 0.0 のまま（HWI・C++ 側は無変更）、maxForce で押付け力を数 N 程度に制限し「目標には届かないがトマト径 (~0.02m ギャップ) で力平衡して止まる」状態を作る。適正値は Step 0 のログを見ながらチューニングし、<code>scene.yaml</code> の physics セクションで管理する。</td></tr>
+<tr><th>対象ファイル</th><td><code>isaac_franka_driver.py</code> または <code>isaac_viewer.py</code>（articulation 初期化時に finger drive gain を設定）、<code>config/scene.yaml</code></td></tr>
+<tr><th>テスト / 良品条件</th><td>統合（headless）: トマト直上で閉指令 → ①トマトの速度スパイクが発生しない（弾き飛ばさない）、②finger ギャップがトマト径近傍で静定する、③接触力ログが maxForce 近傍で飽和する。success モード E2E は引き続き劣化なし（grasp joint 併用のままなので挙動互換）。</td></tr>
+<tr><th>リスク / 戻し方</th><td>力が弱すぎると Step 3 で滑る、強すぎると弾く — ここが最重要チューニングポイント。drive 設定を外せば USD 既定値に戻る。</td></tr>
+</tbody>
+</table>
+
+<h3 id="step3">Step 3: 摩擦による保持 — grasp joint の廃止（--grasp-mode physics 新設）</h3>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>① <code>isaac_viewer.py</code> の <code>--grasp-mode</code> に <code>physics</code> を追加（success / failure は不変）。② physics モードでは <code>_create_grasp_joint()</code> を呼ばず、幾何フォールバック（<code>_augment_contacts_from_grasp_geometry</code>）とテレポート復元も無効化。③ HELD 判定を観測ベースへ: 「gripper 閉 かつ 両指の接触（力積 &gt; しきい値）が N ステップ連続 かつ hand-トマト相対速度 &lt; しきい値」で HELD を報告。以降も相対変位を監視し、滑落（相対距離が把持時から一定以上増加）したら HELD を取り消して FALLEN 系へ。④ 判定パラメータ（N・しきい値）は scene.yaml へ。</td></tr>
+<tr><th>対象ファイル</th><td><code>physics_harvest.py</code>（モード分岐 + 観測判定の新設。既存クラスに if を足すのではなく、判定ストラテジを success 用 / physics 用に分離して単一責務を保つ）、<code>isaac_viewer.py</code>、<code>simulator/tests/</code></td></tr>
+<tr><th>テスト / 良品条件</th><td>単体: 観測判定ロジック（接触継続カウント・相対速度・滑落検出）を pose/速度スタブで検証（test_physics_grasp_runtime.py と同形式）。統合: 把持 → 0.1m 持ち上げ → 5 秒保持でトマトの hand 相対変位 &lt; 5mm（滑落なし）、リリースで自然落下すること。</td></tr>
+<tr><th>リスク / 戻し方</th><td><b>本計画の最難関</b>。残留振動（G6）で滑る場合は Step 2 の把持力・摩擦係数へ差し戻してチューニング。physics モードが不成立でも success モードは無傷なので、フラグを戻すだけで運用継続できる。</td></tr>
+</tbody>
+</table>
+
+<h3 id="step4">Step 4: 枝の自然分離 — 破断の物理化と観測</h3>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>① <code>STEM_BREAK_FORCE_N</code> を現実的な茎の強度（初期候補 2〜5N: トマト自重 0.3N の 7〜17 倍。pull 軌道の張力で切れ、把持振動では切れない水準）へ再設計し scene.yaml へ移動。② DETACHED 判定を「stem joint が実際に破断したか」の検出に変更する。検出方法は 9章の要調査（PhysX の破断イベント購読 or joint の enabled/prim 状態のポーリング）の結果で確定する。③ 距離判定（<code>DETACH_DISTANCE_M</code>）は physics モードでは判定に使わず、デバッグログの参考値に格下げ。</td></tr>
+<tr><th>対象ファイル</th><td><code>physics_harvest.py</code>、<code>config/scene.yaml</code></td></tr>
+<tr><th>テスト / 良品条件</th><td>統合: ①pull 軌道の実行で破断が発生し DETACHED が報告される、②把持だけして引かない場合は 10 秒経過しても破断しない、③破断後にトマトが hand 側に残る（摩擦保持が分離の衝撃に耐える）。</td></tr>
+<tr><th>リスク / 戻し方</th><td>破断しきい値と把持力のバランスが崩れると「切れる前に滑る」。Step 0 の張力ログで pull 時張力 &gt; 破断値 &gt; 振動時張力 の分離余裕を確認してから値を決める。しきい値を 50N に戻せば従来同等。</td></tr>
+</tbody>
+</table>
+
+<h3 id="step5">Step 5: 設置/落下の物理判定 — リリース後の settle 監視</h3>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>① リリース（gripper 開）を「判定の瞬間」ではなく「監視の開始」に変更。② リリース後、トマトの実位置と速度を毎ステップ追跡し、静止（速度 &lt; しきい値が N ステップ継続）した時点で判定: 静止位置がトレイ内部領域（base 上面 × 壁内側、scene.yaml のトレイ寸法から算出）なら PLACED、それ以外（地面など）なら FALLEN。③ タイムアウト（例 5 秒）で静止しない場合は FALLEN。④ <code>PLACE_DISTANCE_M</code> による瞬時判定は physics モードでは廃止。</td></tr>
+<tr><th>対象ファイル</th><td><code>physics_harvest.py</code>、必要に応じて <code>behavior_planner/node.py</code> の PLACED 待ちタイムアウト確認（現行は tomato_status==PLACED を待つ設計なので原則無変更で済む見込み）</td></tr>
+<tr><th>テスト / 良品条件</th><td>単体: トレイ内部領域判定を座標スタブで検証（内側/壁上/外側/境界）。統合: ①正常リリースで落下 → トレイ内静止 → PLACED、②トレイ外でリリース → FALLEN、③判定確定までの遅延が behavior_planner のタイムアウトに収まる。</td></tr>
+<tr><th>リスク / 戻し方</th><td>バウンドしてトレイ外へ転がり出るフレークが想定される → トレイ壁高さ・反発係数（Step 1）で抑制。判定を瞬時方式に戻すフラグは残さない（physics モード自体を戻せば十分）。</td></tr>
+</tbody>
+</table>
+
+<h3 id="step6">Step 6: 統合検証・チューニング・既定化判断</h3>
+<table>
+<tbody>
+<tr><th>変更内容</th><td>① physics モードで E2E（detecting → complete）を 10 回連続実行し、成功率・フレーク要因を記録。② パラメータ（摩擦・把持力・破断値・settle しきい値）の最終値を scene.yaml に確定。③ 成功率が受け入れ条件（10章）を満たしたら、<code>--grasp-mode</code> の既定値を physics へ切り替えるかを判断（切り替えは別コミット）。④ <code>docs/index.html</code>（4.2節）と <code>docs/test_list.html</code> を新モードの仕様・テストで更新。</td></tr>
+<tr><th>テスト / 良品条件</th><td>E2E 成功率 8/10 以上（暫定目標）。既存 success モードの全テスト・E2E が引き続き通過。</td></tr>
+</tbody>
+</table>
+
+<h2 id="ch6">6. 判定ロジック新旧対比</h2>
+<div class="scrollx">
+<table>
+<thead><tr><th>状態</th><th>As-Is（success モード）</th><th>To-Be（physics モード）</th><th>ロボット側への影響</th></tr></thead>
+<tbody>
+<tr><td><code>HELD</code></td><td>接触ラッチ成立 → FixedJoint 生成と同時に確定（幾何フォールバックあり）</td><td>接触力 N ステップ継続 + 相対速度小 → 観測で確定。以降も滑落を継続監視</td><td>確定が数十ステップ遅延。GRASP_EVALUATION のタイムアウト 300 ステップ内なら無影響</td></tr>
+<tr><td><code>DETACHED</code></td><td>茎アンカー距離 ≥ 0.02m</td><td>stem joint の物理破断を検出</td><td>なし（behavior_planner は tomato_status を見るだけ）</td></tr>
+<tr><td><code>PLACED</code> / <code>FALLEN</code></td><td>リリース瞬間の tool-トレイ距離 ≤ 0.18m で即決</td><td>リリース後の落下を追跡し、静止位置がトレイ内なら PLACED、外なら FALLEN、タイムアウトで FALLEN</td><td>PLACED 確定が落下時間ぶん遅延（1〜2 秒程度を想定）</td></tr>
+<tr><td>把持の保持</td><td>FixedJoint（滑落は原理的に起きない）</td><td>摩擦（滑落があり得る → 滑落= FALLEN 報告で robot 側の FAILED 遷移が正しく機能する）</td><td>失敗モードが現実的になる（成功率は下がる方向）</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="ch7">7. テスト戦略</h2>
+<ul>
+<li><b>単体テスト（PhysX 不要）</b>: 観測判定ロジック（接触継続カウンタ・相対速度判定・トレイ内部領域判定・破断検出の状態機械）は純関数/小クラスに切り出し、既存の <code>test_physics_grasp_runtime.py</code> と同じスタブ方式で TDD する。Step 3〜5 の各判定に対し正常系・境界・フレーク（瞬断）ケースを先に書く。</li>
+<li><b>統合テスト（headless Isaac Sim）</b>: docker コンテナで <code>--headless --grasp-mode physics</code> のシナリオスクリプトを Step ごとに用意（持ち上げ保持・pull 破断・リリース設置）。判定はログの数値（相対変位・接触力・静止位置）で機械的に行う。</li>
+<li><b>回帰</b>: 各 Step のマージ条件に「既存 88+5 テスト全通過」「success モード E2E がベースライン成功率から劣化しない」を含める。</li>
+<li><b>文書</b>: 新テストは <code>docs/test_list.html</code> にテスト条件・良品条件を追記する。</li>
+</ul>
+
+<h2 id="ch8">8. リスクと緩和策</h2>
+<table>
+<thead><tr><th>リスク</th><th>影響</th><th>緩和策</th></tr></thead>
+<tbody>
+<tr><td>小径球の摩擦把持が PhysX 上で安定しない（最大リスク）</td><td>Step 3 が長期化・不成立</td><td>Step 0〜2 で数値観測とチューニング基盤を先に確保。トマト径・質量の見直し（例: 半径 0.02m へ拡大）も許容するパラメータ設計にしておく。不成立でも success モードが常に残る</td></tr>
+<tr><td>JTC 残留振動による滑落</td><td>搬送中の FALLEN 多発</td><td>把持力上限と摩擦係数に振動余裕を持たせる。改善しない場合は把持中のみ finger 目標を締め増しする案（ただし人工介入との線引きを 9 章で要判断）</td></tr>
+<tr><td>破断しきい値と把持力の競合（切れる前に滑る）</td><td>DETACHING が進まない</td><td>Step 0 の張力ログで「pull 張力 &gt; 破断値 ≫ 振動張力」の分離を確認してから値を確定</td></tr>
+<tr><td>物理判定の遅延が behavior_planner のタイムアウトへ波及</td><td>誤 FAILED</td><td>Step 3/5 で確定遅延を計測し、必要なら behavior_planner のタイムアウト定数のみ調整（遷移条件は不変）</td></tr>
+<tr><td>ソルバ強化による性能低下</td><td>フレームレート低下</td><td>反復回数はトマト・finger のみ actor 単位で引き上げ、シーン全体設定は最小限に</td></tr>
+</tbody>
+</table>
+
+<h2 id="ch9">9. 未確定事項（実装前に要調査 → RESEARCH.md へ）</h2>
+<p>以下は本計画では仮置きであり、CLAUDE.md のワークフローに従い <b>Web 一次情報（NVIDIA 公式ドキュメント優先）の調査結果を <code>.codex/docs/RESEARCH.md</code> に反映してから</b> Step 3 以降へ着手する。</p>
+<table>
+<thead><tr><th>#</th><th>調査項目</th><th>本計画での仮置き</th></tr></thead>
+<tbody>
+<tr><td>R1</td><td>Isaac Sim 6.0 / PhysX における<b>関節破断の検出方法</b>（破断イベント購読 API の有無、破断後の joint prim / enabled 属性の挙動）</td><td>イベントが無ければ joint 状態のポーリングで代替</td></tr>
+<tr><td>R2</td><td>contact report から<b>接触力（力積）</b>を取得する API（contact_data の構造）と、把持力の定量観測に十分か</td><td>取得可能と仮定（Step 0 で最初に検証）</td></tr>
+<tr><td>R3</td><td>球体把持における<b>torsional（ねじり）摩擦</b>の設定方法と要否 — 点接触の球は通常摩擦だけでは回転して滑りやすい</td><td>PhysX の torsional patch friction を使用予定</td></tr>
+<tr><td>R4</td><td>articulation の finger drive に対する <b>maxForce 設定 API</b>（USD の drive:maxForce vs isaacsim.core のゲイン設定）と HWI 位置指令との相互作用</td><td>USD 属性で設定可能と仮定</td></tr>
+<tr><td>R5</td><td>Franka 公式 USD アセットの finger コリジョン形状・既定マテリアル（把持面がメッシュか近似形状か）</td><td>既定のまま使えると仮定（不適ならパッドへ独自コリジョン追加）</td></tr>
+<tr><td>R6</td><td>「把持中のみ締め増し」等のグレーゾーン介入をどこまで許容するかの方針決定（人間判断）</td><td>初版では介入なしで挑戦</td></tr>
+</tbody>
+</table>
+
+<h2 id="ch10">10. マイルストーンと受け入れ条件</h2>
+<table>
+<thead><tr><th>マイルストーン</th><th>完了条件（良品条件）</th></tr></thead>
+<tbody>
+<tr><td>M0: 計画承認</td><td>本計画のレビュー完了、R1〜R6 の調査完了と RESEARCH.md 反映、TESTING.md への試験項目反映</td></tr>
+<tr><td>M1: 準備工事完了（Step 0〜2）</td><td>接触力が数値観測できる／ATTACHED 静置でテレポート復元 0 回／閉指令でトマトを弾かない。既存テスト・E2E 無劣化</td></tr>
+<tr><td>M2: 摩擦把持成立（Step 3）</td><td>grasp joint なしで持ち上げ 5 秒保持、相対変位 &lt; 5mm。単体テスト追加済み</td></tr>
+<tr><td>M3: 自然分離成立（Step 4）</td><td>pull で物理破断 → DETACHED、非 pull では破断しない</td></tr>
+<tr><td>M4: 物理設置判定成立（Step 5）</td><td>落下追跡による PLACED / FALLEN 判定が正しく機能</td></tr>
+<tr><td>M5: 統合完了（Step 6）</td><td>physics モード E2E 成功率 8/10 以上、success モード無劣化、index.html / test_list.html 更新済み</td></tr>
+</tbody>
+</table>
+<div class="note">
+<b>最終的な「物理のみ」達成の定義（再掲）:</b> physics モードにおいて、grasp joint 生成・幾何フォールバック・テレポート復元・距離即決判定の 4 つの人工/幾何メカニズムがコードパスとして実行されないこと。これはデバッグログ（各メカニズムの発動カウント = 0）で機械的に検証する。
+</div>
+
+<footer>作成: 2026-07-08 ／ 対象コード: 当日時点の main ブランチ（physics_harvest.py 519 行版）。本計画は draft であり、9章の調査結果と M0 レビューを経て確定する。</footer>
+
+</main>
+</div>
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+  securityLevel: 'loose'
+});
+</script>
+</body>
+</html>

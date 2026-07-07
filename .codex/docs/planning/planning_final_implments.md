@@ -17,8 +17,8 @@ updated: 2026-06-20
 
 # 前提
 - 正本は `USERS_GUIDE.md` と `ADR.md`
-- 新規実装は `poc_code/` を直接流用しない
-- 旧 PoC は参照用アーカイブとしてのみ扱う
+- 新規実装は旧 PoC 実装を直接流用しない
+- 旧 PoC 実装は削除済みとし、現行コードベースのみを対象にする
 - 物理シミュレータは `Isaac Sim`
 - ロボットソフトは `ROS 2`
 - シミュレータ環境とロボットソフトは完全に分離する
@@ -116,7 +116,7 @@ updated: 2026-06-20
   - `Stop` と `Reset` が simulator / robot の両方へ反映される様子
   - 初版の実装仕様書
 - 完了条件:
-  - `poc_code/` を使わずに新規 runtime が起動する
+  - 旧 PoC 実装に依存せずに新規 runtime が起動する
   - simulator side と robot side が別責務として見える
   - reset 後に初期状態へ戻れる
   - 実装仕様書に初期フォルダ構成と主要ファイル責務が書かれている
@@ -289,7 +289,7 @@ flowchart TD
 ## 修正してはいけないもの
 - `Isaac Sim` と `ROS 2` を分離する方針
 - simulator side と robot side を独立更新可能にする方針
-- `poc_code/` を直接流用しない方針
+- 旧 PoC 実装を直接流用しない方針
 - 3DView 上で `Start / Stop / Reset` を行う方針
 
 # この計画の出口

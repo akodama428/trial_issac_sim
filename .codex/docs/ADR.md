@@ -38,7 +38,7 @@ draft
 
 PoC の学びも重要である。
 
-- 旧 PoC 実装は `poc_code/` に退避し、新実装では直接流用しない
+- 旧 PoC 実装は削除済みであり、新実装では直接流用しない
 - PoC では `fruit-stem fixed joint break` をそのまま簡易 scene に載せると不安定だった
 - PoC では `kinematic hold` によって把持前の安定性を確保したが、これは本番の最終物理モデルではない
 - 手書き IK と固定オフセットで把持精度を詰め続けるのは効率が悪く、最終的な接近、把持姿勢、経路計画は `MoveIt2` などへ移すべきと分かった
@@ -58,7 +58,7 @@ PoC の学びも重要である。
 ## Assumptions And Limits
 - `REQUIREMENTS.md` 未作成のため、要件 ID は `UG-*` の暫定 ID を用いる
 - 物理モデルの細かな閾値、asset 最終選定、把持成功率の最終チューニングは本 ADR の決定対象外とする
-- 旧 PoC は参照用に `poc_code/` へ隔離済みであり、本番実装は新規に組み立てる
+- 旧 PoC は既に削除済みであり、本番実装は新規に組み立てる
 
 ## Options Considered
 ### Option 1: Isaac Sim 内部一体型モノリス
@@ -309,7 +309,7 @@ option 2 を選ぶ理由は明確である。
 - `MoveIt2`、`OpenVLA`、将来の別ロジックを同じ simulator 上で比較しやすい
 - PoC の暫定物理実装を本番側で置き換えやすい
 - reset、落下、detach といった simulator 固有責務を局所化できる
-- `poc_code/` の密結合実装を新実装へ持ち込まずに済む
+- 旧 PoC の密結合実装を新実装へ持ち込まずに済む
 
 ### Negative
 - 開始時点で interface 設計が必要になる
