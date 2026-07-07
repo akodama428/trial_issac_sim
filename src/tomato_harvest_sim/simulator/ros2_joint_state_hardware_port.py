@@ -3,9 +3,7 @@ HardwareControlPort that reads joint state from the /joint_states ROS2 topic
 published by the C++ joint_state_broadcaster (part of franka_ros2_control).
 
 write_command() is a no-op because the C++ JointTrajectoryController owns
-command writing in the new architecture. Direct step-mode commands still go
-through IsaacRos2ControlSystem (the caller decides which port to use based on
-whether trajectory mode or step mode is active).
+command writing in the new architecture.
 """
 from __future__ import annotations
 
@@ -108,7 +106,6 @@ class Ros2JointStateHardwarePort:
 
     def write_command(self, command: HardwareCommandSample) -> None:
         # C++ JointTrajectoryController owns writes in trajectory mode.
-        # Step-mode callers should use IsaacRos2ControlSystem directly.
         pass
 
     def close(self) -> None:

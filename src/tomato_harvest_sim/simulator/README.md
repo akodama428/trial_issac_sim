@@ -30,14 +30,12 @@ flowchart TD
   Viewer[isaac_viewer.py]
   Plan[scene_plan.py]
   Runtime[scene_runtime.py]
-  Display[scene_runtime_view.py]
   Physics[physics_harvest.py]
   Driver[isaac_franka_driver.py]
   Panel[control_panel.py]
 
   Viewer --> Plan
   Viewer --> Runtime
-  Viewer --> Display
   Viewer --> Physics
   Viewer --> Driver
   Viewer --> Panel
@@ -51,8 +49,6 @@ flowchart TD
 - `scene_runtime.py`
   - simulator side の状態正本
   - camera 状態、トマト状態、tool pose、motion target を保持する
-- `scene_runtime_view.py`
-  - runtime 状態を 3D scene 表示に反映する
 - `physics_harvest.py`
   - PhysX ベースの把持、detach、落下、reset を扱う
 - `isaac_franka_driver.py`

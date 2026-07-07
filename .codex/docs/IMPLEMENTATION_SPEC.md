@@ -166,7 +166,6 @@ src/
       runtime.py
       scene_plan.py
       scene_runtime.py
-      scene_runtime_view.py
 tests/
   test_control_contract.py
   test_control_panel.py
