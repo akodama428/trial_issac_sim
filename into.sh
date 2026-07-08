@@ -7,6 +7,8 @@ cd "${SCRIPT_DIR}"
 IMAGE_NAME="${IMAGE_NAME:-tomato-harvest-sim}"
 CONTAINER_NAME="${CONTAINER_NAME:-tomato-harvest-sim-debug}"
 ROS_DISTRO="${ROS_DISTRO:-jazzy}"
+# worktree 並行開発時にコンテナ間で ROS 2 トピックが混線しないよう分離する
+ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-0}"
 ACCEPT_EULA="${ACCEPT_EULA:-Y}"
 PRIVACY_CONSENT="${PRIVACY_CONSENT:-Y}"
 ISAAC_SIM_ROOT="${ISAAC_SIM_ROOT:-/isaac-sim}"
@@ -40,6 +42,14 @@ has_missing_gui_cache_binds() {
   return 1
 }
 
+enter_container() {
+  if [[ -t 0 ]]; then
+    exec docker exec -it "${CONTAINER_NAME}" bash
+  fi
+  echo "Non-interactive mode: container ${CONTAINER_NAME} is running (skip shell attach)."
+  exit 0
+}
+
 has_incorrect_shm_size() {
   local shm_size
   shm_size="$(docker inspect --format '{{.HostConfig.ShmSize}}' "$1" 2>/dev/null || true)"
@@ -56,7 +66,7 @@ if docker ps --format '{{.Names}}' | grep -Fxq "${CONTAINER_NAME}"; then
     docker rm -f "${CONTAINER_NAME}" >/dev/null
   else
   echo "Entering running container: ${CONTAINER_NAME}"
-  exec docker exec -it "${CONTAINER_NAME}" bash
+  enter_container
   fi
 fi
 
@@ -67,7 +77,7 @@ if docker ps -a --format '{{.Names}}' | grep -Fxq "${CONTAINER_NAME}"; then
   else
   echo "Starting existing stopped container: ${CONTAINER_NAME}"
   docker start "${CONTAINER_NAME}" >/dev/null
-  exec docker exec -it "${CONTAINER_NAME}" bash
+  enter_container
   fi
 fi
 
@@ -82,6 +92,7 @@ DOCKER_ARGS=(
   -e "ACCEPT_EULA=${ACCEPT_EULA}"
   -e "PRIVACY_CONSENT=${PRIVACY_CONSENT}"
   -e "ROS_DISTRO=${ROS_DISTRO}"
+  -e "ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
   -e "ISAAC_SIM_ROOT=${ISAAC_SIM_ROOT}"
   -e "HUB__ARGS__DETECT_ONLY=false"
   -e "PYTHONPATH=/workspace/tomato-harvest/src"
@@ -108,4 +119,4 @@ docker run "${DOCKER_ARGS[@]}" \
   >/dev/null
 
 echo "Entering new container: ${CONTAINER_NAME}"
-exec docker exec -it "${CONTAINER_NAME}" bash
+enter_container
