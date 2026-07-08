@@ -10,3 +10,4 @@ build/
 # colcon build outputs
 install/
 log/
+.artifacts/

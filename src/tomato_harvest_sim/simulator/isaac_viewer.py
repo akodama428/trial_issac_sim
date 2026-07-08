@@ -113,6 +113,8 @@ def build_simulation_app_config(*, headless: bool) -> dict[str, object]:
             "--/persistent/renderer/startupMessageDisplayed=true",
         ]
     )
+    # CI でも GUI 実行と同じシミュレーション経路を検証できるように、
+    # headless 有無の差分は描画設定と viewport 更新の有無だけに限定する。
     return {
         "headless": headless,
         "renderer": "MinimalRendering" if headless else "RaytracedLighting",
@@ -640,6 +642,9 @@ def _run_simulator_node_main_loop(
             artifacts.physics_bridge.finalize_physics_step(physics_controller)
 
     if headless:
+        # headless は CI 向けの自動終了モードであり、ROS bridge / scene_runtime /
+        # physics の更新順を含む処理内容は GUI モードと同一に保つ。
+        # 差分は描画表示を出さないことと、所定 step 数で終了することだけ。
         for _ in range(headless_steps):
             _step()
         _pump_updates(simulation_app.update, frame_count=30)

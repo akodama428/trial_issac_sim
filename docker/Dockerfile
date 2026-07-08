@@ -30,6 +30,7 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     > /etc/apt/sources.list.d/ros2.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
+    python3-pytest \
     python3-colcon-common-extensions \
     python3-rosdep \
     ros-${ROS_DISTRO}-desktop \
