@@ -1,5 +1,5 @@
 ARG ISAAC_SIM_IMAGE=nvcr.io/nvidia/isaac-sim:6.0.0
-FROM ${ISAAC_SIM_IMAGE}
+FROM ${ISAAC_SIM_IMAGE} AS ci-base
 
 USER root
 
@@ -43,13 +43,22 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace/tomato-harvest
+COPY docker/entrypoint.sh /workspace/tomato-harvest/docker/entrypoint.sh
+
+RUN chmod +x /workspace/tomato-harvest/docker/entrypoint.sh
+
+ENTRYPOINT ["/workspace/tomato-harvest/docker/entrypoint.sh"]
+CMD ["bash"]
+
+FROM ci-base AS app
+
+WORKDIR /workspace/tomato-harvest
 COPY pyproject.toml /workspace/tomato-harvest/pyproject.toml
 COPY python.sh /workspace/tomato-harvest/python.sh
 COPY config /workspace/tomato-harvest/config
 COPY scripts /workspace/tomato-harvest/scripts
 COPY src /workspace/tomato-harvest/src
 COPY tests /workspace/tomato-harvest/tests
-COPY docker/entrypoint.sh /workspace/tomato-harvest/docker/entrypoint.sh
 
 # Build all ROS2 packages (C++ + Python) in the project root workspace.
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
@@ -57,9 +66,4 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh \
        --symlink-install \
        --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-RUN chmod +x \
-    /workspace/tomato-harvest/python.sh \
-    /workspace/tomato-harvest/docker/entrypoint.sh
-
-ENTRYPOINT ["/workspace/tomato-harvest/docker/entrypoint.sh"]
-CMD ["bash"]
+RUN chmod +x /workspace/tomato-harvest/python.sh

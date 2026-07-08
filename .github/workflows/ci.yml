@@ -18,8 +18,8 @@ jobs:
     runs-on: [self-hosted, linux, x64, gpu]
     timeout-minutes: 180
     env:
-      CI_IMAGE_REPOSITORY: tomato-harvest-sim-ci
-      CI_IMAGE_TAG: ${{ github.sha }}
+      CI_IMAGE_REPOSITORY: tomato-harvest-sim-ci-base
+      CI_IMAGE_TAG: cached
       CI_HEADLESS_STEPS: "900"
       CI_E2E_TIMEOUT_SEC: "2400"
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
@@ -33,16 +33,19 @@ jobs:
         run: mkdir -p "${CI_ARTIFACT_ROOT}"
 
       - name: Login to NGC
-        if: ${{ secrets.NGC_API_KEY != '' }}
         env:
           NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
         run: |
+          if [ -z "${NGC_API_KEY}" ]; then
+            echo "NGC_API_KEY is not set. Skipping docker login to nvcr.io."
+            exit 0
+          fi
           printf '%s' "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
 
       - name: Check runner prerequisites
         run: bash ./scripts/ci/check_runner_prereqs.sh
 
-      - name: Build CI image
+      - name: Prepare cached CI base image
         run: bash ./scripts/ci/build_ci_image.sh
 
       - name: Run unit tests

@@ -54,6 +54,7 @@ IMAGE_NAME=my-tomato-sim ISAAC_SIM_IMAGE=nvcr.io/nvidia/isaac-sim:6.0.0 ./build.
 - unit テスト: Python `pytest` と `franka_ros2_control` の `colcon test`
 - E2E テスト: Isaac Sim を実際に headless 起動し、`scripts/run_ros2_components.sh --isaac --moveit --headless --auto-start` を実行
 - NGC login が必要な場合は repository secret `NGC_API_KEY` を設定する
+- commit ごとにフル app image を作り直さず、依存入りの `ci-base` image をローカル Docker cache で再利用する。checkout 済みソースは container に bind mount して、その上で build/test を実行する
 
 ## デバッグコンテナに入る
 

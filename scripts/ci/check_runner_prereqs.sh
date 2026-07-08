@@ -19,7 +19,10 @@ require_command() {
 require_command docker
 require_command nvidia-smi
 
-docker info >/dev/null
+# `docker info` can hang in some Docker Desktop / CLI plugin setups even when the
+# daemon itself is healthy. For CI readiness we only need to confirm that the
+# daemon answers ordinary container commands within a bounded time.
+timeout 20s docker ps >/dev/null
 
 {
   echo "date=$(date -Iseconds)"
