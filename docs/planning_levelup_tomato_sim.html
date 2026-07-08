@@ -82,7 +82,11 @@ footer { margin-top: 60px; color: var(--fg-muted); font-size: 12.5px; border-top
   <li><a href="#ch6">6. 判定ロジック新旧対比</a></li>
   <li><a href="#ch7">7. テスト戦略</a></li>
   <li><a href="#ch8">8. リスクと緩和策</a></li>
-  <li><a href="#ch9">9. 未確定事項（要調査）</a></li>
+  <li><a href="#ch9">9. 未確定事項（要調査）</a>
+    <ul>
+      <li><a href="#ch9-1">9.1 調査結果（2026-07-08）</a></li>
+    </ul>
+  </li>
   <li><a href="#ch10">10. マイルストーンと受け入れ条件</a></li>
 </ul>
 </nav>
@@ -163,6 +167,19 @@ flowchart LR
 
 <h2 id="ch5">5. 段階的変更計画</h2>
 <p>6 ステップに分割し、<b>各ステップ単独でテスト可能・ロールバック可能</b>にする。Step 0〜2 は既存モードの挙動を変えない準備工事で、Step 3 以降が <code>--grasp-mode physics</code> の新機能実装となる。CLAUDE.md のワークフローに従い、実装着手前に本計画の Step 3〜5 相当を <code>.codex/docs/RESEARCH.md</code>（9章の要調査項目）と <code>TESTING.md</code> へ反映してから進めることを推奨する。</p>
+<p><b>GitHub Issue（2026-07-09 発行）:</b> 各ステップは以下の Issue で管理する。全 Issue 共通の必須完了条件として「検証レポートを <code>docs/reports/</code> へコミットし、結果をグラフ等で可視化して人間が一目で合否判断できる形にすること」を定めている。</p>
+<table>
+<thead><tr><th>Step</th><th>Issue</th><th>依存</th></tr></thead>
+<tbody>
+<tr><td>Step 0: 観測基盤</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/1">#1</a></td><td>—</td></tr>
+<tr><td>Step 1: 物理モデル土台</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/2">#2</a></td><td>#1</td></tr>
+<tr><td>Step 2: 把持力の上限制御</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/3">#3</a></td><td>#1, #2</td></tr>
+<tr><td>Step 3: 摩擦による保持</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/4">#4</a></td><td>#2, #3</td></tr>
+<tr><td>Step 4: 枝の自然分離</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/5">#5</a></td><td>#4</td></tr>
+<tr><td>Step 5: 設置/落下の物理判定</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/6">#6</a></td><td>#4, #5</td></tr>
+<tr><td>Step 6: 統合検証・既定化判断</td><td><a href="https://github.com/akodama428/trial_issac_sim/issues/7">#7</a></td><td>#4, #5, #6</td></tr>
+</tbody>
+</table>
 <div class="mermaid">
 flowchart LR
   S0["Step 0<br>観測基盤"] --> S1["Step 1<br>物理モデル土台"] --> S2["Step 2<br>把持力上限"] --> S3["Step 3<br>摩擦保持"] --> S4["Step 4<br>自然分離"] --> S5["Step 5<br>設置物理判定"] --> S6["Step 6<br>統合検証"]
@@ -272,17 +289,71 @@ flowchart LR
 </tbody>
 </table>
 
-<h2 id="ch9">9. 未確定事項（実装前に要調査 → RESEARCH.md へ）</h2>
-<p>以下は本計画では仮置きであり、CLAUDE.md のワークフローに従い <b>Web 一次情報（NVIDIA 公式ドキュメント優先）の調査結果を <code>.codex/docs/RESEARCH.md</code> に反映してから</b> Step 3 以降へ着手する。</p>
+<h2 id="ch9">9. 未確定事項（要調査）</h2>
+<p><b>2026-07-08 に R1〜R5 の調査を実施済み</b>（結果は <a href="#ch9-1">9.1</a>）。R1〜R4 は確定、R5 は部分確認（Step 1 に実アセット検査タスクを追加）、R6 は人間判断待ち。<code>.codex/docs/RESEARCH.md</code> への転記は未実施であり、M0 の残作業とする。</p>
 <table>
-<thead><tr><th>#</th><th>調査項目</th><th>本計画での仮置き</th></tr></thead>
+<thead><tr><th>#</th><th>調査項目</th><th>本計画での仮置き</th><th>調査状況</th></tr></thead>
 <tbody>
-<tr><td>R1</td><td>Isaac Sim 6.0 / PhysX における<b>関節破断の検出方法</b>（破断イベント購読 API の有無、破断後の joint prim / enabled 属性の挙動）</td><td>イベントが無ければ joint 状態のポーリングで代替</td></tr>
-<tr><td>R2</td><td>contact report から<b>接触力（力積）</b>を取得する API（contact_data の構造）と、把持力の定量観測に十分か</td><td>取得可能と仮定（Step 0 で最初に検証）</td></tr>
-<tr><td>R3</td><td>球体把持における<b>torsional（ねじり）摩擦</b>の設定方法と要否 — 点接触の球は通常摩擦だけでは回転して滑りやすい</td><td>PhysX の torsional patch friction を使用予定</td></tr>
-<tr><td>R4</td><td>articulation の finger drive に対する <b>maxForce 設定 API</b>（USD の drive:maxForce vs isaacsim.core のゲイン設定）と HWI 位置指令との相互作用</td><td>USD 属性で設定可能と仮定</td></tr>
-<tr><td>R5</td><td>Franka 公式 USD アセットの finger コリジョン形状・既定マテリアル（把持面がメッシュか近似形状か）</td><td>既定のまま使えると仮定（不適ならパッドへ独自コリジョン追加）</td></tr>
-<tr><td>R6</td><td>「把持中のみ締め増し」等のグレーゾーン介入をどこまで許容するかの方針決定（人間判断）</td><td>初版では介入なしで挑戦</td></tr>
+<tr><td>R1</td><td>Isaac Sim 6.0 / PhysX における<b>関節破断の検出方法</b>（破断イベント購読 API の有無、破断後の joint prim / enabled 属性の挙動）</td><td>イベントが無ければ joint 状態のポーリングで代替</td><td><span class="tag phys">確定</span> 破断イベント購読 API あり（<a href="#ch9-1">9.1-R1</a>）</td></tr>
+<tr><td>R2</td><td>contact report から<b>接触力（力積）</b>を取得する API（contact_data の構造）と、把持力の定量観測に十分か</td><td>取得可能と仮定（Step 0 で最初に検証）</td><td><span class="tag phys">確定</span> 力積・法線・分離距離が取得可能（<a href="#ch9-1">9.1-R2</a>）</td></tr>
+<tr><td>R3</td><td>球体把持における<b>torsional（ねじり）摩擦</b>の設定方法と要否 — 点接触の球は通常摩擦だけでは回転して滑りやすい</td><td>PhysX の torsional patch friction を使用予定</td><td><span class="tag phys">確定</span> collider 単位の USD 属性で設定可能（<a href="#ch9-1">9.1-R3</a>）</td></tr>
+<tr><td>R4</td><td>articulation の finger drive に対する <b>maxForce 設定 API</b>（USD の drive:maxForce vs isaacsim.core のゲイン設定）と HWI 位置指令との相互作用</td><td>USD 属性で設定可能と仮定</td><td><span class="tag phys">確定</span> Step 2 の設計は成立（<a href="#ch9-1">9.1-R4</a>）</td></tr>
+<tr><td>R5</td><td>Franka 公式 USD アセットの finger コリジョン形状・既定マテリアル（把持面がメッシュか近似形状か）</td><td>既定のまま使えると仮定（不適ならパッドへ独自コリジョン追加）</td><td><span class="tag geo">部分確認</span> collider フィット不良の既知報告あり。実アセット検査を Step 1 へ追加（<a href="#ch9-1">9.1-R5</a>）</td></tr>
+<tr><td>R6</td><td>「把持中のみ締め増し」等のグレーゾーン介入をどこまで許容するかの方針決定（人間判断）</td><td>初版では介入なしで挑戦</td><td><span class="tag todo">人間判断待ち</span> 判断材料を追記（<a href="#ch9-1">9.1-R6</a>）</td></tr>
+</tbody>
+</table>
+
+<h3 id="ch9-1">9.1 調査結果（2026-07-08 実施）</h3>
+<p class="meta">調査方法: NVIDIA 公式ドキュメント・公式フォーラム・公式 GitHub の Web 調査に加え、<b>実行環境そのもの</b>（docker コンテナ <code>tomato-harvest-sim-debug</code> 内の Isaac Sim インストール、<code>omni.physx 110.1.11</code> / <code>omni.usd.schema.physx 110.1.11</code> の Python バインディング定義ファイル）を一次情報として直接検証した。確認日: 2026-07-08。事実と推測を分離して記載する。</p>
+
+<h4 id="r1-result">R1: 関節破断の検出方法 — <span class="tag phys">確定</span></h4>
+<p><b>確認できた事実:</b> コンテナ内 Isaac Sim の <code>omni/physx/bindings/_physx.pyi</code>（omni.physx 110.1.11）に、シミュレーションイベント列挙 <code>SimulationEvent.JOINT_BREAK</code>（値 7）が定義されている。イベント payload は辞書で、<code>'jointPath': int2</code>（破断した joint の USD パスを int 2 個にエンコードしたもの。<code>PhysicsSchemaTools.decodeSdfPath</code> で <code>SdfPath</code> に復元できる）を含む。イベントは <code>get_physx_interface().get_simulation_event_stream_v2()</code>（<code>carb.events.IEventStream</code> を返す）の購読で受け取れる。破断のしきい値は現行コードでも使用中の <code>UsdPhysics.Joint</code> の BreakForce / BreakTorque 属性であり、PhysX 公式ドキュメントでも breakable joints として仕様化されている。</p>
+<p><b>推奨方針:</b> Step 4 の DETACHED 判定は <code>SimulationEvent.JOINT_BREAK</code> の購読で実装する（ポーリング代替は不要）。受信時に <code>jointPath</code> をデコードし、stem joint のパスと一致した場合のみ DETACHED を確定する。既存の contact report 購読（<code>subscribe_contact_report_events</code>）と同居できる。</p>
+<p><b>実装パターン（コンテナ内の公式デモ <code>omni.physx.demos 110.1.11</code> の <code>JointBreakDemo.py</code> で確認した実コード）:</b></p>
+<pre style="background: var(--code-bg); padding: 10px 14px; border-radius: 6px; overflow-x: auto; font-size: 12.5px;"><code>from omni.physx import get_physx_interface
+from omni.physx.bindings._physx import SimulationEvent
+from pxr import PhysicsSchemaTools
+
+events = get_physx_interface().get_simulation_event_stream_v2()
+self._simulation_event_sub = events.create_subscription_to_pop(self._on_simulation_event)
+
+def _on_simulation_event(self, event):
+    if event.type == int(SimulationEvent.JOINT_BREAK):
+        joint_path = PhysicsSchemaTools.decodeSdfPath(
+            event.payload['jointPath'][0], event.payload['jointPath'][1])
+        # joint_path が stem joint と一致したら DETACHED を確定</code></pre>
+
+<h4 id="r2-result">R2: 接触力（力積）の取得 — <span class="tag phys">確定</span></h4>
+<p><b>確認できた事実:</b> 現行コードが使用中の <code>subscribe_contact_report_events</code> のコールバック型は <code>Callable[[ContactEventHeaderVector, ContactDataVector], None]</code>。<code>ContactEventHeader</code> は <code>actor0 / actor1 / collider0 / collider1 / type</code>（CONTACT_FOUND / PERSISTS / LOST）に加えて <code>contact_data_offset</code> と <code>num_contact_data</code> を持ち、第2引数の <code>ContactDataVector</code> の該当区間を参照することで接触点ごとの <code>impulse</code>（Float3）・<code>normal</code>・<code>position</code>・<code>separation</code> が取得できる（バインディング定義で全フィールド確認）。<b>現行実装はこの第2引数を捨てており</b>、Step 0 の「接触力ログ」は既存購読の拡張だけで実現できる。報告最小しきい値は使用中の <code>PhysxContactReportAPI.CreateThresholdAttr(0.0)</code> で制御する。</p>
+<p><b>推奨方針:</b> 把持力は「接触力積のノルム ÷ 物理 dt」で法線力相当に換算してログ化する。HELD の観測判定（Step 3）は力積が連続 N ステップしきい値超え、を一次条件にする。</p>
+
+<h4 id="r3-result">R3: 球体把持のねじり摩擦 — <span class="tag phys">確定</span></h4>
+<p><b>確認できた事実:</b> <code>PhysxCollisionAPI</code>（collider prim 単位）に <code>physxCollision:torsionalPatchRadius</code> / <code>physxCollision:minTorsionalPatchRadius</code> 属性があり、点接触でもねじり方向の摩擦を発生させる接触パッチ半径を設定できる（スキーマ定義で確認）。同 API には Step 1 で予定していた <code>contactOffset</code> / <code>restOffset</code> も揃っている。またマテリアル側（PhysxMaterialAPI）には <code>frictionCombineMode</code> / <code>restitutionCombineMode</code> に加えて、<b>compliant contact</b>（<code>physxMaterial:compliantContactStiffness / compliantContactDamping</code>）が存在し、剛体のまま「柔らかい接触」を近似できる。</p>
+<p><b>推奨方針:</b> トマト collider（半径 0.01m の球）に <code>torsionalPatchRadius</code> を数 mm（初期値 0.003〜0.005m、要チューニング）で設定する。トマトの実物の柔らかさ（つぶれによる接触面積拡大）の近似として compliant contact の採用を Step 1 のチューニング候補に追加する。<span class="tag geo">推測</span> 具体値は一次情報に規定がないため Step 0 の観測で決める。</p>
+
+<h4 id="r4-result">R4: finger drive の maxForce — <span class="tag phys">確定</span></h4>
+<p><b>確認できた事実:</b> OpenUSD 公式 API リファレンスにより、<code>UsdPhysics.DriveAPI</code> は multipleApply スキーマ（prismatic joint には <code>"linear"</code>、revolute には <code>"angular"</code> で適用）で、drive は「力制限付きダンパー付きバネ」として仕様化されている: <code>force = stiffness × (targetPosition − position) + damping × (targetVelocity − velocity)</code>、<code>maxForce</code> がその上限（inf = 無制限）。つまり <b>HWI からの位置指令（drive の targetPosition）はそのままに、maxForce だけで押付け力を制限する Step 2 の設計は USD の仕様どおり成立する</b>。</p>
+<p><b>推奨方針:</b> finger 2 関節（prismatic）の <code>drive:linear:physics:maxForce</code> と stiffness / damping を scene.yaml から設定する。Franka 実機のグリッパー連続把持力が最大 70N（公式仕様）であることを参考上限とし、トマト用初期値は数 N から始める。</p>
+
+<h4 id="r5-result">R5: Franka 公式 USD アセットの finger コリジョン — <span class="tag geo">部分確認</span></h4>
+<p><b>確認できた事実:</b> 使用アセットは <code>Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd</code>（isaac_viewer.py で確認）。コリジョン形状の公式仕様記述は見つからなかったが、関連する既知報告として次を確認した: ① Isaac Lab 公式 GitHub で「Panda グリッパーの collider が視覚形状にタイトフィットしない」issue（#3571）、② <code>franka_alt_fingers.usd</code> で把持時に指が対象へめり込む報告（Isaac Sim 4.1、公式フォーラム）、③ 把持中に finger joint が外れる報告（公式フォーラム 2025）。また Isaac Sim には把持姿勢を検証する公式ツール Grasp Editor が存在する。</p>
+<p><b>推奨方針:</b> 「既定のまま使える」とは仮定しない。Step 1 に「コンテナ内で franka.usd の finger collider（形状・近似方式・マテリアル割当）をスクリプトで検査し、フィット不良ならフィンガーパッドに解析形状（box）の collider を追加する」タスクを組み込む（4章 G1 の具体化）。</p>
+
+<h4 id="r6-result">R6: グレーゾーン介入の許容方針 — <span class="tag todo">人間判断待ち</span></h4>
+<p><b>判断材料として確認した事実:</b> NVIDIA 公式フォーラムの安定把持スレッド（Isaac Sim 5.1.0、2025-12〜2026-01）で、NVIDIA スタッフが「物理 timestep の削減と摩擦の増加」を推奨しつつ、<b>「チューニング済みシナリオの一般化は難しく、パラメータが変わるたびに再チューニングが必要」と公式に認めている</b>。質問者は摩擦 10.0 等の非現実値でも改善が限定的だったと報告している。また Isaac Lab には吸着型の人工拘束グリッパー（SurfaceGripper）が公式提供されており、「完全な摩擦物理のみ」に固執しない設計が公式エコシステムでも一般的である。</p>
+<p><b>示唆:</b> 本計画の「摩擦のみで保持」は挑戦的な目標であることが裏付けられた。Step 3 が難航した場合の現実的な妥協ライン（例: 把持中の締め増し、compliant contact の積極利用）をどこに置くかは、M2 マイルストーン評価時に人間が判断する。</p>
+
+<h4>ソース一覧（確認日: 2026-07-08）</h4>
+<table>
+<thead><tr><th>種別</th><th>ソース</th><th>使用箇所</th></tr></thead>
+<tbody>
+<tr><td>実環境（最優先の一次情報）</td><td>コンテナ <code>tomato-harvest-sim-debug</code> 内 <code>/isaac-sim/extscache/omni.physx-110.1.11/omni/physx/bindings/_physx.pyi</code> および <code>omni.usd.schema.physx-110.1.11/pxr/PhysxSchema/__init__.pyi</code></td><td>R1（SimulationEvent.JOINT_BREAK / jointPath / get_simulation_event_stream_v2）、R2（ContactEventHeader / ContactData 全フィールド）、R3（torsionalPatchRadius / compliantContact / combineMode 属性）</td></tr>
+<tr><td>公式ドキュメント</td><td><a href="https://openusd.org/dev/api/class_usd_physics_drive_a_p_i.html">OpenUSD: UsdPhysicsDriveAPI Class Reference</a></td><td>R4（maxForce / stiffness / damping、力制限バネの式）</td></tr>
+<tr><td>公式ドキュメント</td><td><a href="https://nvidia-omniverse.github.io/PhysX/physx/5.1.0/docs/Joints.html">PhysX 5.1 SDK: Joints（breakable joints）</a></td><td>R1（破断仕様の背景）</td></tr>
+<tr><td>公式ドキュメント</td><td><a href="https://docs.isaacsim.omniverse.nvidia.com/5.1.0/sensors/isaacsim_sensors_physics_contact.html">Isaac Sim: Contact Sensor</a> ／ <a href="https://docs.omniverse.nvidia.com/kit/docs/omni_physics/latest/extensions/runtime/source/omni.physx/docs/api/python.html">Omni Physics Python API</a></td><td>R2（PhysxContactReportAPI / threshold / 接触データ項目）</td></tr>
+<tr><td>公式ツール</td><td><a href="https://docs.isaacsim.omniverse.nvidia.com/4.5.0/robot_setup/grasp_editor.html">Isaac Sim: Grasp Editor</a></td><td>R5（把持検証ツールの存在）</td></tr>
+<tr><td>公式 GitHub / フォーラム</td><td><a href="https://github.com/isaac-sim/IsaacLab/issues/3571">IsaacLab #3571（gripper collider フィット不良）</a> ／ <a href="https://forums.developer.nvidia.com/t/issues-with-collision-using-the-franka-model-franka-alt-fingers-usd-in-isaac-sim-4-1/302506">franka_alt_fingers 貫通報告</a> ／ <a href="https://forums.developer.nvidia.com/t/franka-finger-joint-detaches-from-hand-during-grasping/335580">finger joint 脱落報告</a></td><td>R5（既知問題）</td></tr>
+<tr><td>公式フォーラム（NVIDIA スタッフ回答）</td><td><a href="https://forums.developer.nvidia.com/t/stable-grasping-in-isaac-sim/354866">Stable grasping in Isaac Sim（Isaac Sim 5.1.0、2025-12〜2026-01）</a></td><td>R6（摩擦把持の頑健性限界に関する公式見解）、8章リスク評価の裏付け</td></tr>
 </tbody>
 </table>
 

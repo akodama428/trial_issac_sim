@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>tomato-harvest-sim 解説書</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff;
+  --bg-alt: #f5f6f8;
+  --fg: #1c2127;
+  --fg-muted: #5b6472;
+  --border: #dfe3e8;
+  --accent: #2563eb;
+  --accent-bg: #eef3ff;
+  --warn-bg: #fff6e5;
+  --warn-border: #e8b93a;
+  --warn-fg: #6b4e00;
+  --code-bg: #f0f1f4;
+  --table-head: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --bg-alt: #1b1e24;
+    --fg: #e4e6ea;
+    --fg-muted: #9aa3ad;
+    --border: #2c3138;
+    --accent: #6ea8ff;
+    --accent-bg: #17233d;
+    --warn-bg: #332a10;
+    --warn-border: #8a6d1f;
+    --warn-fg: #f0d78c;
+    --code-bg: #1f2329;
+    --table-head: #202329;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #14161a; --bg-alt: #1b1e24; --fg: #e4e6ea; --fg-muted: #9aa3ad;
+  --border: #2c3138; --accent: #6ea8ff; --accent-bg: #17233d;
+  --warn-bg: #332a10; --warn-border: #8a6d1f; --warn-fg: #f0d78c;
+  --code-bg: #1f2329; --table-head: #202329;
+}
+:root[data-theme="light"] {
+  --bg: #ffffff; --bg-alt: #f5f6f8; --fg: #1c2127; --fg-muted: #5b6472;
+  --border: #dfe3e8; --accent: #2563eb; --accent-bg: #eef3ff;
+  --warn-bg: #fff6e5; --warn-border: #e8b93a; --warn-fg: #6b4e00;
+  --code-bg: #f0f1f4; --table-head: #eef1f5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  line-height: 1.75;
+}
+.layout { display: flex; max-width: 1400px; margin: 0 auto; }
+nav.toc {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  overflow-y: auto;
+  width: 270px;
+  flex: 0 0 270px;
+  padding: 24px 16px;
+  border-right: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+nav.toc h2 { font-size: 0.78rem; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-muted); margin: 0 0 12px; }
+nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: sect; }
+nav.toc > ol > li { counter-increment: sect; margin-bottom: 6px; }
+nav.toc a { color: var(--fg); text-decoration: none; display: block; padding: 4px 8px; border-radius: 6px; }
+nav.toc a:hover { background: var(--bg-alt); }
+nav.toc ol ol { margin: 2px 0 4px 14px; }
+nav.toc ol ol a { color: var(--fg-muted); font-size: 0.85em; padding: 2px 8px; }
+main { flex: 1 1 auto; min-width: 0; padding: 32px 48px 120px; }
+h1 { font-size: 1.9rem; margin: 0 0 6px; }
+.subtitle { color: var(--fg-muted); margin: 0 0 40px; }
+section.chapter { margin-bottom: 64px; scroll-margin-top: 16px; padding-top: 8px; border-top: 1px solid var(--border); }
+section.chapter:first-of-type { border-top: none; }
+h2.chapter-title { font-size: 1.5rem; display: flex; gap: 10px; align-items: baseline; }
+h2.chapter-title .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+h3 { font-size: 1.15rem; margin-top: 36px; border-left: 4px solid var(--accent); padding-left: 10px; }
+h4 { font-size: 1rem; margin-top: 24px; color: var(--fg); }
+p { max-width: 900px; }
+code, pre, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+code { background: var(--code-bg); padding: .1em .4em; border-radius: 4px; font-size: 0.9em; }
+pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto; font-size: 0.85em; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 16px 0 28px; font-size: 0.88rem; }
+caption { text-align: left; font-size: 0.82rem; color: var(--fg-muted); margin-bottom: 6px; }
+th, td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; vertical-align: top; }
+th { background: var(--table-head); font-weight: 600; }
+tbody tr:nth-child(even) { background: var(--bg-alt); }
+.scrollx { overflow-x: auto; }
+.note, .warn, .fact {
+  border-radius: 8px; padding: 12px 16px; margin: 16px 0; max-width: 900px; font-size: 0.92rem;
+}
+.note { background: var(--accent-bg); border: 1px solid var(--accent); }
+.warn { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-fg); }
+.warn b { color: inherit; }
+.note b, .warn b { display:block; margin-bottom:4px; }
+.tag { display: inline-block; font-size: 0.72rem; font-weight: 700; letter-spacing: .03em; padding: 1px 8px; border-radius: 999px; margin-right: 6px; }
+.tag.fact { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent); }
+.tag.guess { background: var(--warn-bg); color: var(--warn-fg); border: 1px solid var(--warn-border); }
+.tag.gap { background: #ffe1e1; color: #9c1f1f; border: 1px solid #d65f5f; }
+@media (prefers-color-scheme: dark) { .tag.gap { background: #3a1c1c; color: #ff9d9d; border-color: #7a3232; } }
+:root[data-theme="dark"] .tag.gap { background: #3a1c1c; color: #ff9d9d; border-color: #7a3232; }
+:root[data-theme="light"] .tag.gap { background: #ffe1e1; color: #9c1f1f; border-color: #d65f5f; }
+.mermaid { background: var(--bg-alt); border-radius: 10px; padding: 16px; margin: 20px 0; overflow-x: auto; }
+ul, ol { max-width: 900px; }
+a { color: var(--accent); }
+.pkgmap { columns: 2; column-gap: 32px; max-width: 900px; }
+.pkgmap div { break-inside: avoid; margin-bottom: 10px; }
+footer { color: var(--fg-muted); font-size: 0.8rem; margin-top: 60px; }
+@media (max-width: 900px) {
+  .layout { flex-direction: column; }
+  nav.toc { position: static; height: auto; width: auto; flex: none; border-right: none; border-bottom: 1px solid var(--border); }
+  main { padding: 24px; }
+  .pkgmap { columns: 1; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+<h2>目次</h2>
+<ol>
+<li><a href="#ch1">はじめに</a></li>
+<li><a href="#ch2">リポジトリ概要</a></li>
+<li><a href="#ch3">全体アーキテクチャ</a></li>
+<li><a href="#ch4">tomato_harvest_simulator（Isaac Sim側）</a>
+  <ol>
+    <li><a href="#ch4-1">SimulatorNode</a></li>
+    <li><a href="#ch4-2">IsaacSceneRuntime / physics_harvest</a></li>
+    <li><a href="#ch4-3">IsaacJointRos2Bridge</a></li>
+    <li><a href="#ch4-4">control_panel / isaac_viewer</a></li>
+  </ol>
+</li>
+<li><a href="#ch5">tomato_harvest_robot（ROS2ノード群）</a>
+  <ol>
+    <li><a href="#ch5-1">5ノードの入出力一覧</a></li>
+    <li><a href="#ch5-2">HarvestTaskPhase 状態遷移</a></li>
+    <li><a href="#ch5-3">motion_command 生成仕様</a></li>
+    <li><a href="#ch5-4">trajectory_planner_node と MoveIt2</a></li>
+    <li><a href="#ch5-5">MoveIt2 の使い方 詳解（goal の内容と切り替えタイミング）</a></li>
+    <li><a href="#ch5-6">レガシーコードの削除履歴</a></li>
+  </ol>
+</li>
+<li><a href="#ch6">franka_ros2_control（C++側）</a></li>
+<li><a href="#ch7">ROS2 インタフェース一覧</a></li>
+<li><a href="#ch8">起動シーケンスとデータフロー</a></li>
+<li><a href="#ch9">ビルド・実行方法</a></li>
+<li><a href="#ch10">用語集・付録</a></li>
+</ol>
+<h2>関連文書</h2>
+<ol>
+<li><a href="index.html">文書一覧（目次）へ戻る</a></li>
+<li><a href="test_list.html">テスト要件一覧</a></li>
+<li><a href="planning_levelup_tomato_sim.html">計画: 物理忠実度レベルアップ</a></li>
+<li><a href="planning_movit2_improvements.html">計画: MoveIt2 再計画改善</a></li>
+</ol>
+</nav>
+<main>
+<h1>tomato-harvest-sim 解説書</h1>
+<p class="subtitle">Isaac Sim 6.0 + ROS 2 Jazzy + Franka Panda によるトマト収穫シミュレータのアーキテクチャ解説</p>
+
+<section class="chapter" id="ch1">
+<h2 class="chapter-title"><span class="num">1.</span> はじめに</h2>
+
+<h3>本書の目的</h3>
+<p>このリポジトリを初めて読む人が、全体構成・各パッケージの責務・ROS2 通信の流れを短時間で把握できるようにすることを目的とする。加えて、リポジトリ内の設計文書（<code>.codex/docs/</code>、各パッケージ内の <code>docs/</code>）と実際のコードとの間に見つかった相違点を明示し、「今どちらが正しいか」を判断できるようにする。</p>
+
+<h3>対象読者</h3>
+<ul>
+<li>このリポジトリに初めて触れる開発者・レビュアー</li>
+<li>ROS 2（topic / service / action）の基本と、Isaac Sim / MoveIt2 の役割をおおまかに知っている人</li>
+</ul>
+
+<h3>対象外</h3>
+<p>旧 PoC 実装は削除済みであり、現行アーキテクチャの対象外のため本書では扱わない。</p>
+
+<h3>表記ルール</h3>
+<p>本書は複数の調査結果を突き合わせて作成しており、コードから直接確認できた事実と、コードからは断定できない解釈を区別して記載する。</p>
+<p>
+<span class="tag fact">事実</span> コード・設定ファイルを直接読んで確認した内容<br>
+<span class="tag guess">推測</span> コードから断定はできないが妥当と考えられる解釈<br>
+<span class="tag gap">乖離</span> 設計意図（旧 <code>ROS2_COMPONENT_ARCHITECTURE.md</code> 等。内容は本書へ統合済みで、原本は削除された）と実装が一致していない箇所
+</p>
+<div class="note">
+<b>本書全体を通じての注意（2026-07-07 更新）</b>
+「単一プロセス構成（<code>robot_node.py</code> / <code>HarvestRuntime</code>）→ マルチノード構成」への移行は完了した。旧構成の残骸（<code>api/</code>・<code>app/</code>・<code>robot_node.py</code>・<code>runtime.py</code>・<code>robot/trajectory_tracking/</code>）は削除済み。さらに 2026-07-07 に robot/ 配下をコンポーネント毎のサブパッケージへ再編し（<a href="#ch5">5章</a>）、各サブパッケージが自前の <code>tests/</code> を持つ構成になった。加えて同日に <code>motion_command_executor_node</code> は Python パッケージから <code>src/franka_ros2_control/</code> の C++ ノードへ移設された。本書は<b>実装コードを一次情報として</b>整理している。
+</div>
+
+</section>
+
+<section class="chapter" id="ch2">
+<h2 class="chapter-title"><span class="num">2.</span> リポジトリ概要</h2>
+
+<h3>何を実現するシステムか</h3>
+<p><span class="tag fact">事実</span> <code>README.md</code> 冒頭より：「Isaac Sim 6.0 と ROS 2 Jazzy を1コンテナにまとめ、Franka Panda でトマト収穫シナリオを検証するリポジトリ」。<code>pyproject.toml</code> 上のパッケージ名は <code>tomato-harvest-sim</code>（version 0.1.0, Python ≥3.12）。</p>
+<p>カメラで検出したトマトの位置に対して、MoveIt2 で軌道計画を行い、Franka Panda アームで pregrasp → grasp → detach（引き抜き）→ place（トレイへ設置）→ home 復帰、という一連の収穫サイクルを Isaac Sim 上で実行し、その成否を PhysX の物理挙動で判定する。</p>
+
+<h3>動作環境</h3>
+<ul>
+<li>Linux + NVIDIA GPU + NVIDIA Container Toolkit + Docker</li>
+<li>ベースイメージ <code>nvcr.io/nvidia/isaac-sim:6.0.0</code></li>
+<li>GUI 表示する場合は <code>xhost +local:root</code> が必要</li>
+</ul>
+
+<h3>ディレクトリマップ</h3>
+<div class="pkgmap">
+<div><code>src/tomato_harvest_sim/simulator/</code><br>Isaac Sim プロセス側。シーン構築・物理判定・UI パネル。</div>
+<div><code>src/tomato_harvest_sim/robot/</code><br>ロボット側 ROS2 Python ノード群。コンポーネント毎のサブパッケージ構成で、各パッケージが <code>node.py</code>（ノード実装）と <code>tests/</code>（単体テスト）を内包する。</div>
+<div><code>src/tomato_harvest_sim/msg/</code><br>simulator / robot 共通のメッセージ型・topic 定数・シリアライズ関数。</div>
+<div><code>src/franka_ros2_control/</code><br>C++ の ros2_control ハードウェアインタフェース（アーム制御のみ）と <code>motion_command_executor_node</code>。</div>
+<div><code>scripts/</code><br>起動スクリプト（<code>run_ros2_components.sh</code> 等）、デバッグ用可視化。</div>
+<div><code>docker/</code><br>本番用 Dockerfile。</div>
+<div><code>config/</code><br><code>scene.yaml</code> など静的シーン構成。</div>
+<div><code>.codex/docs/</code><br>要件・設計・調査等の開発ドキュメント一式（本書の対象外、付録で軽く触れる）。</div>
+</div>
+
+</section>
+
+<section class="chapter" id="ch3">
+<h2 class="chapter-title"><span class="num">3.</span> 全体アーキテクチャ</h2>
+
+<p><span class="tag fact">事実</span> 実行時は 1 コンテナ内で複数プロセスが ROS 2 topic / service / action 経由で協調動作する。<code>scripts/run_ros2_components.sh</code> が起動する構成を正とすると、実体は次の4グループに分かれる。</p>
+
+<div class="mermaid">
+flowchart TB
+  subgraph SIM["tomato_harvest_simulator （Isaac Simプロセス・Python）"]
+    SIMNODE["SimulatorNode\nIsaacSceneRuntime / physics_harvest\nIsaacFrankaDriver / IsaacJointRos2Bridge\ncontrol_panel（UI）"]
+  end
+  subgraph ROBOT["tomato_harvest_robot （5つの独立ROS2 Pythonノード）"]
+    R1["① tomato_detector_node"]
+    R2["② behavior_planner_node"]
+    R3["③ trajectory_planner_node"]
+    R4["④ trajectory_monitor_node"]
+    R5["⑤ motion_command_node"]
+  end
+  subgraph CPP["franka_ros2_control （C++、arm 7軸 + finger 2軸）"]
+    MCE["motion_command_executor_node\nC++ executor + gripper_closed publish"]
+    HWI["IsaacSimHardwareInterface\n（finger command を HWI へ統合）"]
+    JTC["JointTrajectoryController"]
+    JSB["joint_state_broadcaster"]
+  end
+  subgraph MV["MoveIt2 move_group（外部プロセス、任意）"]
+    MVS["/plan_kinematic_path\n/apply_planning_scene"]
+  end
+
+  SIM -->|"/tomato_harvest/scene_snapshot\n/camera/fixed/image_raw, /tf"| ROBOT
+  R5 -->|"/tomato_harvest/motion_command"| MCE
+  MCE -->|"FollowJointTrajectory action"| JTC
+  MCE -.->|"/tomato_harvest/gripper_closed\n（scene state + HWI finger intent）"| HWI
+  JTC <-->|"arm 7軸 cmd/state"| HWI
+  HWI <-->|"/isaac_joint_states, /isaac_joint_commands\n（arm 7軸 + finger 2軸）"| SIM
+  JSB -->|"/joint_states"| ROBOT
+  R3 -->|"planning request"| MV
+</div>
+
+<div class="warn">
+<b>最重要ポイント：グリッパー制御は HWI を経由する</b>
+<code>franka_ros2_control</code> の URDF（<code>franka_ros2_control.urdf</code>）にはフィンガー関節（<code>panda_finger_joint1/2</code>）が追加され、<code>IsaacSimHardwareInterface</code> は arm 7軸 + finger 2軸の command/state interface を持つ。<span class="tag fact">事実</span><br>
+<code>motion_command_executor_node</code> は引き続き <code>/tomato_harvest/gripper_closed</code>（<code>std_msgs/String</code>、"true"/"false"）を publish するが、現在この topic を finger 指令として受けるのは simulator 直結ではなく <code>IsaacSimHardwareInterface</code> である。HWI が finger 目標値（open=<code>0.04</code>, closed=<code>0.0</code>）を command vector へ反映し、<code>/isaac_joint_commands</code> を 9関節まとめて publish し、<code>IsaacJointRos2Bridge</code> はその joint command をそのまま Isaac Sim articulation へ適用する。<span class="tag fact">事実</span>
+</div>
+
+<h3>正規起動経路</h3>
+<p><span class="tag fact">事実</span> 現行実装の利用者向け起動入口は <code>scripts/run_ros2_components.sh</code> で統一する。これは上図の4グループをフルに起動するマルチノード構成であり、README もこの経路を正として案内する。詳細は<a href="#ch9">9章</a>。</p>
+<p><code>scripts/run_harvest_viewer.py</code> は <code>run_ros2_components.sh --isaac</code> から内部的に呼ばれる Isaac Sim viewer 起動ヘルパーとして残るが、単独起動を README で推奨する構成ではない。本書の4〜8章もこの正規起動経路を基準に解説する。</p>
+
+</section>
+
+<section class="chapter" id="ch4">
+<h2 class="chapter-title"><span class="num">4.</span> tomato_harvest_simulator（Isaac Sim側）</h2>
+<p>Isaac Sim プロセス内で動作するパッケージ。USD シーンの構築、物理ステップとの同期、ロボットのフィンガー・アーム駆動、PhysX による把持判定、UI パネルを担当する。</p>
+
+<div class="mermaid">
+flowchart TB
+  VIEWER["isaac_viewer.py\n（エントリポイント／stage構築／メインループ）"]
+  PLAN["scene_plan.py\n静的primパス・pose定義"]
+  CFG["scene_config.py\nconfig/scene.yaml 読込"]
+  RUNTIME["scene_runtime.py\nIsaacSceneRuntime（論理状態の正本）"]
+  PHYS["physics_harvest.py\nPhysX把持/detach/place判定"]
+  DRIVER["isaac_franka_driver.py\nIsaacFrankaDriver（articulation I/O・IK）"]
+  BRIDGE["isaac_joint_ros2_bridge.py\nIsaacJointRos2Bridge（C++との橋渡し）"]
+  NODE["simulator_node.py\nSimulatorNode（ROS2通信本体）"]
+  PANEL["control_panel.py\nUIパネル（Start/Stop/Reset/カメラ切替）"]
+
+  VIEWER --> PLAN --> CFG
+  VIEWER --> RUNTIME
+  VIEWER --> PHYS
+  VIEWER --> DRIVER
+  VIEWER --> BRIDGE
+  VIEWER --> NODE
+  VIEWER --> PANEL
+  RUNTIME --> PHYS
+  BRIDGE --> DRIVER
+  NODE --> RUNTIME
+  PANEL -. "/tomato_harvest/control" .-> NODE
+</div>
+
+<h3 id="ch4-1">4.1 SimulatorNode（<code>simulator_node.py</code>）</h3>
+<p><span class="tag fact">事実</span> ROS2 ノード <code>tomato_harvest_simulator_node</code> 本体。<code>IsaacSceneRuntime</code> をラップし、robot 側との ROS2 通信すべてを担う。</p>
+<table>
+<caption>SimulatorNode の入出力</caption>
+<thead><tr><th>方向</th><th>Topic</th><th>型</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/control</code></td><td>String</td><td>start/stop/reset コマンド → <code>scene_runtime.apply_control()</code></td></tr>
+<tr><td>Sub</td><td><code>/tomato_harvest/gripper_closed</code></td><td>String("true"/"false")</td><td><code>scene_runtime.close_gripper()</code>/<code>open_gripper()</code> を呼ぶ</td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/scene_snapshot</code></td><td>String(JSON)</td><td><code>SceneSnapshot</code> 全フィールド</td></tr>
+<tr><td>Pub</td><td><code>/camera/fixed/image_raw</code>, <code>/camera/hand/image_raw</code></td><td>sensor_msgs/Image</td><td>ダミー16x16画像（実カメラレンダリングなし）</td></tr>
+<tr><td>Pub</td><td><code>/joint_states</code></td><td>sensor_msgs/JointState</td><td><code>tick()</code> に joint_state が渡された場合のみ publish</td></tr>
+<tr><td>Pub</td><td><code>/tf</code></td><td>tf2_msgs/TFMessage</td><td>fixed_camera / hand_camera / tomato の3 transform</td></tr>
+</tbody>
+</table>
+<p><code>tick()</code> の処理順（毎ステップ）：① <code>spin_once(timeout_sec=0.0)</code> でノンブロッキング処理 → ② pending control/gripper command を <code>scene_runtime</code> に適用 → ③ <code>snapshot()</code> 取得 → ④ 各topicをpublish。</p>
+
+<h3 id="ch4-2">4.2 IsaacSceneRuntime / physics_harvest（論理状態と物理判定）</h3>
+<p><span class="tag fact">事実</span> <code>scene_runtime.py</code> の <code>IsaacSceneRuntime</code> がシーンの論理状態（phase・tomato状態・gripper開閉・robot pose 等）を一元管理する。<code>physics_grasp_enabled</code> フラグにより「PhysX駆動モード」と「幾何学フォールバック（ソフトウェア判定）モード」を切り替える。</p>
+<ul>
+<li><b>幾何学フォールバックモード</b>（<code>physics_grasp_enabled=False</code>）: ロボットツールとトマトの距離のしきい値（<code>STABLE_GRASP_TOLERANCE_M=0.04m</code> 等）で把持成否をソフトウェア的に判定する。</li>
+<li><b>PhysX駆動モード</b>（<code>physics_grasp_enabled=True</code>、<code>--grasp-mode success</code> 時）: <code>close_gripper()</code>/<code>open_gripper()</code> はほぼ何もせず、<code>physics_harvest.py</code> の PhysX 接触判定が正本になる。</li>
+</ul>
+
+<p><code>physics_harvest.py</code> の <code>IsaacPhysicsHarvestBridge</code> が PhysX の剛体・joint・接触イベントを使い、把持・detach・place・fallをすべて物理ベースで判定する（<span class="tag fact">事実</span>、主要定数：<code>STEM_BREAK_FORCE_N=50</code>, <code>TOMATO_MASS_KG=0.03</code>, <code>DETACH_DISTANCE_M=0.02</code>, <code>PLACE_DISTANCE_M=0.18</code>）。<code>PLACE_DISTANCE_M</code> は、place_pose がトレイ中心の 0.12m 上空（<code>pregrasp_planner</code> の <code>place_vertical_offset_m</code>）でリリースする設計のため「リリース高さ 0.12 + 到達許容 0.05 + 余裕」で 0.18 に設定されている（旧値 0.06 では正常な設置でも必ず FALLEN 判定になる不整合があり、2026-07-06 に修正）。</p>
+<ol>
+<li>接触イベントは <code>subscribe_contact_report_events()</code> でPhysXから非同期に受け取り、一時的な瞬断を吸収するグレース猶予（<code>CONTACT_LATCH_GRACE_STEPS=3</code>）で確定させる。</li>
+<li>接触イベントだけで両指接触が揃わない場合、hand-tomato距離やfinger間ギャップから幾何学的に補完する fallback がある。</li>
+<li>gripper が閉じ・両指接触が確定すると hand↔tomato の FixedJoint（grasp joint）を生成 = <code>HELD</code>。</li>
+<li>茎アンカーとの距離が <code>DETACH_DISTANCE_M</code> を超えると <code>DETACHED</code>。</li>
+<li>gripperが開き、トレイとの距離が <code>PLACE_DISTANCE_M</code> 以下なら <code>PLACED</code>、そうでなければ <code>FALLEN</code>。</li>
+</ol>
+
+<p><span class="tag fact">事実</span> 旧版の本書で「配線が外れている疑い」と指摘していた <code>scene_runtime_view.py</code>・<code>debug_visualization.py</code>・<code>isaac_ros2_control_system.py</code> は、どこからも import されていないことを再確認したうえで <b>2026-07-07 に削除済み</b>（専用テスト2本も同時に削除、README のモジュール構成図も更新済み）。<code>HardwareControlPort</code> プロトコル自体は <code>msg/hardware_control.py</code> に定義があり、<code>ros2_joint_state_hardware_port.py</code> が引き続き使用している。</p>
+
+<h3 id="ch4-3">4.3 IsaacJointRos2Bridge（<code>isaac_joint_ros2_bridge.py</code>）</h3>
+<p><span class="tag fact">事実</span> Isaac Sim Python API と C++ <code>franka_ros2_control</code> の間の橋渡し役。現在は <code>IsaacSimHardwareInterface</code> が生成した 9関節 command/state を中継する責務に限定され、bridge 自身が <code>gripper_closed</code> から finger 値を決めることはしない。</p>
+<table>
+<caption>IsaacJointRos2Bridge の入出力</caption>
+<thead><tr><th>方向</th><th>Topic</th><th>型</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Pub</td><td><code>/isaac_joint_states</code></td><td>sensor_msgs/JointState</td><td>arm 7軸 + finger 2軸の position/velocity</td></tr>
+<tr><td>Pub</td><td><code>/clock</code></td><td>rosgraph_msgs/Clock</td><td>Isaac Sim の timeline 時刻</td></tr>
+<tr><td>Sub</td><td><code>/isaac_joint_commands</code></td><td>sensor_msgs/JointState</td><td>C++ HWI からの arm 7軸 + finger 2軸コマンド</td></tr>
+</tbody>
+</table>
+<div class="mermaid">
+sequenceDiagram
+  participant MCE as motion_command_executor_node
+  participant SIMN as SimulatorNode
+  participant HWI as IsaacSimHardwareInterface
+  participant BR as IsaacJointRos2Bridge
+  participant DRV as IsaacFrankaDriver
+
+  MCE->>SIMN: /tomato_harvest/gripper_closed ("true"/"false")
+  MCE->>HWI: /tomato_harvest/gripper_closed ("true"/"false")
+  SIMN->>SIMN: scene_runtime.close_gripper()/open_gripper()
+  HWI->>BR: /isaac_joint_commands (9 joints)
+  BR->>DRV: set_joint_velocity_targets_with_debug(positions/velocities)
+</div>
+<p><span class="tag fact">事実</span> <code>_publish_state()</code> は <code>/isaac_joint_states</code> へ 9関節名を publish し、<code>_on_joint_command()</code> / <code>_apply_pending_command()</code> は <code>/isaac_joint_commands</code> で受けた 9関節 command をそのまま articulation へ渡す。2026-07-07 時点で <code>apply_gripper_state()</code> と <code>set_finger_positions_only()</code> を使った direct finger override は削除済み。</p>
+
+<h3 id="ch4-4">4.4 control_panel / isaac_viewer（UIと同期処理）</h3>
+<p><span class="tag fact">事実</span> <code>control_panel.py</code> の <code>IsaacControlPanelWindow</code> は <code>Tomato Harvest Controls</code> という3DView上のUIウィンドウで、<b>Start / Stop / Reset / Fixed Camera / Hand Camera</b> ボタンを提供する。ボタン操作は <code>scene_runtime</code> を直接叩くのではなく、<code>/tomato_harvest/control</code> へ publish するワンクッションを置いた設計になっている（同一プロセス内でも ROS2 pub/sub を経由）。</p>
+<p>Isaac Sim の物理ステップとの同期には、物理コールバックAPI（<code>subscribe_physics_step_events</code>）は使われていない。代わりに <code>isaac_viewer.py</code> の <code>_step()</code> が <code>simulation_app.update()</code> を挟んで「前処理（コマンド適用）→ 物理ステップ実行 → 後処理（把持判定）」を手続き的に毎フレーム実行する構造になっている。</p>
+<div class="mermaid">
+flowchart LR
+  A["① isaac_joint_bridge.step()\nstate publish・command適用"] --> B["② scene_runtime.sync_robot_tool_pose()"]
+  B --> C["③ node.tick(joint_state)\nROS2 spin・snapshot publish"]
+  C --> D["④ control_controller.step_runtime()"]
+  D --> E["⑤ physics_bridge.begin_physics_step()"]
+  E --> F["⑥ simulation_app.update()\n実際の物理ステップ"]
+  F --> G["⑦ physics_bridge.finalize_physics_step()\n接触判定確定"]
+</div>
+
+</section>
+
+<section class="chapter" id="ch5">
+<h2 class="chapter-title"><span class="num">5.</span> tomato_harvest_robot（ROS2ノード群）</h2>
+<p><span class="tag fact">事実</span> 現行実装のアプリ層は5つの独立した ROS2 Python ノードで構成される（<code>src/tomato_harvest_sim/robot/setup.py</code> の entry_points と一致）。<code>motion_command_executor_node</code> は 2026-07-07 に <code>franka_ros2_control</code> の C++ ノードへ移設され、<code>/tomato_harvest/motion_command</code> が Python 層と C++ 制御層の境界になった（詳細は<a href="#ch6">6章</a>）。</p>
+
+<h3>パッケージ構成（2026-07-07 リファクタ後）</h3>
+<p><span class="tag fact">事実</span> 各コンポーネントは <code>robot/</code> 配下のサブパッケージとして分離されており、ノード実装（<code>node.py</code>）・ライブラリ・単体テスト（<code>tests/</code>）を1パッケージに同居させる。ノードと機能ライブラリが対応するもの（behavior_planner / perception / motion_planner）は同一パッケージへ統合されている。</p>
+<pre><code>robot/
+├── behavior_planner/            # フェーズ状態機械ノード（node.py）+ tests/
+├── perception/                  # トマト検出ノード + TomatoTargetEstimator + tests/
+├── motion_planner/              # MoveIt2 計画ノード + プランナーライブラリ + tests/
+├── execute_manager/             # motion_command / trajectory_monitor ノード + tests/
+├── msg/                         # robot 内部の Protocol 型定義
+├── perception/frame_transform.py
+├── launch/ · config/ · moveit_config/ · resource/
+└── package.xml · setup.py       # ament パッケージ (tomato_harvest_robot)</code></pre>
+<p>起動は <code>python3 -m tomato_harvest_sim.robot.&lt;パッケージ名またはモジュール&gt;</code> で行う。<code>execute_manager</code> だけは 1 サブパッケージ内に <code>motion_command.py</code> と <code>trajectory_monitor.py</code> の 2 ノード実装を持つ。テストは <code>pytest src/tomato_harvest_sim/robot/&lt;サブパッケージ&gt;/tests</code> または <code>pytest src/tomato_harvest_sim/simulator/tests</code> でサブパッケージ単位に実行できる（<code>pyproject.toml</code> の <code>testpaths</code> に登録済み）。JTC action 実行ノードは robot パッケージから外れ、<code>src/franka_ros2_control/src/motion_command_executor_node.cpp</code> に置かれている。</p>
+
+<div class="mermaid">
+flowchart LR
+  DET["① tomato_detector_node\ncamera+TF → target_estimate"]
+  BP["② behavior_planner_node\nフェーズ状態機械 → phase"]
+  TP["③ trajectory_planner_node\nMoveIt2呼び出し → harvest_motion_plan"]
+  TM["④ trajectory_monitor_node\nexecution_status監視 → trajectory_status"]
+  MC["⑤ motion_command_node\nphase+plan → motion_command"]
+  MCE["franka_ros2_control::motion_command_executor_node\nJTC action実行 + gripper_closed publish"]
+
+  DET -->|target_estimate| BP
+  DET -->|target_estimate| TP
+  BP -->|phase| TP
+  BP -->|phase| MC
+  TP -->|harvest_motion_plan| MC
+  TM -->|trajectory_status| TP
+  MC -->|motion_command| MCE
+  MCE -->|execution_status| TM
+  MCE -->|execution_status| BP
+</div>
+
+<h3 id="ch5-1">5.1 5ノードの入出力一覧</h3>
+
+<h4>① tomato_detector_node</h4>
+<table>
+<thead><tr><th>方向</th><th>Topic/型</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/camera/fixed/image_raw</code></td><td>画像内容は使わず、estimate計算のトリガとしてのみ使用</td></tr>
+<tr><td>Sub</td><td><code>/tf</code></td><td><code>target_tomato_frame</code>/<code>fixed_camera_frame</code> の transform を取得</td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/target_estimate</code>（JSON）</td><td>トマト推定位置・姿勢（confidence固定値0.99）</td></tr>
+</tbody>
+</table>
+<div class="warn"><span class="tag gap">乖離</span> 設計文書は「DETECTINGフェーズ中のみ稼働」とするが、実装はフェーズを一切参照せず常時 estimate を publish し続ける。また画像処理・検出処理は実装されておらず、TFの座標変換だけで完結するダミー実装である。</div>
+
+<h4>② behavior_planner_node</h4>
+<p>フェーズ状態機械を保持し、遷移のみを担当（詳細は<a href="#ch5-2">5.2</a>）。</p>
+<table>
+<thead><tr><th>方向</th><th>Topic</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/control</code>, <code>/tomato_harvest/scene_snapshot</code>, <code>/tomato_harvest/target_estimate</code>, <code>/tomato_harvest/harvest_motion_plan</code>, <code>/tomato_harvest/execution_status</code></td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/phase</code></td></tr>
+</tbody>
+</table>
+<p><span class="tag fact">事実</span> フェーズ状態機械は <code>node.py</code> 内に直接実装されている。旧版の本書で「未使用」と指摘していた <code>BehaviorPlanner</code>（planner.py）／<code>PhaseExecutionIntentBuilder</code>（intent_builder.py）／<code>phase_execution.yaml</code>／<code>phase_motion.py</code> は、どこからも参照されていないことを確認したうえで <b>2026-07-07 に削除済み</b>。パッケージの公開 API は node.py 由来の <code>main</code> / <code>detaching_outcome</code> / <code>moving_to_place_outcome</code> のみになった。</p>
+
+<h4>③ trajectory_planner_node</h4>
+<table>
+<thead><tr><th>方向</th><th>Topic</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/phase</code>, <code>/tomato_harvest/target_estimate</code>, <code>/joint_states</code>, <code>/tomato_harvest/trajectory_status</code>, <code>/tomato_harvest/scene_snapshot</code></td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/harvest_motion_plan</code>（JSON）</td></tr>
+</tbody>
+</table>
+<p>詳細は<a href="#ch5-4">5.4</a>参照。</p>
+
+<h4>④ trajectory_monitor_node</h4>
+<table>
+<thead><tr><th>方向</th><th>Topic</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/execution_status</code></td><td>JSONパースを試み、失敗時はプレーン文字列として扱う（実際に motion_command_executor_node はプレーン文字列を publish しているため整合）</td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/trajectory_status</code></td><td><code>"aborted"</code>→<code>"aborted"</code>、それ以外（"running"含む）はすべて<code>"ok"</code></td></tr>
+</tbody>
+</table>
+
+<h4>⑤ motion_command_node</h4>
+<table>
+<thead><tr><th>方向</th><th>Topic</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/phase</code>, <code>/tomato_harvest/harvest_motion_plan</code>, <code>/joint_states</code></td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/motion_command</code>（JSON）</td></tr>
+</tbody>
+</table>
+<p>詳細は<a href="#ch5-3">5.3</a>参照。出力は phase・plan・現在 joint の3入力だけで決定的に決まる。</p>
+<p><span class="tag fact">事実</span> 旧版の本書で指摘していた「<code>trajectory_status</code> を subscribe するが出力ロジックには使われていない」問題は、<b>2026-07-08 に未使用 subscription ごと削除して解消済み</b>。合わせてモジュール docstring も「フェーズ・計画・現在関節状態から生成する」に修正された。</p>
+
+<p><span class="tag fact">事実</span> <code>motion_command_executor_node</code> は本章の Python ノード群には含まれず、現在は <code>franka_ros2_control</code> 側の C++ ノードとして起動される。入出力と実装詳細は<a href="#ch6">6章</a>を参照。</p>
+
+<h3 id="ch5-2">5.2 HarvestTaskPhase 状態遷移（実装の事実）</h3>
+<p><code>HarvestTaskPhase</code> は <code>msg/contracts.py</code> で16状態が定義されているが、<code>behavior_planner_node.py</code> のベタ書きステートマシンが実際に遷移させるのは以下のみ（<code>PLANNING</code> / <code>PREGRASP_REACHED</code> / <code>DETACHED</code> は未使用の列挙値）。</p>
+<div class="scrollx">
+<table>
+<caption>実装されているフェーズ遷移（behavior_planner_node.py）</caption>
+<thead><tr><th>現フェーズ</th><th>トリガ（実装上の事実）</th><th>次フェーズ</th></tr></thead>
+<tbody>
+<tr><td>IDLE / STOPPED</td><td>control=start</td><td>DETECTING</td></tr>
+<tr><td>任意</td><td>control=stop</td><td>STOPPED</td></tr>
+<tr><td>任意</td><td>control=reset</td><td>IDLE</td></tr>
+<tr><td>DETECTING</td><td>target_estimate 受信（パース成功）</td><td>TARGET_FOUND</td></tr>
+<tr><td>TARGET_FOUND</td><td>harvest_motion_plan 受信 かつ running</td><td>MOVING_TO_PREGRASP</td></tr>
+<tr><td>MOVING_TO_PREGRASP</td><td>execution_status=succeeded</td><td>MOVING_TO_GRASP</td></tr>
+<tr><td>MOVING_TO_GRASP</td><td>execution_status=succeeded</td><td>AT_GRASP（grasp_settle_countリセット）</td></tr>
+<tr><td>AT_GRASP</td><td>scene_snapshot受信を30回カウント（settle待ち）</td><td>GRASP_EVALUATION</td></tr>
+<tr><td>GRASP_EVALUATION</td><td>tomato_status==HELD</td><td>DETACHING</td></tr>
+<tr><td>GRASP_EVALUATION</td><td>tomato_status==FALLEN、または300ステップ超過</td><td>FAILED</td></tr>
+<tr><td>DETACHING</td><td>tomato_status==DETACHED（<b>成果ベース</b>）、または execution_status=succeeded</td><td>MOVING_TO_PLACE</td></tr>
+<tr><td>DETACHING</td><td>tomato_status==FALLEN</td><td>FAILED</td></tr>
+<tr><td>MOVING_TO_PLACE</td><td>ツールが place_pose の 5cm 以内へ到達（<b>成果ベース</b>）、または execution_status=succeeded</td><td>PLACED</td></tr>
+<tr><td>MOVING_TO_PLACE</td><td>tomato_status==FALLEN</td><td>FAILED</td></tr>
+<tr><td>PLACED</td><td>tomato_status==PLACED</td><td>RETURNING_HOME</td></tr>
+<tr><td>PLACED</td><td>tomato_status==FALLEN</td><td>FAILED</td></tr>
+<tr><td>RETURNING_HOME</td><td>execution_status=succeeded、または snapshot.robot_home==True</td><td>COMPLETE</td></tr>
+<tr><td>移動系フェーズ全般</td><td>execution_status=aborted</td><td>遷移せずフェーズ維持（trajectory_planner_node が /trajectory_status 経由で独立に再計画）</td></tr>
+</tbody>
+</table>
+</div>
+<div class="note">
+<b>成果ベース遷移と aborted 時の扱い（2026-07-06〜07 の実機デバッグで確立）</b>
+<ul>
+<li><b>成果ベース遷移</b>（<code>detaching_outcome()</code> / <code>moving_to_place_outcome()</code>、<code>behavior_planner/node.py</code> のモジュールレベル純関数）: トマト把持中は指との接触で <code>panda_joint7</code> に約 0.6 rad/s の残留振動が残り、JTC が速度静止判定（<code>stopped_velocity_tolerance: 0.05</code>）を満たせず goal_time 経過後に必ず abort する。このため DETACHING / MOVING_TO_PLACE では JTC の成否を待たず、物理状態（トマト分離・ツール到達距離）で完了を判定する。</li>
+<li><b>aborted 時にフェーズを再 publish しない</b>: 以前は behavior_planner が aborted 受信のたびにフェーズを再 publish していたが、motion_command_node が古い plan で即座にコマンドを再生成 → executor が即 aborted を返す遅延ゼロの無限ループになるため廃止した。再計画は trajectory_monitor_node → <code>/trajectory_status</code>="aborted" → trajectory_planner_node の経路で独立に行われ、再試行は計画レイテンシ（約1秒）律速に収まる。</li>
+</ul>
+</div>
+
+<div class="mermaid">
+stateDiagram-v2
+  [*] --> IDLE
+  IDLE --> DETECTING: start
+  STOPPED --> DETECTING: start
+  DETECTING --> TARGET_FOUND: target_estimate受信
+  TARGET_FOUND --> MOVING_TO_PREGRASP: harvest_motion_plan受信
+  MOVING_TO_PREGRASP --> MOVING_TO_GRASP: exec=succeeded
+  MOVING_TO_GRASP --> AT_GRASP: exec=succeeded
+  AT_GRASP --> GRASP_EVALUATION: settle 30step
+  GRASP_EVALUATION --> DETACHING: tomato=HELD
+  GRASP_EVALUATION --> FAILED: tomato=FALLEN/timeout
+  DETACHING --> MOVING_TO_PLACE: tomato=DETACHED / exec=succeeded
+  DETACHING --> FAILED: tomato=FALLEN
+  MOVING_TO_PLACE --> PLACED: place_pose到達 / exec=succeeded
+  MOVING_TO_PLACE --> FAILED: tomato=FALLEN
+  PLACED --> RETURNING_HOME: tomato=PLACED
+  PLACED --> FAILED: tomato=FALLEN
+  RETURNING_HOME --> COMPLETE: exec=succeeded/robot_home
+  COMPLETE --> [*]
+  FAILED --> [*]
+  IDLE --> STOPPED: stop
+  DETECTING --> IDLE: reset
+</div>
+
+<h3 id="ch5-3">5.3 motion_command 生成仕様（<code>execute_manager/motion_command.py</code>）</h3>
+<div class="scrollx">
+<table>
+<caption>build_motion_command() のフェーズ別出力（実装の事実）</caption>
+<thead><tr><th>フェーズ</th><th>command_name</th><th>planner_name</th><th>joint_trajectory</th><th>gripper_closed</th></tr></thead>
+<tbody>
+<tr><td>MOVING_TO_PREGRASP</td><td>move_to_pregrasp</td><td>plan.planner_name</td><td>plan.pregrasp_joint_trajectory</td><td>true</td></tr>
+<tr><td>MOVING_TO_GRASP</td><td>move_to_grasp</td><td>plan.planner_name</td><td>plan.grasp_joint_trajectory</td><td>false</td></tr>
+<tr><td>AT_GRASP</td><td>hold_at_grasp</td><td>"stop"</td><td>停止軌道（現在jointの単一ウェイポイント）</td><td>true</td></tr>
+<tr><td>GRASP_EVALUATION</td><td>hold_grasp_eval</td><td>"stop"</td><td>停止軌道</td><td>true</td></tr>
+<tr><td>DETACHING</td><td>pull_to_detach</td><td>plan.planner_name</td><td>plan.pull_joint_trajectory</td><td>true</td></tr>
+<tr><td>MOVING_TO_PLACE</td><td>move_to_place</td><td>plan.planner_name</td><td>plan.place_joint_trajectory</td><td>true</td></tr>
+<tr><td>PLACED</td><td>hold_placed</td><td>"stop"</td><td>停止軌道</td><td>false</td></tr>
+<tr><td>RETURNING_HOME</td><td>move_home</td><td>"direct"</td><td>現在位置→デフォルト関節位置へ10秒の直線軌道（MoveIt2非経由）</td><td>false</td></tr>
+</tbody>
+</table>
+</div>
+<p>上記いずれのフェーズにも一致しない場合（IDLE/DETECTING/TARGET_FOUND/PLANNING/PREGRASP_REACHED/DETACHED/COMPLETE/FAILED/STOPPED）は例外が握りつぶされ、<code>motion_command</code> は publish されない。</p>
+
+<h3 id="ch5-4">5.4 trajectory_planner_node と MoveIt2</h3>
+<p>計画の起点は「phase が TARGET_FOUND になった時」または「trajectory_status が aborted の時」。<code>build_planner()</code>（環境変数 <code>TOMATO_HARVEST_PLANNER_BACKEND</code> で <code>auto</code>/<code>geometric</code>/<code>moveit2</code> を切替、既定 auto は rclpy/moveit_msgs の import可否で自動選択）で得たプランナーが、pregrasp → grasp → pull（トマトをattachした軌道） → （pre_placeがあれば）approach → place の順にフルチェーンで計画する。<b>goal の中身・タイミング・切り替えの詳細は <a href="#ch5-5">5.5</a> を参照。</b></p>
+<div class="warn">
+<b>MoveIt2 サービス名が設計文書と異なる</b><span class="tag gap">乖離</span><br>
+実装（<code>moveit_service_bridge.py</code>）が呼び出すサービス名は既定で <code>/plan_kinematic_path</code> と <code>/apply_planning_scene</code>（環境変数 <code>TOMATO_HARVEST_MOVEIT_SERVICE</code> / <code>TOMATO_HARVEST_MOVEIT_SCENE_SERVICE</code> で変更可）。設計文書が言う <code>/move_group/get_motion_plan</code> とはサービス名が一致しない（メッセージ型自体は <code>GetMotionPlan</code> 相当で同じ）。
+</div>
+<div class="warn">
+<b>フェーズ別の部分再計画は未実装</b><span class="tag gap">乖離</span><br>
+設計文書は「MOVING_TO_PLACEフェーズでは現在jointからplace軌道のみ再計画する」とするが、<code>trajectory_planner_node.py</code> にフェーズ別分岐は無く、<code>trajectory_status=="aborted"</code> を受けると常にフルチェーンを再計画する。部分再計画用API（<code>plan_place_from_joint_state()</code>）は定義されているが呼ばれていない。
+</div>
+
+<h3 id="ch5-5">5.5 MoveIt2 の使い方 詳解（goal の内容と切り替えタイミング）</h3>
+<p>この節では、MoveIt2 を初めて扱う読者向けに、このリポジトリが MoveIt2 に「何を・いつ・どう依頼しているか」と「作られた軌道がいつ差し替わるか」を、実装（<code>motion_planner/moveit_service_bridge.py</code>・<code>motion_planner/node.py</code>・<code>motion_command_executor_node.cpp</code>）に即して説明する。すべて<span class="tag fact">事実</span>（コード確認済み）である。</p>
+
+<h4>5.5.1 まず押さえる大前提：MoveIt2 は「計画」だけ、実行は自前</h4>
+<p>MoveIt2 の一般的な使い方には「MoveGroup アクションで計画も実行も任せる」方法があるが、このリポジトリは<b>そうしていない</b>。MoveIt2 には <code>GetMotionPlan</code> サービス（<code>/plan_kinematic_path</code>）で<b>関節軌道の計算だけ</b>を依頼し、返ってきた軌道は一旦 <code>harvest_motion_plan</code> topic に載せて自前のノード群へ渡す。実際にアームを動かす（JTC へ goal を送る）のは C++ の <code>motion_command_executor_node</code> である。つまり登場する「goal」は次の2種類あり、混同しないことが重要:</p>
+<table>
+<thead><tr><th>goal の種類</th><th>宛先</th><th>誰が送るか</th><th>中身</th></tr></thead>
+<tbody>
+<tr><td><b>計画 goal</b>（MotionPlanRequest）</td><td>MoveIt2 <code>/plan_kinematic_path</code> サービス</td><td>trajectory_planner_node（Python）</td><td>「この姿勢に届く関節軌道を計算して」という依頼。動作はしない</td></tr>
+<tr><td><b>実行 goal</b>（FollowJointTrajectory）</td><td>JTC の action サーバ</td><td>motion_command_executor_node（C++）</td><td>計算済み軌道そのもの。送ると実際にアームが動く</td></tr>
+</tbody>
+</table>
+
+<div class="mermaid">
+sequenceDiagram
+  participant BP as behavior_planner_node
+  participant TP as trajectory_planner_node
+  participant MV as MoveIt2 move_group
+  participant MC as motion_command_node
+  participant MCE as executor（C++）
+  participant JTC as JTC
+
+  Note over TP,MV: 【計画フェーズ】TARGET_FOUND 時に1回だけ
+  BP->>TP: phase = TARGET_FOUND
+  loop pregrasp → grasp → pull → (pre_place) → place の順に1区間ずつ
+    TP->>MV: /apply_planning_scene（衝突物の再配置）
+    TP->>MV: /plan_kinematic_path（計画 goal）
+    MV-->>TP: 関節軌道（この区間分）
+  end
+  TP->>MC: harvest_motion_plan（全区間の軌道をまとめて1回 publish）
+  Note over MC,JTC: 【実行フェーズ】フェーズが進むたびに軌道を1本ずつ使う
+  BP->>MC: phase = MOVING_TO_PREGRASP
+  MC->>MCE: motion_command（pregrasp 軌道）
+  MCE->>JTC: 実行 goal 送信（既存 goal があれば先に cancel）
+  JTC-->>MCE: succeeded
+  MCE-->>BP: execution_status = succeeded
+  BP->>MC: phase = MOVING_TO_GRASP（→ 次の軌道で goal 切替）
+</div>
+
+<h4>5.5.2 計画はいつ走るか（計画 goal を与えるタイミング）</h4>
+<p><code>trajectory_planner_node</code> が MoveIt2 を呼ぶトリガは次の2つだけ（<code>node.py</code> の <code>_on_phase</code> / <code>_on_trajectory_status</code>）:</p>
+<ol>
+<li><b>phase が TARGET_FOUND になった時</b> — 収穫サイクル開始時の本計画。target_estimate と /joint_states を両方受信済みであることが前提（未受信なら何もしない）。</li>
+<li><b>trajectory_status が "aborted" になった時</b> — 実行失敗時の再計画。JTC が abort → executor が <code>execution_status="aborted"</code> → trajectory_monitor_node が <code>trajectory_status="aborted"</code> に変換、という経路で伝わる。</li>
+</ol>
+<p>逆に言うと、<b>フェーズが進むたびに計画し直すことはない</b>。1回の計画で収穫サイクル全区間の軌道をまとめて作り、以降は実行側がそれを順番に消費する。</p>
+
+<h4>5.5.3 目標姿勢はどう決まるか（幾何オフセット）</h4>
+<p>MoveIt2 に渡す目標姿勢そのものは MoveIt2 が決めるのではなく、<code>pregrasp_planner.py</code> の <code>MoveItStylePreGraspPlanner</code> がトマト推定位置（target_estimate）とトレイ位置（scene_snapshot）から固定オフセットで算出する。姿勢はすべて roll=180°（グリッパー真下向き）。</p>
+<table>
+<thead><tr><th>姿勢</th><th>基準</th><th>オフセット（既定値）</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>pregrasp_pose</td><td>トマト</td><td>x −0.12 / z +0.09</td><td>手前上空で構える</td></tr>
+<tr><td>grasp_pose</td><td>トマト</td><td>z +0.060</td><td>把持位置（トマト直上）</td></tr>
+<tr><td>pull_pose</td><td>トマト</td><td>x −0.08 / z +0.08</td><td>枝から引き離す方向へ退避</td></tr>
+<tr><td>pre_place_pose</td><td>トレイ</td><td>z +0.12+0.10</td><td>トレイ上空アプローチ</td></tr>
+<tr><td>place_pose</td><td>トレイ</td><td>z +0.12</td><td>リリース高さ（<a href="#ch4-2">4.2</a> の <code>PLACE_DISTANCE_M</code> と対応）</td></tr>
+</tbody>
+</table>
+
+<h4>5.5.4 1区間の計画で MoveIt2 に何を送るか</h4>
+<p>1回の計画は <b>pregrasp → grasp → pull → (pre_place) → place</b> の順に、区間ごとに次の2ステップを繰り返す（<code>_plan_phase()</code>）:</p>
+<p><b>ステップ1: <code>/apply_planning_scene</code> — 衝突環境の構築。</b>MoveIt2 は「どこにぶつかってはいけないか」を知らないので、毎区間の計画前に衝突オブジェクトを送り直す。枝（box 0.18×0.02×0.02）・茎（box）・トレイ（板5枚組）を scene_snapshot の実座標に配置する。ここで重要なのが<b>トマトの扱いの切り替え</b>:</p>
+<ul>
+<li><b>pregrasp / grasp 区間</b>（<code>attach_tomato=False</code>）: トマトは「世界に固定された障害物」として置く…のではなく、把持対象なので衝突体としては add しつつ、ハンドが接近できる必要がある。</li>
+<li><b>pull / pre_place / place 区間</b>（<code>attach_tomato=True</code>）: トマトを半径 0.01 m の球として <code>panda_hand</code> に <b>attach</b>（ハンド先端から z +0.1034 の位置）する。これにより MoveIt2 は「ハンドがトマトを持ったまま」の状態で、トマトが枝やトレイにぶつからない軌道を計画する。</li>
+</ul>
+<p><b>ステップ2: <code>/plan_kinematic_path</code>（GetMotionPlan） — 計画依頼。</b><code>MotionPlanRequest</code> の主要フィールドは次のとおり:</p>
+<table>
+<thead><tr><th>フィールド</th><th>値</th><th>初心者向け解説</th></tr></thead>
+<tbody>
+<tr><td><code>group_name</code></td><td><code>panda_arm</code>（7軸）</td><td>SRDF で定義されたアームの関節グループ。finger は計画対象外</td></tr>
+<tr><td><code>start_state</code></td><td>最初の区間は現在の <code>/joint_states</code>（URDF 上下限にクランプ済み）。<b>2区間目以降は「前区間の軌道の終端姿勢」</b></td><td>後述 5.5.5 の「数珠つなぎ計画」の肝</td></tr>
+<tr><td><code>goal_constraints</code>（位置）</td><td>目標位置を中心とする<b>半径 0.01 m の球</b>（PositionConstraint）に <code>panda_hand</code> link を入れること</td><td>「1 cm 以内に届けば成功」という位置ゴール。なお運用上の目標はツール先端なので、<code>panda_hand</code> link 位置へは +0.0584 m の z オフセットで換算する</td></tr>
+<tr><td><code>goal_constraints</code>（姿勢）</td><td>目標姿勢の quaternion、各軸許容 ±0.10 rad（OrientationConstraint、既定で有効）</td><td>グリッパー真下向きを保つための姿勢ゴール</td></tr>
+<tr><td><code>num_planning_attempts</code> / <code>allowed_planning_time</code></td><td>4 回 / 1.0 秒</td><td>OMPL（RRTConnect）は乱択なので複数回試す</td></tr>
+<tr><td><code>max_velocity/acceleration_scaling_factor</code></td><td>0.2</td><td>最高速度の 20% に制限したゆっくり動作</td></tr>
+</tbody>
+</table>
+<p>応答の <code>error_code==1</code>（SUCCESS）なら軌道を受理する。ただし「開始姿勢とほぼ同じ姿勢に留まる no-op 軌道」（全点が許容 1e-3 rad 以内）は棄却して失敗扱いにする — 目標に既に居ると誤認して腕が動かないまま成功になる事故を防ぐため。</p>
+
+<h4>5.5.5 数珠つなぎ計画（なぜ start_state を引き継ぐか）</h4>
+<p>2区間目以降の計画は、ロボットの<b>現在姿勢からではなく、前区間の軌道の終端姿勢から</b>始める（<code>_joint_state_from_trajectory()</code> で終端を取り出して次の start_state に渡す）。理由は単純で、実行時には pregrasp 軌道を走り終えた姿勢から grasp 軌道が始まるからである。もし全区間を現在姿勢から計画すると、区間の継ぎ目で姿勢が飛ぶ軌道になってしまう。</p>
+<div class="mermaid">
+flowchart LR
+  J0["現在の /joint_states<br>（クランプ済み）"] -->|start| P1["pregrasp 計画"]
+  P1 -->|"終端姿勢を次の start に"| P2["grasp 計画"]
+  P2 -->|終端姿勢| P3["pull 計画<br>（トマト attach）"]
+  P3 -->|終端姿勢| P4["pre_place 計画<br>（attach 継続）"]
+  P4 -->|終端姿勢| P5["place 計画<br>（attach 継続）"]
+  P4 & P5 --> C["approach+place を連結して<br>place_joint_trajectory に"]
+</div>
+<p>途中区間が失敗した場合の扱いは段階的で、pregrasp / grasp / pull のどれかが失敗すると全体を失敗（フォールバック）とし、pre_place / place だけ失敗した場合は「そこまでの軌道を保持した部分成功」（<code>moveit2_service_bridge_partial</code>）として返す — ロボットが少なくとも pregrasp まで進めるようにするため。MoveIt2 自体が使えない環境（rclpy / moveit_msgs が import 不可、サービス未起動）では、joint 軌道なしの幾何プラン（pose のみ）に落ち、実行側は移動系コマンドの軌道 null を検出して aborted を返す。</p>
+
+<h4>5.5.6 実行 goal の送信と切り替えタイミング</h4>
+<p>計画結果（最大4本の関節軌道を含む <code>harvest_motion_plan</code>）は1回だけ publish され、以降は<b>フェーズの進行が軌道の切り替えスイッチ</b>になる。流れは次のとおり:</p>
+<ol>
+<li><code>behavior_planner_node</code> がフェーズを1段進めて publish する（例: MOVING_TO_PREGRASP → MOVING_TO_GRASP）。</li>
+<li><code>motion_command_node</code> は phase / plan / joint_states のどれかを受信するたびに <code>build_motion_command()</code> を呼び、<b>そのフェーズに対応する軌道1本</b>を載せた motion_command を publish する（対応表は <a href="#ch5-3">5.3</a>）。</li>
+<li>C++ executor は motion_command を受けるたびに <code>send_trajectory()</code> を実行する。このとき<b>実行中の JTC goal が残っていれば必ず先に <code>async_cancel_goal()</code> で取り消し</b>、新しい FollowJointTrajectory goal を送る。JTC 側の goal は常に最新の1本だけ、が不変条件である。</li>
+</ol>
+<p>つまり<b>実行 goal の切り替えは「フェーズ遷移のたび」と「再計画で新しい plan が届いたとき」</b>に起きる。後者では phase は変わらないが、同じフェーズの軌道が新しいものに差し替わって再送される。また AT_GRASP / GRASP_EVALUATION / PLACED では「現在位置に留まる1点だけの停止軌道」が goal として送られる — 把持判定や settle 待ちの間、JTC に明示的に静止を指示するためである。</p>
+<p>goal の結果は次のように <code>execution_status</code> へ写像される: 受理拒否または結果 abort → <code>"aborted"</code>、正常完了 → <code>"succeeded"</code>、<b>cancel（こちらから取り消した場合）→ 何も publish しない</b>。cancel を aborted 扱いにすると、フェーズ遷移のたびに偽の失敗が behavior_planner へ流れてしまうからである。</p>
+
+<h4>5.5.7 再計画ループの全体像</h4>
+<div class="mermaid">
+flowchart TD
+  A["JTC が goal を abort<br>（例: 残留振動で静止判定を満たせない）"] --> B["executor: execution_status='aborted'"]
+  B --> C["trajectory_monitor: trajectory_status='aborted'"]
+  C --> D["trajectory_planner: フルチェーン再計画<br>（今の /joint_states を起点に 5.5.4 を再実行）"]
+  D --> E["新しい harvest_motion_plan を publish"]
+  E --> F["motion_command_node: 現フェーズの軌道を差し替えて再送"]
+  F --> G["executor: 旧 goal を cancel → 新 goal 送信"]
+  G -.->|また abort したら| A
+</div>
+<p>behavior_planner はこのループに関与せず（aborted を受けてもフェーズを維持するだけ）、再試行の頻度は計画レイテンシ（約1秒）で自然に律速される。DETACHING / MOVING_TO_PLACE では abort が続いても物理的成果（トマト分離・到達距離）でフェーズが進める設計になっている（<a href="#ch5-2">5.2</a> の成果ベース遷移）。</p>
+
+<h4>5.5.8 環境変数によるチューニング</h4>
+<table>
+<thead><tr><th>環境変数</th><th>既定値</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td><code>TOMATO_HARVEST_PLANNER_BACKEND</code></td><td><code>auto</code></td><td><code>moveit2</code> / <code>geometric</code> の強制切替。auto は import 可否で自動判定</td></tr>
+<tr><td><code>TOMATO_HARVEST_MOVEIT_SERVICE</code></td><td><code>/plan_kinematic_path</code></td><td>計画サービス名</td></tr>
+<tr><td><code>TOMATO_HARVEST_MOVEIT_SCENE_SERVICE</code></td><td><code>/apply_planning_scene</code></td><td>planning scene サービス名</td></tr>
+<tr><td><code>TOMATO_HARVEST_MOVEIT_GROUP</code> / <code>_EE_LINK</code></td><td><code>panda_arm</code> / <code>panda_hand</code></td><td>計画グループとエンドエフェクタ link</td></tr>
+<tr><td><code>TOMATO_HARVEST_MOVEIT_SERVICE_TIMEOUT_SEC</code> / <code>_ALLOWED_PLANNING_TIME_SEC</code></td><td>1.50 / 1.00</td><td>サービス待ちと計画時間の上限</td></tr>
+<tr><td><code>TOMATO_HARVEST_MOVEIT_POSITION_TOLERANCE_M</code> / <code>_ORIENTATION_TOLERANCE_RAD</code></td><td>0.01 / 0.10</td><td>goal の位置球半径と姿勢許容</td></tr>
+<tr><td><code>TOMATO_HARVEST_MOVEIT_ENFORCE_ORIENTATION</code></td><td>1</td><td>姿勢制約の有効/無効</td></tr>
+<tr><td><code>TOMATO_HARVEST_DEBUG_MOVEIT</code></td><td>無効</td><td>計画リクエスト/応答の詳細ログ</td></tr>
+</tbody>
+</table>
+
+<h3 id="ch5-6">5.6 レガシーコードの削除履歴</h3>
+<p><span class="tag fact">事実</span> 旧アーキテクチャの軌道追従ライブラリ <code>robot/trajectory_tracking/</code>（coordinator / tracker / action_client 等）は、現行構成からの参照ゼロを確認したうえで <b>2026-07-07 に削除済み</b>。旧単一プロセス構成の <code>api/</code>・<code>app/</code>・<code>robot_node.py</code>・<code>runtime.py</code> も削除済み。<code>robot/msg/trajectory_tracking.py</code>（型定義モジュール）だけは <code>simulator/isaac_franka_driver.py</code> が参照するため残存している。</p>
+<p><span class="tag fact">事実</span> 2026-07-07〜08 の追加整理: ① simulator の未使用モジュール3本（<code>scene_runtime_view.py</code> / <code>debug_visualization.py</code> / <code>isaac_ros2_control_system.py</code>）を削除。② behavior_planner の未使用ライブラリ群（<code>planner.py</code> / <code>intent_builder.py</code> / <code>phase_motion.py</code> / <code>config/phase_execution.yaml</code>）を削除。③ motion_command_node の未使用 <code>trajectory_status</code> subscription を削除。④ C++ executor の JTC action 名ハードコードを ROS パラメータ <code>follow_joint_trajectory_action</code> 化（<a href="#ch6">6章</a>）。いずれも削除前に参照ゼロを確認し、全テストの通過を検証済み。</p>
+
+</section>
+
+<section class="chapter" id="ch6">
+<h2 class="chapter-title"><span class="num">6.</span> franka_ros2_control（C++側）</h2>
+<p><span class="tag fact">事実</span> C++ 側は <code>hardware_interface::SystemInterface</code> を継承した <code>IsaacSimHardwareInterface</code>（<code>franka_ros2_control_plugin.xml</code> で pluginlib 登録）と、<code>/tomato_harvest/motion_command</code> を JTC action へ変換する <code>motion_command_executor_node</code> で構成される。HWI は現在 <b>arm 7軸 + finger 2軸</b> を扱い、JTC は arm 7軸のみを制御しつつ、finger 指令は <code>/tomato_harvest/gripper_closed</code> から HWI 内で command vector へ統合される。</p>
+
+<table>
+<caption>IsaacSimHardwareInterface の入出力</caption>
+<thead><tr><th>方向</th><th>Topic</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/isaac_joint_states</code></td><td>simulator側 <code>IsaacJointRos2Bridge</code> から。名前一致でstateへマッピング</td></tr>
+<tr><td>Sub</td><td><code>/tomato_harvest/gripper_closed</code></td><td><code>"true"</code>/<code>"false"</code> を finger target へ変換し、内部 command vector へ反映</td></tr>
+<tr><td>Pub</td><td><code>/isaac_joint_commands</code></td><td>URDF上下限でクランプ済みの arm 7軸 + finger 2軸 command を送信</td></tr>
+</tbody>
+</table>
+
+<h3>起動時の安全策</h3>
+<ul>
+<li><code>on_activate</code>: 起動後最大5秒 Isaac Sim からの初回 joint_state を待機。届かなければ0埋めで警告を出しつつ継続し、届いた実位置で command をリシードして起動時のジャンプを防止。</li>
+<li><code>write()</code>: <code>state_received_</code> が false の間は何もpublishしない（接続前に0を送るとJTCがゼロホールドしてしまうため、とコメントに明記）。</li>
+</ul>
+
+<h3>controller構成（<code>franka_controllers.yaml</code>）</h3>
+<ul>
+<li><code>controller_manager</code>: <code>update_rate: 100</code>Hz。<code>use_sim_time</code> は意図的に未設定（<code>/clock</code>配信より先にactivateが試行されるため、とコメントあり）。</li>
+<li><code>joint_state_broadcaster</code>: <code>/joint_states</code> をpublish。</li>
+<li><code>joint_trajectory_controller</code>: <code>panda_joint1〜7</code>、position+velocity interface、<code>interpolation_method: splines</code>、<code>open_loop_control: true</code>（closed-loopだと <code>panda_joint4</code> が可動域外の0へ動く問題を回避するためのコメントあり）。finger 2軸は controller の joints リストには含めず、HWI が独立に上書きする。</li>
+<li>ゴール判定許容値（<code>constraints</code>）: 位置ゴール判定は全関節 <code>goal: 0.0</code> で無効化。<code>stopped_velocity_tolerance: 0.05</code> は「腕が実際に到着して停止した」ことの確認として機能しており、<b>0.0（無効化）にしてはならない</b> — 無効化すると軌道時間経過だけで即 success となり、腕の到着前にグリッパーが閉じて把持が空振りする（2026-07-07 の実験で確認済み、yaml コメントに記録）。トマト把持中の残留振動による abort は behavior_planner 側の成果ベース遷移（<a href="#ch5-2">5.2</a>）で救済する。</li>
+</ul>
+
+<h3>motion_command_executor_node</h3>
+<p><span class="tag fact">事実</span> 2026-07-07 に <code>src/tomato_harvest_sim/robot/motion_command_executor_node/</code> から <code>src/franka_ros2_control/src/motion_command_executor_node.cpp</code> へ移設済み。<code>/tomato_harvest/motion_command</code> トピックは、現在は「アプリケーション層（robot・Python）→ ロボット制御層（franka_ros2_control・C++）」の境界として実装されている。移行の主眼は性能ではなくレイヤ分離にある:</p>
+<ul>
+<li><b>依存方向の整理</b>: robot 側 Python から <code>control_msgs</code> / FollowJointTrajectory アクションといった ros2_control の知識が消え、アプリ層は「コマンドの意味」だけを、制御層は「実行手段」だけを知る構造になる。</li>
+<li><b>sim / 実機切替の局所化</b>: シミュレータ（IsaacSimHardwareInterface）と実機ハードウェアの差し替えが franka_ros2_control 内で完結し、アプリ側は変更不要になる。</li>
+<li><b>責務の固定</b>: <code>motion_command_node</code> は command JSON の生成のみに集中し、JTC action client は C++ executor に閉じ込められる。</li>
+</ul>
+<table>
+<thead><tr><th>方向</th><th>Topic/Action</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>Sub</td><td><code>/tomato_harvest/motion_command</code>（JSON）</td><td><code>command_name</code> / <code>gripper_closed</code> / <code>phase_motion_plan.joint_trajectory</code> を YAML parser で読み取り</td></tr>
+<tr><td>Action Client</td><td><code>/joint_trajectory_controller/follow_joint_trajectory</code>（ROS パラメータ <code>follow_joint_trajectory_action</code> で変更可、2026-07-08 パラメータ化）</td><td>軌道点の position と <code>time_from_start_sec</code> を JTC action goal へ変換</td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/execution_status</code></td><td>プレーン文字列 <code>"idle"</code>/<code>"running"</code>/<code>"succeeded"</code>/<code>"aborted"</code></td></tr>
+<tr><td>Pub</td><td><code>/tomato_harvest/gripper_closed</code></td><td><code>"true"</code>/<code>"false"</code> を publish。<code>SimulatorNode</code> は scene state 用に、<code>IsaacSimHardwareInterface</code> は finger command 用に購読する</td></tr>
+</tbody>
+</table>
+<p>移動コマンド（<code>move_*</code> / <code>pull_*</code>）で <code>joint_trajectory</code> が null の場合は、計画失敗とみなして即座に <code>"aborted"</code> を publish し再計画を促す。停止コマンド（<code>hold_*</code>）は軌道 null が正常のため何も publish しない。この判定は <code>command_name</code> の接頭辞で行う。</p>
+<div class="warn">
+<b>現状の整理</b><span class="tag fact">事実</span><br>
+finger 指令の HWI 統合は 2026-07-07 に実装済み。<code>/tomato_harvest/gripper_closed</code> は依然 topic として残るが、これは「scene の論理状態を伝える経路」と「HWI へ finger intent を渡す経路」の兼用であり、simulator の articulation を直接書き換える経路ではない。
+</div>
+
+<h3>launch構成</h3>
+<ul>
+<li><code>franka_ros2_control.launch.py</code>: <code>ros2_control_node</code> → <code>joint_state_broadcaster</code> spawner → <code>joint_trajectory_controller</code> spawner → <code>motion_command_executor_node</code> の4ノードを起動。controller 名は launch 内の変数で一元管理され、spawner 引数と executor の <code>follow_joint_trajectory_action</code> パラメータの両方がそこから導出される。</li>
+<li><code>move_group.launch.py</code>: URDF/SRDF/kinematics/ompl/joint_limitsをロードし <code>move_group</code> ノードを起動（<code>/plan_kinematic_path</code>, <code>/apply_planning_scene</code> を提供）。</li>
+</ul>
+<p>その他設定ファイル：<code>joint_limits.yaml</code>（MoveIt2用の速度・加速度上書き）、<code>kinematics.yaml</code>（KDL）、<code>ompl_planning.yaml</code>（RRTConnect等）、<code>panda.srdf</code>（<code>panda_arm</code>グループ、自己衝突無効化ペア）。</p>
+
+</section>
+
+<section class="chapter" id="ch7">
+<h2 class="chapter-title"><span class="num">7.</span> ROS2 インタフェース一覧</h2>
+
+<h3>Topics</h3>
+<div class="scrollx">
+<table>
+<thead><tr><th>Topic</th><th>型</th><th>Publisher</th><th>Subscriber</th></tr></thead>
+<tbody>
+<tr><td><code>/tomato_harvest/control</code></td><td>String</td><td>control_panel経由 / UI</td><td>SimulatorNode, behavior_planner_node</td></tr>
+<tr><td><code>/tomato_harvest/scene_snapshot</code></td><td>String(JSON)</td><td>SimulatorNode</td><td>behavior_planner_node, trajectory_planner_node</td></tr>
+<tr><td><code>/tomato_harvest/target_estimate</code></td><td>String(JSON)</td><td>tomato_detector_node</td><td>behavior_planner_node, trajectory_planner_node</td></tr>
+<tr><td><code>/tomato_harvest/phase</code></td><td>String</td><td>behavior_planner_node</td><td>trajectory_planner_node, motion_command_node</td></tr>
+<tr><td><code>/tomato_harvest/harvest_motion_plan</code></td><td>String(JSON)</td><td>trajectory_planner_node</td><td>motion_command_node</td></tr>
+<tr><td><code>/tomato_harvest/motion_command</code></td><td>String(JSON)</td><td>motion_command_node</td><td>motion_command_executor_node</td></tr>
+<tr><td><code>/tomato_harvest/execution_status</code></td><td>String（プレーン文字列）</td><td>motion_command_executor_node</td><td>trajectory_monitor_node, behavior_planner_node</td></tr>
+<tr><td><code>/tomato_harvest/trajectory_status</code></td><td>String</td><td>trajectory_monitor_node</td><td>trajectory_planner_node（再計画トリガ）</td></tr>
+<tr><td><code>/tomato_harvest/gripper_closed</code></td><td>String("true"/"false")</td><td>motion_command_executor_node</td><td>SimulatorNode, IsaacSimHardwareInterface</td></tr>
+<tr><td><code>/camera/fixed/image_raw</code>, <code>/camera/hand/image_raw</code></td><td>sensor_msgs/Image</td><td>SimulatorNode</td><td>tomato_detector_node（fixedのみ実質使用）</td></tr>
+<tr><td><code>/tf</code></td><td>tf2_msgs/TFMessage</td><td>SimulatorNode</td><td>tomato_detector_node</td></tr>
+<tr><td><code>/joint_states</code></td><td>sensor_msgs/JointState</td><td>joint_state_broadcaster（C++）</td><td>trajectory_planner_node, motion_command_node</td></tr>
+<tr><td><code>/isaac_joint_states</code></td><td>sensor_msgs/JointState</td><td>IsaacJointRos2Bridge</td><td>IsaacSimHardwareInterface（C++）</td></tr>
+<tr><td><code>/isaac_joint_commands</code></td><td>sensor_msgs/JointState</td><td>IsaacSimHardwareInterface（C++）</td><td>IsaacJointRos2Bridge</td></tr>
+<tr><td><code>/clock</code></td><td>rosgraph_msgs/Clock</td><td>IsaacJointRos2Bridge</td><td>ros2_control（参考用）</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3>Actions</h3>
+<table>
+<thead><tr><th>Action</th><th>型</th><th>Client</th><th>Server</th></tr></thead>
+<tbody>
+<tr><td><code>/joint_trajectory_controller/follow_joint_trajectory</code></td><td>control_msgs/FollowJointTrajectory</td><td>motion_command_executor_node</td><td>JointTrajectoryController（C++）</td></tr>
+</tbody>
+</table>
+<p><span class="tag fact">事実</span> 旧版の本書で指摘していた「C++ executor が action 名をローカルにハードコードしている」問題は、<b>2026-07-08 に ROS パラメータ <code>follow_joint_trajectory_action</code> 化して解消済み</b>（既定値は上記の JTC action 名、launch が controller 名から導出して渡す）。なお <code>msg/topics.py</code> の <code>FOLLOW_JOINT_TRAJECTORY_ACTION = "/tomato_harvest/follow_joint_trajectory"</code> は JTC とは別系統の定数で、<code>msg/bridge.py</code>（Ros2Bridge）が内部の action client / server ペアに使用している。この bridge 内 action 経路は現行の C++ executor 経由の軌道実行とは独立した旧経路であり、整理は今後の課題である。<span class="tag guess">推測</span></p>
+
+<h3>Services</h3>
+<table>
+<thead><tr><th>Service</th><th>型</th><th>Client</th><th>Server</th></tr></thead>
+<tbody>
+<tr><td><code>/plan_kinematic_path</code></td><td>GetMotionPlan相当</td><td>trajectory_planner_node</td><td>MoveIt2 move_group</td></tr>
+<tr><td><code>/apply_planning_scene</code></td><td>ApplyPlanningScene</td><td>trajectory_planner_node</td><td>MoveIt2 move_group</td></tr>
+</tbody>
+</table>
+
+<h3>motion_command の JSON構造（例）</h3>
+<pre><code>{
+  "command_name": "move_to_pregrasp",
+  "planner_name": "moveit2",
+  "target_pose": { "x": 0.45, "y": -0.12, "z": 0.38, "roll": 0.0, "pitch": 90.0, "yaw": 0.0 },
+  "gripper_closed": true,
+  "phase_motion_plan": {
+    "phase_id": "moving_to_pregrasp",
+    "phase_goal_pose": { "x": 0.45, "y": -0.12, "z": 0.38 },
+    "active_waypoints": [{ "x": 0.45, "y": -0.12, "z": 0.38 }],
+    "joint_trajectory": {
+      "joint_names": ["panda_joint1", "...", "panda_joint7"],
+      "points": [
+        { "positions_rad": [0.0, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8], "time_from_start_sec": 0.0 },
+        { "positions_rad": [0.1, -0.3, 0.0, -2.0, 0.0, 1.8, 0.8], "time_from_start_sec": 1.2 }
+      ]
+    }
+  }
+}</code></pre>
+
+<h3>主要データクラス（<code>msg/contracts.py</code>）</h3>
+<div class="scrollx">
+<table>
+<thead><tr><th>クラス</th><th>主なフィールド</th></tr></thead>
+<tbody>
+<tr><td><code>Pose3D</code></td><td>x, y, z, roll, pitch, yaw</td></tr>
+<tr><td><code>SceneSnapshot</code></td><td>phase, active_camera, tomato_status, gripper_closed, robot_home, cycle_id, 各種pose, active_phase_motion_plan(任意)</td></tr>
+<tr><td><code>JointStateSnapshot</code></td><td>joint_names, positions_rad</td></tr>
+<tr><td><code>JointTrajectory</code> / <code>JointTrajectoryPoint</code></td><td>joint_names / points（positions_rad, time_from_start_sec, velocities_rad_s任意）</td></tr>
+<tr><td><code>HarvestMotionPlan</code></td><td>planner_name, target_pose, pregrasp/grasp/pull/place の pose・waypoints・joint_trajectory</td></tr>
+<tr><td><code>MotionCommand</code></td><td>command_name, planner_name, target_pose(任意), gripper_closed(任意), phase_motion_plan(任意)</td></tr>
+<tr><td><code>TargetEstimate</code></td><td>camera_name, target_world_pose, target_camera_pose, confidence</td></tr>
+<tr><td><code>HardwareStateSample</code> / <code>HardwareCommandSample</code>（<code>msg/hardware_control.py</code>）</td><td>joint状態のread/write抽象。gripper_closedも含む</td></tr>
+</tbody>
+</table>
+</div>
+
+</section>
+
+<section class="chapter" id="ch8">
+<h2 class="chapter-title"><span class="num">8.</span> 起動シーケンスとデータフロー</h2>
+
+<h3>起動シーケンス（<code>scripts/run_ros2_components.sh</code> 基準）</h3>
+<div class="mermaid">
+sequenceDiagram
+  participant SH as run_ros2_components.sh
+  participant CPP as franka_ros2_control
+  participant MV as MoveIt2 move_group（任意）
+  participant ROB as robotノード群（5つ）
+  participant SIM as simulator_node / Isaac Sim
+
+  SH->>CPP: robot_state_publisher 起動
+  SH->>CPP: ros2_control_node 起動
+  Note over CPP: /controller_manager/list_controllers 出現待ち（最大15秒）
+  SH->>CPP: joint_state_broadcaster / joint_trajectory_controller spawn
+  Note over CPP: active count>=2 待ち（最大20秒）
+  opt --moveit 指定時
+    SH->>MV: move_group.launch.py 起動
+    Note over MV: /plan_kinematic_path 出現待ち（最大30秒）
+  end
+  SH->>ROB: tomato_detector_node起動
+  SH->>ROB: behavior_planner_node起動
+  SH->>ROB: trajectory_planner_node起動
+  SH->>ROB: trajectory_monitor_node起動
+  SH->>ROB: motion_command_node起動
+  SH->>CPP: motion_command_executor_node起動
+  opt --auto-start 指定時
+    SH->>SIM: scene_snapshot出現待ち後 "start" を自動publish
+  end
+  SH->>SIM: simulator_node起動（--isaacならrun_harvest_viewer.pyをforeground起動）
+</div>
+
+<h3>1収穫サイクルのデータフロー</h3>
+<div class="mermaid">
+sequenceDiagram
+  participant SIM as SimulatorNode
+  participant DET as tomato_detector_node
+  participant BP as behavior_planner_node
+  participant TP as trajectory_planner_node
+  participant MC as motion_command_node
+  participant MCE as motion_command_executor_node
+  participant HWI as IsaacSimHardwareInterface
+  participant BR as IsaacJointRos2Bridge
+  participant TM as trajectory_monitor_node
+  participant MV as MoveIt2
+
+  SIM->>DET: /camera/fixed/image_raw + /tf
+  DET->>BP: target_estimate
+  DET->>TP: target_estimate
+  BP->>TP: phase (TARGET_FOUND)
+  TP->>MV: /plan_kinematic_path (フルチェーン計画)
+  MV-->>TP: 軌道
+  TP->>MC: harvest_motion_plan
+  BP->>MC: phase (MOVING_TO_PREGRASP)
+  MC->>MCE: motion_command (pregrasp軌道, gripper_closed=true)
+  MCE->>HWI: /tomato_harvest/gripper_closed ("true")
+  HWI->>BR: /isaac_joint_commands (finger close含む)
+  MCE->>TM: execution_status (running→succeeded)
+  MCE->>BP: execution_status (succeeded)
+  BP->>MC: phase (MOVING_TO_GRASP)
+  Note over MCE,TM: abort発生時
+  MCE->>TM: execution_status (aborted)
+  TM->>TP: trajectory_status (aborted)
+  TP->>MV: 再計画（フルチェーン）
+</div>
+
+</section>
+
+<section class="chapter" id="ch9">
+<h2 class="chapter-title"><span class="num">9.</span> ビルド・実行方法</h2>
+
+<h3>Dockerビルド</h3>
+<pre><code>./build.sh
+# 環境変数で上書き可能
+IMAGE_NAME=my-tomato-sim ISAAC_SIM_IMAGE=nvcr.io/nvidia/isaac-sim:6.0.0 ./build.sh</code></pre>
+<p><code>docker/Dockerfile</code> は <code>nvcr.io/nvidia/isaac-sim:6.0.0</code> をベースに ROS2 Jazzy（<code>ros-jazzy-desktop</code>, <code>ros-jazzy-moveit</code>, ros2-control系）をインストールし、<code>colcon build --symlink-install</code> で全ROS2パッケージをビルドする。</p>
+
+<h3>デバッグコンテナに入る</h3>
+<pre><code>xhost +local:root
+./into.sh</code></pre>
+<p><code>into.sh</code> はコンテナ名 <code>tomato-harvest-sim-debug</code> を作成/再利用し、リポジトリ全体を <code>/workspace/tomato-harvest</code> にマウント、<code>PYTHONPATH=/workspace/tomato-harvest/src</code> を設定する。</p>
+
+<h3>コンテナ内での実行</h3>
+<pre><code># フルROS2マルチノード構成（推奨）
+./scripts/run_ros2_components.sh --isaac --moveit
+
+# 自動開始
+./scripts/run_ros2_components.sh --isaac --moveit --auto-start
+
+# headless E2E
+./scripts/run_ros2_components.sh --isaac --moveit --headless --headless-steps 600 --auto-start</code></pre>
+
+<h3><code>run_ros2_components.sh</code> の主なオプション</h3>
+<table>
+<thead><tr><th>オプション</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td><code>--isaac</code></td><td>Isaac Sim統合モード（未指定時はtoy physicsモード）</td></tr>
+<tr><td><code>--headless</code> / <code>--headless-steps N</code></td><td>ヘッドレス実行（デフォルト64ステップ）</td></tr>
+<tr><td><code>--auto-start</code></td><td>起動後に自動で"start"コマンドを送信</td></tr>
+<tr><td><code>--rebuild</code></td><td>C++パッケージを強制再ビルド</td></tr>
+<tr><td><code>--moveit</code></td><td>MoveIt2 move_groupを起動</td></tr>
+<tr><td><code>--ros-distro</code>, <code>--ws-dir</code>, <code>--controller-log</code>, <code>--robot-log</code></td><td>環境調整用</td></tr>
+</tbody>
+</table>
+<p>終了時は <code>trap cleanup EXIT INT TERM</code> により全バックグラウンドプロセスと <code>ros2_control_node</code>/spawner の残留プロセスをkillする。個別に強制終了したい場合は <code>scripts/kill_ros2_nodes.sh</code>（ros2ノード一覧表示→SIGINT→2秒待機→SIGKILL→<code>ros2 daemon stop</code>）を使う。</p>
+
+<h3>デバッグ用可視化</h3>
+<p><code>scripts/plot_joint_log.py</code>: ログファイルから軌道追従の目標値/実測値、フェーズ遷移、リプラン発生を抽出し、7関節の時系列をフェーズ遷移の色分けマーカー付きでプロットする。</p>
+
+<h3>よくある間違い（README記載）</h3>
+<ul>
+<li><code>./python.sh</code> が無いと言われる → 現行の <code>./into.sh</code> で起動したコンテナではない可能性</li>
+<li>GUIが真っ暗になる → <code>DISPLAY</code>・X11ソケット、<code>xhost +local:root</code>実行漏れを確認</li>
+</ul>
+
+<h3>既知の不整合一覧</h3>
+<table>
+<thead><tr><th>箇所</th><th>内容</th></tr></thead>
+<tbody>
+<tr><td>なし</td><td>この節で追跡していた README の旧起動案内と <code>scripts/BOOT_SEQUENCE.md</code> 参照は 2026-07-08 に解消済み</td></tr>
+</tbody>
+</table>
+<p>2026-07-07 に解消済み: <code>motion_command_executor_node</code> の Python 実装残存（<code>franka_ros2_control</code> へ C++ 移設）、<code>robot/package.xml</code> / <code>setup.py</code> の executor 依存、設計文書 <code>robot/docs/ROS2_COMPONENT_ARCHITECTURE.md</code> との乖離（内容を本書へ統合し原本を削除）。</p>
+<p>2026-07-07〜08 に解消済み: simulator の未使用モジュール3本の削除、behavior_planner の未使用ライブラリ群の削除、motion_command_node の未使用 <code>trajectory_status</code> subscription の削除、C++ executor の action 名パラメータ化（詳細は <a href="#ch5-6">5.6</a>）。</p>
+
+</section>
+
+<section class="chapter" id="ch10">
+<h2 class="chapter-title"><span class="num">10.</span> 用語集・付録</h2>
+
+<h3>略語</h3>
+<table>
+<thead><tr><th>略語</th><th>正式名</th><th>意味</th></tr></thead>
+<tbody>
+<tr><td>HWI</td><td>IsaacSimHardwareInterface</td><td>ros2_control のC++ハードウェア抽象化層（arm 7軸 + finger 2軸）</td></tr>
+<tr><td>JTC</td><td>JointTrajectoryController</td><td>ros2_control のアーム軌道追従コントローラ</td></tr>
+<tr><td>JSB</td><td>joint_state_broadcaster</td><td><code>/joint_states</code>をpublishするコントローラ</td></tr>
+<tr><td>MCE</td><td>motion_command_executor_node</td><td>motion_commandをJTC actionへ変換するC++ノード</td></tr>
+<tr><td>IK</td><td>Inverse Kinematics</td><td>逆運動学。<code>LulaKinematicsSolver</code>で使用</td></tr>
+</tbody>
+</table>
+
+<h3>HarvestTaskPhase 全列挙値</h3>
+<p><code>msg/contracts.py</code> 定義：<code>IDLE, DETECTING, TARGET_FOUND, PLANNING*, MOVING_TO_PREGRASP, PREGRASP_REACHED*, MOVING_TO_GRASP, AT_GRASP, GRASP_EVALUATION, DETACHING, DETACHED*, MOVING_TO_PLACE, PLACED, RETURNING_HOME, COMPLETE, FAILED, STOPPED</code>（<code>*</code>は現行 <code>behavior_planner_node</code> では未使用）。</p>
+
+<h3>その他のEnum</h3>
+<ul>
+<li><code>ControlCommand</code>: start / stop / reset</li>
+<li><code>ScenePhase</code> / <code>RobotRuntimeState</code>: booting / ready / running / stopped</li>
+<li><code>TomatoStatus</code>: attached / held / detached / placed / fallen</li>
+<li><code>PhaseId</code>: moving_to_pregrasp / moving_to_grasp / pull_to_detach / moving_to_place / returning_home</li>
+<li><code>PoseSemantics</code>: tool_center / grasp_center / moveit_link</li>
+<li><code>SuccessJudge</code>: end_effector_pose / joint_trajectory_completed / tomato_state</li>
+</ul>
+
+<h3>関連ドキュメント</h3>
+<p><code>.codex/docs/</code> 配下には要件・設計・調査に関する開発ドキュメント一式（<code>MASTER.md</code>, <code>RESEARCH.md</code>, <code>USERS_GUIDE.md</code>, <code>POC.md</code>, <code>ADR.md</code> 等）がある。これらは開発プロセス管理用の文書であり、本書はその内容を転記せず、実装コードの解説に専念している。旧 <code>robot/docs/</code>（<code>ROS2_COMPONENT_ARCHITECTURE.md</code> 等）は内容を本書へ統合したうえで削除済み。挙動の一次情報は常にコードを優先すること。</p>
+<p>現行テストの要件一覧（サブパッケージ別のテスト条件・良品条件）は <a href="test_list.html">test_list.html</a> に整理されている。</p>
+
+<footer>本書は 2026-07-06 時点のリポジトリ実装を調査して作成し、2026-07-07 のサブパッケージ再編・レガシー削除・成果ベース遷移の導入、2026-07-08 の未使用コード削除（simulator 3モジュール・behavior_planner ライブラリ群・trajectory_status subscription）・action 名パラメータ化・MoveIt2 詳解（5.5）の追加を反映して更新した。コードは開発途中であり、本書の内容も今後の実装変更に伴って更新が必要になる。</footer>
+
+</section>
+</main>
+</div>
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default',
+  securityLevel: 'loose'
+});
+</script>
+</body>
+</html>

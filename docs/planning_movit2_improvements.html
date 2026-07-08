@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoveIt2 Replanning Improvements Plan</title>
+  <style>
+    :root {
+      --bg: #f6f3ea;
+      --paper: #fffdf8;
+      --ink: #1f2a2e;
+      --muted: #59656a;
+      --line: #d6ccb8;
+      --accent: #b5542f;
+      --accent-soft: #f3dfd3;
+      --good: #295f4e;
+      --warn: #8d5d12;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #f2e7d4 0, transparent 30%),
+        linear-gradient(180deg, #efe7d8 0, var(--bg) 18rem);
+      line-height: 1.75;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+
+    section,
+    header {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 24px 28px;
+      box-shadow: 0 10px 24px rgba(48, 41, 26, 0.06);
+      margin-bottom: 20px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0 0 12px;
+      line-height: 1.35;
+    }
+
+    h1 {
+      font-size: 2rem;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      border-left: 6px solid var(--accent);
+      padding-left: 12px;
+    }
+
+    h3 {
+      font-size: 1.05rem;
+      color: var(--good);
+    }
+
+    p,
+    li {
+      margin: 0 0 10px;
+    }
+
+    ul,
+    ol {
+      padding-left: 1.3rem;
+      margin: 0;
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      background: #f3eee4;
+      padding: 0.08rem 0.35rem;
+      border-radius: 6px;
+    }
+
+    .lead {
+      font-size: 1.02rem;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .note,
+    .decision,
+    .risk {
+      border-radius: 14px;
+      padding: 16px 18px;
+      margin-top: 12px;
+    }
+
+    .note {
+      background: #f7f2e7;
+      border: 1px solid #e3d6b8;
+    }
+
+    .decision {
+      background: #eef7f3;
+      border: 1px solid #bfd9cd;
+    }
+
+    .risk {
+      background: #fff4e8;
+      border: 1px solid #ebcda8;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 0.95rem;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #f2ebde;
+    }
+
+    .small {
+      font-size: 0.92rem;
+      color: var(--muted);
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.85rem;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="pill">Planning Draft</div>
+    <h1>MoveIt2 リプラン改善計画</h1>
+    <p class="lead">
+      現在の <code>trajectory_planner_node</code> は、<code>TARGET_FOUND</code> と
+      <code>trajectory_status="aborted"</code> を契機にしか MoveIt2 を再実行しない。
+      これは静的な Sense-Plan-Act に近く、制御誤差や外乱がある環境では保守的すぎる。
+      本書では、「現在状態からの低周期リプランを常時回すべきか」という問いに対して、
+      その方向性自体は妥当だが、<b>毎回フルチェーンを無条件に再計画する方式は採らない</b>、
+      という前提で段階的な改善計画を定義する。
+    </p>
+    <p class="meta">更新日: 2026-07-09 / 対象: <code>src/tomato_harvest_sim/robot/motion_planner/</code>, <code>src/franka_ros2_control/</code>, <code>docs/index.html</code></p>
+  </header>
+
+  <section>
+    <h2>1. 現状認識</h2>
+    <ul>
+      <li>現行実装では、計画トリガは <code>phase == TARGET_FOUND</code> と <code>trajectory_status == "aborted"</code> の2つだけである。</li>
+      <li>1回の planning で <code>pregrasp → grasp → pull → (pre_place) → place</code> のフルチェーンを作り、その後は executor が順に消費する。</li>
+      <li><code>MOVING_TO_PLACE</code> 向けの <code>plan_place_trajectory()</code> は既に実装済みだが、現状は呼ばれていない。</li>
+      <li>executor は新しい trajectory を受けるたびに、既存 goal を cancel して FollowJointTrajectory goal を差し替える。</li>
+    </ul>
+    <div class="note">
+      問題は「replan が少なすぎる」ことだけではない。現行のまま timer を足して毎秒フルチェーン再計画すると、
+      <code>JTC cancel → 新 goal 送信</code> が高頻度で繰り返され、接触中フェーズや終端近傍で不安定化する。
+    </div>
+  </section>
+
+  <section>
+    <h2>2. 一次情報から見た設計判断</h2>
+    <p>
+      MoveIt 公式の <code>Hybrid Planning</code> は、従来の Sense-Plan-Act が動的・不確実環境に弱いことを前提に、
+      遅い <b>global planner</b> と速い <b>local planner</b> を並列で回す構成を推奨している。
+      また <code>PlanningSceneMonitor</code> は最新の robot state と planning scene を維持する推奨インタフェースであり、
+      <code>Realtime Servo</code> は visual servoing や closed-loop position control を対象にしている。
+    </p>
+    <div class="decision">
+      <b>判断:</b> 「現在状態からの再計画を定期実行する」という方向は正しい。<br>
+      ただし当面の実装方針は、<b>低周期の phase-scoped suffix replan</b> を追加し、
+      将来的に <b>Hybrid Planning / Servo を使う local planner 併用構成</b> へ進める。
+    </div>
+    <div class="note">
+      重要なのは、改善案Bを最終形として固定しないことだ。Bは「低周期replanを足す案」ではなく、
+      <b>global planning と execution の間に、replan trigger / state aggregation / plan revision / plan adoption policy を先に切り出す段階</b>
+      として設計する必要がある。この切り出しができていれば、後から local planner を追加しても下流の executor 契約を大きく崩さずに済む。
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 目標と非目標</h2>
+    <h3>目標</h3>
+    <ul>
+      <li>制御誤差、残留振動、外乱、scene 更新があっても、active phase の実行継続性を高める。</li>
+      <li>最新の <code>/joint_states</code> と <code>scene_snapshot</code> を起点に、古い trajectory を放置しない。</li>
+      <li>再計画が executor の goal 差し替えループを破壊しないよう、周波数・採用条件・phase 境界を明示する。</li>
+    </ul>
+    <h3>非目標</h3>
+    <ul>
+      <li>初回から full Hybrid Planning を丸ごと導入すること。</li>
+      <li><code>DETACHING</code> の接触制御を OMPL のグローバル再計画だけで解決すること。</li>
+      <li>全 phase を同一アルゴリズムで扱うこと。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. 比較する改善案</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>案</th>
+          <th>内容</th>
+          <th>利点</th>
+          <th>欠点</th>
+          <th>判断</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A</td>
+          <td>現状維持。abort 時だけフルチェーン再計画</td>
+          <td>実装が単純。cancel churn が少ない</td>
+          <td>外乱に鈍い。ズレた trajectory を長く保持する</td>
+          <td>不採用</td>
+        </tr>
+        <tr>
+          <td>B</td>
+          <td>低周期 timer で、現在 phase 以降だけ suffix replan。加えて replan trigger / plan revision / plan adoption を独立責務として切り出す</td>
+          <td>現行構成に最も小さく入れられる。誤差に追従しやすい。Cに必要な責務分離を先に進められる</td>
+          <td>周波数設計と stale plan 制御が必要。local planner 自体はまだ無い</td>
+          <td><b>Cへの移行段階として採用</b></td>
+        </tr>
+        <tr>
+          <td>C</td>
+          <td>MoveIt Hybrid Planning または Servo を併用し、global / local を分離。Bで切り出した replan / adoption 境界の内側に local planner を挿入する</td>
+          <td>動的環境への整合性が高い。接触や局所補正に強い。Bで作った境界を再利用できる</td>
+          <td>構成変更が大きい。導入コストが高い</td>
+          <td>中長期の本命</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>5. 推奨アーキテクチャ</h2>
+    <p>
+      近短期は案Bを採る。ただし実装の目的は suffix replan そのものではなく、
+      <b>「current state を集約し、replan を起動し、候補planを評価し、executorへ採用する」境界を明示的に作ること</b>に置く。
+      そのうえで、初期の plan producer は low-rate OMPL suffix planner とし、将来はここに
+      local planner を追加して C へ移行する。
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>モジュール</th>
+          <th>追加・変更責務</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>trajectory_planner_node</code></td>
+          <td>timer 起動、replan 条件判定、phase-scoped suffix planning、plan revision 付与。将来は global planner coordinator へ昇格</td>
+        </tr>
+        <tr>
+          <td><code>moveit_service_bridge.py</code></td>
+          <td>phase 別 suffix API を明確化。既存 <code>plan_place_trajectory()</code> の活用。必要なら <code>plan_from_phase()</code> を追加。将来は global planner adapter になる</td>
+        </tr>
+        <tr>
+          <td><code>motion_command_node</code></td>
+          <td>古い revision の plan を無視。現 phase と plan revision の整合を保持。将来は local planner 由来 command との arbitration 窓口候補</td>
+        </tr>
+        <tr>
+          <td><code>motion_command_executor_node</code></td>
+          <td>新 plan が有効採用された場合のみ cancel-and-replace。差分が小さい場合は据え置きも検討。入力契約はなるべく固定し、planner 側進化を吸収しない</td>
+        </tr>
+        <tr>
+          <td><code>trajectory_monitor_node</code></td>
+          <td><code>aborted</code> だけでなく、将来的には tracking error や scene change を replan reason として出せるよう拡張候補。Cでは event source の一つになる</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>6. BからCへつなぐ設計原則</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Bで先に作るもの</th>
+          <th>Cでどう使うか</th>
+          <th>Bの段階でやってはいけないこと</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>State Aggregation</b><br>最新 <code>joint_states</code>、<code>scene_snapshot</code>、phase、tracking error をまとめる入力境界</td>
+          <td>global planner と local planner の共通入力になる</td>
+          <td>planner実装の中に subscribe と状態整形を埋め込んで密結合にすること</td>
+        </tr>
+        <tr>
+          <td><b>Replan Trigger Policy</b><br>timer、abort、scene change、tracking error の起動条件</td>
+          <td>Hybrid Planning の event logic / local planner 介入条件へ発展できる</td>
+          <td><code>aborted</code> 固定の if 文を各ノードへ散らすこと</td>
+        </tr>
+        <tr>
+          <td><b>Plan Revision / Adoption Policy</b><br>どの候補planを採用するかの規則</td>
+          <td>global plan と local correction command の arbitration に再利用できる</td>
+          <td>新planが来たら無条件で cancel-and-replace すること</td>
+        </tr>
+        <tr>
+          <td><b>Phase-scoped Plan API</b><br><code>plan_from_phase()</code> のような残区間計画API</td>
+          <td>global planner を full-chain から phase-aware planner に差し替えやすくなる</td>
+          <td>phaseごとの分岐を node 側の巨大 if で持つこと</td>
+        </tr>
+        <tr>
+          <td><b>Executor-facing Command Contract</b><br>executor に渡す command / trajectory 契約</td>
+          <td>planner の進化に対して executor を安定化できる</td>
+          <td>local planner 導入時に executor のI/Fまで同時に壊すこと</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="decision">
+      BがCにつながる条件は、<b>suffix replan の頻度を上げることではなく、planner の責務を producer / trigger / adoption に分解すること</b>である。
+      この分解ができていなければ、Cへ進むときに B の実装をほぼ捨てることになる。
+    </div>
+  </section>
+
+  <section>
+    <h2>7. Replan の基本ルール</h2>
+    <h3>7.1 周期</h3>
+    <ul>
+      <li>初期値は <code>1.0 Hz</code> ではなく <code>0.5 Hz</code> から始める。まず controller churn を抑える。</li>
+      <li>計画時間上限は replan 周期より十分短くする。初期案は <code>allowed_planning_time = 0.20 - 0.35 sec</code>。</li>
+      <li>planner がまだ実行中なら次周期をスキップし、同時多重 plan は許可しない。</li>
+    </ul>
+    <h3>7.2 実行条件</h3>
+    <ul>
+      <li>active phase が移動系であること。</li>
+      <li>最新 <code>joint_states</code> と <code>scene_snapshot</code> が揃っていること。</li>
+      <li>前回 replan から最小間隔を超えていること。</li>
+      <li>start state の偏差、target/tray pose の変化、scene object 更新、tracking error のいずれかが閾値を超えた場合だけ採用する。</li>
+    </ul>
+    <h3>7.3 採用条件</h3>
+    <ul>
+      <li>新 trajectory の先頭が現在関節位置から不連続すぎないこと。</li>
+      <li>残り実行時間がごく短い場合は差し替えない。</li>
+      <li>新旧差分が閾値未満なら cancel せず現行 goal を継続する。</li>
+      <li>plan message に <code>plan_revision</code> と <code>planned_phase</code> を持たせ、stale overwrite を防ぐ。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>8. Phase 別方針</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Phase</th>
+          <th>replan 方針</th>
+          <th>理由</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>MOVING_TO_PREGRASP</code></td>
+          <td>周期 replan 有効。suffix は pregrasp 以降</td>
+          <td>自由空間が多く、再計画の利得が大きい</td>
+        </tr>
+        <tr>
+          <td><code>MOVING_TO_GRASP</code></td>
+          <td>周期 replan 有効。suffix は grasp 以降</td>
+          <td>トマト認識誤差の吸収余地がある</td>
+        </tr>
+        <tr>
+          <td><code>DETACHING</code></td>
+          <td>初期段階では周期 OMPL replan を原則無効。abort/明示要求時だけ</td>
+          <td>接触中に global trajectory を差し替えると不安定になりやすい。将来は Servo / local planner 候補</td>
+        </tr>
+        <tr>
+          <td><code>MOVING_TO_PLACE</code></td>
+          <td>周期 replan 有効。<code>plan_place_trajectory()</code> を使って現在状態から place suffix のみ計画</td>
+          <td>既存 API があり、全チェーン再生成より自然</td>
+        </tr>
+        <tr>
+          <td><code>RETURNING_HOME</code></td>
+          <td>replan 対象外</td>
+          <td>MoveIt2 非経由の direct 軌道</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>9. Cへ至る実装ステップ</h2>
+    <ol>
+      <li><b>Step 0: 観測追加</b><br>現行 planner latency、cancel 回数、phase ごとの abort 率、trajectory 差し替え回数をログ化する。これは B でも C でも必要な基準線になる。</li>
+      <li><b>Step 1: 契約を安定化</b><br><code>HarvestMotionPlan</code> かそのシリアライズに <code>plan_revision</code>、<code>generated_at</code>、<code>planned_from_phase</code>、将来の <code>producer_kind</code> を追加する。ここで plan adoption の土台を作る。</li>
+      <li><b>Step 2: State Aggregation と Trigger Policy を独立化</b><br><code>trajectory_planner_node</code> に periodic callback を追加する前に、phase、joint state、scene snapshot、tracking error を一箇所で束ねる。replan 条件も独立した policy として切り出す。</li>
+      <li><b>Step 3: Bの最小完成形</b><br>現在 phase に応じて full-chain ではなく残り区間だけ計画する suffix API へ切り替える。まずは <code>MOVING_TO_PLACE</code> を対象にして、executor churn 抑制と revision 採用規則を入れる。</li>
+      <li><b>Step 4: Bを一般化</b><br><code>MOVING_TO_PREGRASP</code>、<code>MOVING_TO_GRASP</code> へ広げる。ここで作るのは「suffix planner」そのものより、phase-aware global planner adapter である。</li>
+      <li><b>Step 5: Cの受け皿を追加</b><br>executor の下流契約は変えずに、plan producer を複数持てる形にする。少なくとも <code>global_planner</code> と将来の <code>local_planner</code> を識別できるようにする。</li>
+      <li><b>Step 6: local planner を追加</b><br>接触や終端補正が支配的な phase に対し、MoveIt Servo もしくは Hybrid Planning の local planner を導入する。最初は <code>DETACHING</code> ではなく、自由空間末端の微修正区間から始める。</li>
+      <li><b>Step 7: Cへ移行</b><br>global planner は疎な full/suffix replan、local planner は高頻度補正、trigger policy は event-based、plan adoption は arbitration 付き、という最終形へ移す。ここで初めて改善案Cが成立する。</li>
+    </ol>
+    <div class="note">
+      つまり B は「低周期OMPL再計画を増やして終わり」ではない。<b>Cに必要な境界を先に作るための移行ステップ</b>としてのみ採用する。
+    </div>
+  </section>
+
+  <section>
+    <h2>10. テスト計画</h2>
+    <ul>
+      <li>unit: replan timer の gating、minimum interval、revision 比較、phase 別 suffix 選択。</li>
+      <li>unit: replan trigger policy と plan adoption policy が planner 実装から独立に検証できること。</li>
+      <li>integration: <code>MOVING_TO_PLACE</code> 中に joint state をずらし、place suffix だけが再計画されること。</li>
+      <li>integration: planner 実行中に次周期が来ても二重起動しないこと。</li>
+      <li>integration: 将来の local planner ダミー実装を挿したときも executor 側契約を変えずに command 採用できること。</li>
+      <li>e2e: Isaac + MoveIt + ros2_control 構成で、外乱注入時に abort 頼みではなく trajectory 更新が走ること。</li>
+      <li>regression: <code>DETACHING</code> の成果ベース遷移と JTC abort 救済が壊れないこと。</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>11. リスク</h2>
+    <div class="risk">
+      <ul>
+        <li><b>cancel churn</b>: 周期 replan が高すぎると、controller が常に goal 差し替え中になり進捗が落ちる。</li>
+        <li><b>OMPL 非決定性</b>: 毎回別経路になり、末端で jitter が増える可能性がある。</li>
+        <li><b>接触区間との相性</b>: detaching は local correction 向きであり、global replan を多用すると逆効果になりうる。</li>
+        <li><b>stale overwrite</b>: phase が進んだ後に古い plan が到着すると、意図しない巻き戻りが起こる。</li>
+        <li><b>Bの作り捨て化</b>: trigger / adoption / state aggregation を切り出さずにBを実装すると、Cへ進む時に全面作り直しになる。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>12. 最終提案</h2>
+    <div class="decision">
+      最終目標を改善案Cに置くなら、改善案Bは「一時的な低周期replan」ではなく、
+      <b>Cに必要な責務分離を先行実装するステップ</b>として定義すべきである。<br>
+      実施順は、
+      <b>State Aggregation / Trigger Policy / Plan Revision / Adoption Policy の切り出し</b>
+      → <b>phase-scoped suffix replan の導入</b>
+      → <b>plan producer の複線化</b>
+      → <b>Hybrid Planning / Servo の local planner 追加</b>
+      とする。これなら B の成果物を捨てずに C へ進める。
+    </div>
+  </section>
+
+  <section>
+    <h2>13. ソース</h2>
+    <ul>
+      <li><a href="https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html">MoveIt Hybrid Planning Concepts</a></li>
+      <li><a href="https://moveit.picknik.ai/main/doc/examples/hybrid_planning/hybrid_planning_tutorial.html">MoveIt Hybrid Planning Tutorial</a></li>
+      <li><a href="https://moveit.picknik.ai/main/doc/examples/planning_scene_monitor/planning_scene_monitor_tutorial.html">MoveIt Planning Scene Monitor</a></li>
+      <li><a href="https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html">MoveIt Realtime Servo</a></li>
+    </ul>
+    <p class="small">
+      本書の設計判断は 2026-07-08 に上記一次情報と現行コード
+      （<code>motion_planner/node.py</code>、<code>moveit_service_bridge.py</code>、<code>docs/index.html</code>）を突き合わせて作成した。
+    </p>
+  </section>
+</main>
+</body>
+</html>
