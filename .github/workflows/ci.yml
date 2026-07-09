@@ -20,7 +20,10 @@ jobs:
     env:
       CI_IMAGE_REPOSITORY: tomato-harvest-sim-ci-base
       CI_IMAGE_TAG: cached
-      CI_HEADLESS_STEPS: "900"
+      # ヘッドレス実行は固定ステップ消化後に終了する（完了検知なし）。
+      # ステップ消化速度はキャッシュの温まり具合で変動するため、
+      # ウォームキャッシュでも収穫サイクルが完走できる余裕を持たせる。
+      CI_HEADLESS_STEPS: "3600"
       CI_E2E_TIMEOUT_SEC: "2400"
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
