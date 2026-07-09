@@ -7,6 +7,7 @@ from tomato_harvest_sim.simulator.isaac_viewer import (
     build_appframework_argv,
     build_official_franka_asset_path,
     build_simulation_app_config,
+    is_headless_terminal_phase,
     parse_args,
     select_hand_mount_prim_path,
 )
@@ -91,6 +92,27 @@ class IsaacViewerConfigTest(unittest.TestCase):
         config = build_simulation_app_config(headless=True)
 
         self.assertIn("--no-window", config["extra_args"])
+
+
+class HeadlessTerminalPhaseTest(unittest.TestCase):
+    """収穫サイクルの終端フェーズを検知したらヘッドレス実行を早期終了する仕様。"""
+
+    def test_harvest_cycle_completion_stops_headless_run(self) -> None:
+        self.assertTrue(is_headless_terminal_phase("complete"))
+
+    def test_harvest_cycle_failure_stops_headless_run(self) -> None:
+        self.assertTrue(is_headless_terminal_phase("failed"))
+
+    def test_transient_phases_keep_headless_run_going(self) -> None:
+        for phase in ("idle", "detecting", "target_found", "moving_to_place", "returning_home"):
+            with self.subTest(phase=phase):
+                self.assertFalse(is_headless_terminal_phase(phase))
+
+    def test_unobserved_phase_keeps_headless_run_going(self) -> None:
+        self.assertFalse(is_headless_terminal_phase(None))
+
+    def test_unknown_phase_value_keeps_headless_run_going(self) -> None:
+        self.assertFalse(is_headless_terminal_phase("unexpected_value"))
 
 
 if __name__ == "__main__":
