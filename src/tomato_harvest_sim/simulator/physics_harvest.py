@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass
 
 from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
+from tomato_harvest_sim.simulator.physics_observation import (
+    FingerContactImpulses,
+    estimate_stem_tension_n,
+    format_observation_line,
+    summarize_finger_contact_impulses,
+)
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,8 @@ class IsaacPhysicsHarvestBridge:
     FINGER_GAP_MIN_M = 0.015
     FINGER_GAP_MAX_M = 0.065
     TOMATO_COLLISION_PRIM_SUFFIX = "/Geometry"
+    # 観測ログ専用の物理ステップ幅の仮定値。判定には使用しない。
+    OBSERVATION_PHYSICS_DT_SEC = 1.0 / 60.0
 
     def __init__(
         self,
@@ -55,6 +64,8 @@ class IsaacPhysicsHarvestBridge:
         self._grasp_joint_active = False
         self._detach_reported = False
         self._contact_subscription = None
+        self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
+        self._previous_tomato_velocity = (0.0, 0.0, 0.0)
         self._debug_enabled = os.environ.get(
             "TOMATO_HARVEST_DEBUG_PHYSICS_GRASP",
             "",
@@ -74,6 +85,7 @@ class IsaacPhysicsHarvestBridge:
 
     def begin_physics_step(self) -> None:
         self._pending_finger_contacts = set()
+        self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
 
     def finalize_physics_step(self, controller: object) -> None:
         snapshot = controller.current_scene_snapshot()
@@ -103,6 +115,7 @@ class IsaacPhysicsHarvestBridge:
             self._set_world_pose(self._scene_paths.tomato_prim_path, tomato_pose)
             self._zero_rigid_body_velocity(self._scene_paths.tomato_prim_path)
         controller.sync_tomato_physics(tomato_pose)
+        self._log_observation(snapshot=snapshot, tomato_pose=tomato_pose)
         self._augment_contacts_from_grasp_geometry(tomato_pose=tomato_pose, gripper_closed=snapshot.gripper_closed)
 
         if (
@@ -172,14 +185,17 @@ class IsaacPhysicsHarvestBridge:
         from omni.physx import get_physx_simulation_interface
         from pxr import PhysxSchema
 
-        tomato_prim = self._stage.GetPrimAtPath(self._tomato_collision_prim_path())
+        # PhysX の接触レポートは剛体アクター単位のため、collider 子 prim ではなく
+        # RigidBodyAPI を持つルート prim に適用する（子 prim 適用ではイベントが
+        # 一切発生しないことを Step 0 ベースライン run1 で確認済み）。
+        tomato_prim = self._stage.GetPrimAtPath(self._scene_paths.tomato_prim_path)
         contact_api = PhysxSchema.PhysxContactReportAPI.Apply(tomato_prim)
         contact_api.CreateThresholdAttr().Set(0.0)
         self._contact_subscription = get_physx_simulation_interface().subscribe_contact_report_events(
             self._on_contact_report_event
         )
 
-    def _on_contact_report_event(self, contact_headers: object, _: object) -> None:
+    def _on_contact_report_event(self, contact_headers: object, contact_data: object) -> None:
         from pxr import PhysicsSchemaTools
 
         active_contacts: set[str] = set()
@@ -194,6 +210,23 @@ class IsaacPhysicsHarvestBridge:
             if finger_name is not None:
                 active_contacts.add(finger_name)
         self._accumulate_pending_contacts(active_contacts)
+        if self._debug_enabled:
+            self._accumulate_contact_impulses(contact_headers, contact_data)
+
+    def _accumulate_contact_impulses(self, contact_headers: object, contact_data: object) -> None:
+        """観測用に finger 別接触力積を集計する（判定へは介入しない）。"""
+        from pxr import PhysicsSchemaTools
+
+        def finger_of_pair(actor0: int, actor1: int) -> str | None:
+            return self._match_finger_contact(
+                str(PhysicsSchemaTools.intToSdfPath(actor0)),
+                str(PhysicsSchemaTools.intToSdfPath(actor1)),
+            )
+
+        impulses = summarize_finger_contact_impulses(
+            contact_headers, contact_data, finger_of_pair=finger_of_pair
+        )
+        self._pending_contact_impulses = self._pending_contact_impulses.merged_with(impulses)
 
     def _accumulate_pending_contacts(self, contacts: set[str]) -> None:
         self._pending_finger_contacts.update(contacts)
@@ -216,6 +249,51 @@ class IsaacPhysicsHarvestBridge:
             self._latched_finger_contacts.update(contacts_to_latch)
             return
         self._latched_finger_contacts = set()
+
+    def _log_observation(self, *, snapshot: object, tomato_pose: Pose3D) -> None:
+        """1 ステップ分の物理観測値を機械可読形式でログ出力する。
+
+        Step 0 の観測基盤。TOMATO_HARVEST_DEBUG_PHYSICS_GRASP 有効時のみ動作し、
+        物理判定・シーン状態には一切影響しない読み取り専用処理。
+        """
+        if not self._debug_enabled:
+            return
+        velocity = self._rigid_body_velocity(self._scene_paths.tomato_prim_path)
+        speed = (velocity[0] ** 2 + velocity[1] ** 2 + velocity[2] ** 2) ** 0.5
+        hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
+        stem_pose = self._world_pose(self._scene_paths.stem_anchor_prim_path)
+        stem_tension = estimate_stem_tension_n(
+            mass_kg=self.TOMATO_MASS_KG,
+            velocity_m_s=velocity,
+            previous_velocity_m_s=self._previous_tomato_velocity,
+            dt_sec=self.OBSERVATION_PHYSICS_DT_SEC,
+        )
+        self._previous_tomato_velocity = velocity
+        print(
+            format_observation_line(
+                timestamp_sec=time.monotonic(),
+                tomato_status=snapshot.tomato_status.value,
+                gripper_closed=bool(snapshot.gripper_closed),
+                grasp_joint_active=self._grasp_joint_active,
+                impulses=self._pending_contact_impulses,
+                tomato_speed_m_s=speed,
+                hand_distance_m=self._distance(hand_pose, tomato_pose),
+                stem_distance_m=self._distance(stem_pose, tomato_pose),
+                stem_tension_n=stem_tension,
+            ),
+            flush=True,
+        )
+
+    def _rigid_body_velocity(self, prim_path: str) -> tuple[float, float, float]:
+        """剛体の線速度を読み取る。属性が未生成の間は零ベクトルを返す。"""
+        prim = self._stage.GetPrimAtPath(prim_path)
+        attr = prim.GetAttribute("physics:velocity")
+        if not attr.IsValid():
+            return (0.0, 0.0, 0.0)
+        value = attr.Get()
+        if value is None:
+            return (0.0, 0.0, 0.0)
+        return (float(value[0]), float(value[1]), float(value[2]))
 
     def _match_finger_contact(self, actor0: str, actor1: str) -> str | None:
         pair = (actor0, actor1)

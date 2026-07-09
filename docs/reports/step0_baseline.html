@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Step 0 検証レポート: 観測基盤とベースライン確保</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg: #ffffff; --fg: #1c2127; --fg-muted: #5b6472; --border: #dfe3e8;
+  --accent: #2563eb; --ok-bg: #e8f7ee; --ok-fg: #14532d; --ok-border: #34a866;
+  --warn-bg: #fff6e5; --warn-fg: #6b4e00; --warn-border: #e8b93a;
+  --code-bg: #f0f1f4; --table-head: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --fg: #e4e6ea; --fg-muted: #9aa3ad; --border: #2c3138;
+    --accent: #6ea8ff; --ok-bg: #10291a; --ok-fg: #9fd8b4; --ok-border: #2c7a4f;
+    --warn-bg: #332a10; --warn-fg: #f0d78c; --warn-border: #8a6d1f;
+    --code-bg: #1f2329; --table-head: #202329;
+  }
+}
+body { margin: 0 auto; max-width: 1100px; padding: 32px 40px 80px; background: var(--bg);
+  color: var(--fg); line-height: 1.75;
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
+h1 { font-size: 24px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+h2 { font-size: 20px; margin-top: 44px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+h3 { font-size: 16px; margin-top: 28px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
+  font-family: "SF Mono", Consolas, monospace; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 13.5px; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--table-head); }
+img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; }
+.meta { color: var(--fg-muted); font-size: 13.5px; }
+.pass { display: inline-block; background: var(--ok-bg); color: var(--ok-fg);
+  border: 1px solid var(--ok-border); font-weight: 700; padding: 1px 10px; border-radius: 10px; font-size: 12px; }
+.finding { background: var(--warn-bg); border-left: 4px solid var(--warn-border); color: var(--warn-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; font-size: 13.5px; }
+.verdict { background: var(--ok-bg); border-left: 4px solid var(--ok-border); color: var(--ok-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; }
+figcaption { color: var(--fg-muted); font-size: 12.5px; margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<h1>Step 0 検証レポート: 観測基盤とベースライン確保</h1>
+<p class="meta">
+実施日: 2026-07-09 ／ Issue: <a href="https://github.com/akodama428/trial_issac_sim/issues/1">#1</a> ／ ブランチ: <code>physics/step0-observation</code><br>
+実行環境: docker コンテナ <code>tomato-harvest-sim-physics</code>（Isaac Sim 6.0 / ROS 2 Jazzy / ROS_DOMAIN_ID=1、physics worktree をマウント）
+</p>
+
+<div class="verdict">
+<b>総合判定: 合格（Issue #1 の完了条件をすべて満たす）</b><br>
+① 観測基盤（接触力積・トマト速度・hand 相対距離・茎張力推定のログ）を実装し、実 E2E で動作を確認。
+② ベースライン E2E 5 回すべて COMPLETE（成功率 100%）。
+③ 既存テストは全通過（挙動変更なし）。
+④ 副次成果として「接触イベントが 1 件も発生しない」という観測基盤自体の欠陥を発見し、修正・実証済み（4章）。
+</div>
+
+<h2>1. 完了条件と結果の対比</h2>
+<table>
+<thead><tr><th>Issue #1 の完了条件</th><th>結果</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>既存テスト全通過・シミュ挙動変更なし</td><td>Python 95 件（新規 7 件含む）+ C++ 5 件 通過。観測コードは <code>TOMATO_HARVEST_DEBUG_PHYSICS_GRASP</code> 有効時のみ動作</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>接触力・トマト速度・hand 相対変位の数値出力</td><td><code>[PhysicsObs]</code> 行として毎ステップ出力（run1〜6 で計 3 万行超を取得）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>接触力の時系列グラフ（左右 finger 別）</td><td>2章・4章に掲載。ベースラインでは全ゼロ（それ自体が知見、3章）、修正後 run6 で左 finger の力積波形を取得</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>ベースライン E2E 5 回の成功率とフェーズ別所要時間</td><td>5/5 成功。グラフと表を2章に掲載</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>しきい値・実測値の対比表</td><td>5章に掲載</td><td><span class="pass">PASS</span></td></tr>
+</tbody>
+</table>
+
+<h2>2. ベースライン E2E（5 回・success モード）</h2>
+<p>実行コマンド（コンテナ内）: <code>TOMATO_HARVEST_DEBUG_PHYSICS_GRASP=1 ./scripts/run_ros2_components.sh --isaac --moveit --headless --headless-steps N --auto-start</code>（run1: N=12000、run2〜5: N=6000）。</p>
+<figure>
+<img src="img/baseline_success.png" alt="baseline success">
+<figcaption>図 2-1: ベースライン E2E の成否。5/5 が COMPLETE 到達（成功率 100%）。</figcaption>
+<img src="img/baseline_phase_durations.png" alt="baseline phase durations">
+<figcaption>図 2-2: run 別フェーズ所要時間。run1 の detecting 422 秒は Isaac Sim 初回ブート（アセットダウンロード込み）を含むため外れ値。キャッシュが温まった run2 以降は detecting 26〜53 秒で安定。</figcaption>
+</figure>
+<table>
+<caption>表 2-1: フェーズ別所要時間 [s]（最初のサイクルのみ）</caption>
+<thead><tr><th>フェーズ</th><th>run1*</th><th>run2</th><th>run3</th><th>run4</th><th>run5</th></tr></thead>
+<tbody>
+<tr><td>detecting</td><td>422.3*</td><td>35.7</td><td>32.8</td><td>26.7</td><td>53.4</td></tr>
+<tr><td>target_found（計画）</td><td>2.6</td><td>0.1</td><td>1.4</td><td>0.2</td><td>0.2</td></tr>
+<tr><td>moving_to_pregrasp</td><td>27.1</td><td>3.0</td><td>3.5</td><td>6.9</td><td>7.0</td></tr>
+<tr><td>moving_to_grasp</td><td>0.8</td><td>2.0</td><td>1.3</td><td>0.9</td><td>1.2</td></tr>
+<tr><td>at_grasp〜detaching</td><td>0.9</td><td>0.7</td><td>0.6</td><td>0.8</td><td>0.5</td></tr>
+<tr><td>moving_to_place</td><td>1.9</td><td>2.0</td><td>2.1</td><td>8.4</td><td>10.3</td></tr>
+<tr><td>returning_home</td><td>0.0</td><td>10.1</td><td>10.0</td><td>10.1</td><td>10.3</td></tr>
+</tbody>
+</table>
+<p class="meta">* run1 は初回ブート（アセット取得）を含む。計測上の注記: robot ログは追記式のため、途中で破棄した予備実行（step 予算 2500 で planning 待ちのままタイムアウトしたもの）の残骸が run2/3 のログ先頭に混在した。集計は「最後のサイクル開始（idle→detecting）以降」でフィルタ済み。</p>
+
+<h3>2.1 代表 run の観測グラフ（run1）</h3>
+<figure>
+<img src="img/run1_tomato_motion.png" alt="run1 tomato motion">
+<figcaption>図 2-3: run1 のトマト速度と茎張力推定。約 31〜34 秒に把持→引抜→設置の運動バーストが見える。張力推定は静止時に自重 0.294 N（=0.03 kg × 9.81）へ正確に一致しており、推定器の妥当性を実データで確認。ピークは 2.63 N。</figcaption>
+<img src="img/run1_distances.png" alt="run1 distances">
+<figcaption>図 2-4: run1 の hand-トマト距離 / 茎アンカー-トマト距離。引抜（stem_d 増加）と搬送が確認できる。</figcaption>
+<img src="img/run1_contact_impulse.png" alt="run1 contact impulse (all zero)">
+<figcaption>図 2-5: run1 の finger 接触力積 — <b>全区間ゼロ</b>。これがベースラインの最重要知見（3章）。</figcaption>
+</figure>
+<p class="meta">run2〜5 の同種グラフは <code>docs/reports/img/run{2..5}_*.png</code> を参照。</p>
+
+<h2>3. 重要知見: ベースラインの把持は物理接触イベントなしで成立している</h2>
+<div class="finding">
+<b>発見（ベースライン run1〜5 共通）:</b> PhysX の接触レポートイベントが<b>全 run で 0 件</b>だった。一方で place 時のトマトは実際に落下→静止しており（図 2-3 の速度スパイク→ゼロ）、コライダ自体は機能している。つまり把持成立（HELD 判定）は<b>全面的に幾何フォールバック</b>（<code>_augment_contacts_from_grasp_geometry</code>、run1 で発動 2 回）に依存しており、「物理接触の検出」は現行ベースラインでは一度も起きていない。これは計画書 <code>docs/planning_levelup_tomato_sim.html</code> 2章の As-Is 分析を実測で裏付けると同時に、より深刻（接触検出は「物理+幾何」ではなく実質「幾何のみ」）であることを示す。
+</div>
+<p><b>原因:</b> <code>PhysxContactReportAPI</code> が collider の子 prim（<code>/World/TargetTomato/Geometry</code>）に適用されていたため。PhysX の接触レポートは剛体アクター単位であり、<code>RigidBodyAPI</code> を持つルート prim（<code>/World/TargetTomato</code>）に適用する必要がある。</p>
+
+<h2>4. 観測基盤の欠陥修正と実証（run6）</h2>
+<p>report API の適用先を剛体ルート prim へ変更し（<code>physics_harvest.py</code> の <code>_subscribe_contact_reports</code>）、同条件で検証 run6 を実行した。</p>
+<table>
+<caption>表 4-1: 修正前後の比較（同条件 E2E）</caption>
+<thead><tr><th>指標</th><th>修正前（run1〜5）</th><th>修正後（run6）</th></tr></thead>
+<tbody>
+<tr><td>接触イベント数</td><td><b>0 件</b></td><td><b>1,288 件</b></td></tr>
+<tr><td>非ゼロ接触力積の観測</td><td>なし</td><td>あり（左 finger、保持中 ≈0.20 N·s/step ≒ 12 N 相当で持続）</td></tr>
+<tr><td>E2E 完走</td><td>5/5</td><td>1/1（修正が E2E を壊さないことを確認）</td></tr>
+<tr><td>幾何フォールバック発動</td><td>2 回/run</td><td>2 回（依然発動 — 右 finger の物理接触が無いため）</td></tr>
+</tbody>
+</table>
+<figure>
+<img src="img/run6_contact_impulse.png" alt="run6 contact impulse">
+<figcaption>図 4-1: run6（修正後）の finger 接触力積。把持〜引抜の間（約 18.5〜21.5 秒）に左 finger の接触が観測され、瞬間ピーク 0.36 N·s（≒21 N）、保持中は ≈0.20 N·s/step（≒12 N）で持続。<b>右 finger は依然ゼロ</b> = 実際の把持は左 finger 片側の押し付けと幾何フォールバックで成立している。</figcaption>
+</figure>
+<div class="finding">
+<b>Step 2/3 への引き継ぎ事項:</b> ① 右 finger がトマトに物理接触していない（グリッパー中心とトマトの横ずれ、または finger 閉じ量の非対称）。摩擦把持には両指接触が必須のため、Step 2 の把持力チューニング時に要対処。② 保持中の左 finger 押し付け力 ≒12 N はトマト（30 g）に対して過大であり、Step 2 の maxForce 設計の実測根拠となる（現状は grasp joint が保持しているため無害）。
+</div>
+
+<h2>5. しきい値・実測値の対比</h2>
+<table>
+<thead><tr><th>項目</th><th>基準/期待値</th><th>実測値</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>ベースライン E2E 成功率</td><td>記録すること（基準なし）</td><td>5/5 = 100%</td><td><span class="pass">記録済</span></td></tr>
+<tr><td>既存テスト</td><td>全通過</td><td>Python 95 passed / C++ 5 passed</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>張力推定の静的検証</td><td>静止時 m×g = 0.2943 N</td><td>0.2943 N（実データ）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>接触力の観測可否（修正後）</td><td>非ゼロ力積が取得できること</td><td>左 finger 最大 0.36 N·s/step（≒21 N）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>把持中の張力推定ピーク</td><td>参考記録（Step 4 の破断値設計入力）</td><td>2.04〜2.63 N（5 run）</td><td><span class="pass">記録済</span></td></tr>
+</tbody>
+</table>
+
+<h2>6. 成果物と再現手順</h2>
+<table>
+<tbody>
+<tr><th>実装</th><td><code>simulator/physics_observation.py</code>（純ロジック）、<code>physics_harvest.py</code>（ログ組込・report API 修正）、単体テスト 7 件</td></tr>
+<tr><th>スクリプト</th><td><code>scripts/plot_physics_observation.py</code>（per-run グラフ4種+サマリ）、<code>scripts/plot_baseline_summary.py</code>（集計）、<code>scripts/run_baseline_e2e.sh</code>（連続実行）</td></tr>
+<tr><th>データ</th><td><code>docs/reports/data/sim_run{1..6}.log.gz</code> / <code>robot_run{1..6}.log.gz</code>（生ログ）、<code>docs/reports/img/</code>（グラフ・サマリ JSON）</td></tr>
+<tr><th>再現手順</th><td>① physics コンテナで <code>TOMATO_HARVEST_DEBUG_PHYSICS_GRASP=1 HEADLESS_STEPS=6000 ./scripts/run_baseline_e2e.sh 1 5</code> ② <code>python3 scripts/plot_physics_observation.py --sim-log ... --robot-log ... --out-dir ... --prefix runN</code> ③ <code>python3 scripts/plot_baseline_summary.py --summaries ... --out-dir ...</code></td></tr>
+</tbody>
+</table>
+
+<p class="meta">本レポートは Issue #1 の必須完了条件「検証結果をレポートとして残し、グラフ等で可視化して人間が一目で理解できること」に基づき作成した。</p>
+
+</body>
+</html>
