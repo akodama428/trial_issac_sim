@@ -13,9 +13,7 @@ CACHE_ROOT="${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}"
 mkdir -p \
   "${ARTIFACT_DIR}" \
   "${CACHE_ROOT}/franka-ws" \
-  "${CACHE_ROOT}/ov-cache" \
-  "${CACHE_ROOT}/ov-data" \
-  "${CACHE_ROOT}/ov-logs" \
+  "${CACHE_ROOT}/ci-home" \
   "${CACHE_ROOT}/kit-cache"
 
 # /isaac-sim は isaac-sim:isaac-sim の 750 のため、補助グループで読み取り権を得る
@@ -39,9 +37,7 @@ docker run --rm \
   -e XDG_CACHE_HOME=/tmp/tomato-harvest-ci-home/.cache \
   -v "${ARTIFACT_DIR}:/tmp/tomato-harvest-ci-artifacts" \
   -v "${CACHE_ROOT}/franka-ws:/tmp/tomato-harvest-ci-franka-ws" \
-  -v "${CACHE_ROOT}/ov-cache:/tmp/tomato-harvest-ci-home/.cache/ov" \
-  -v "${CACHE_ROOT}/ov-data:/tmp/tomato-harvest-ci-home/.local/share/ov/data" \
-  -v "${CACHE_ROOT}/ov-logs:/tmp/tomato-harvest-ci-home/.nvidia-omniverse/logs" \
+  -v "${CACHE_ROOT}/ci-home:/tmp/tomato-harvest-ci-home" \
   -v "${CACHE_ROOT}/kit-cache:/isaac-sim/kit/cache" \
   -v "${REPO_ROOT}:/workspace/tomato-harvest:ro" \
   -w /workspace/tomato-harvest \
