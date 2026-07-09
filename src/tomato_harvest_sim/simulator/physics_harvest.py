@@ -185,7 +185,10 @@ class IsaacPhysicsHarvestBridge:
         from omni.physx import get_physx_simulation_interface
         from pxr import PhysxSchema
 
-        tomato_prim = self._stage.GetPrimAtPath(self._tomato_collision_prim_path())
+        # PhysX の接触レポートは剛体アクター単位のため、collider 子 prim ではなく
+        # RigidBodyAPI を持つルート prim に適用する（子 prim 適用ではイベントが
+        # 一切発生しないことを Step 0 ベースライン run1 で確認済み）。
+        tomato_prim = self._stage.GetPrimAtPath(self._scene_paths.tomato_prim_path)
         contact_api = PhysxSchema.PhysxContactReportAPI.Apply(tomato_prim)
         contact_api.CreateThresholdAttr().Set(0.0)
         self._contact_subscription = get_physx_simulation_interface().subscribe_contact_report_events(

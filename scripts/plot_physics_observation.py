@@ -77,7 +77,11 @@ def parse_observation_log(path: Path) -> ObservationSeries:
 
 
 def parse_phase_transitions(path: Path) -> list[PhaseTransition]:
-    """robot ログからフェーズ遷移を時刻付きで読み出す。"""
+    """robot ログからフェーズ遷移を時刻付きで読み出す（最後のサイクルのみ）。
+
+    robot ログは追記式のため、同一ファイルに複数回の実行が混在し得る。
+    最後の「idle → detecting」（サイクル開始）以降だけを対象にする。
+    """
     transitions: list[PhaseTransition] = []
     with path.open(encoding="utf-8", errors="replace") as stream:
         for line in stream:
@@ -91,14 +95,24 @@ def parse_phase_transitions(path: Path) -> list[PhaseTransition]:
                     dst=match.group("dst"),
                 )
             )
-    return transitions
+    last_cycle_start = 0
+    for index, transition in enumerate(transitions):
+        if transition.src == "idle" and transition.dst == "detecting":
+            last_cycle_start = index
+    return transitions[last_cycle_start:]
 
 
 def phase_durations_sec(transitions: list[PhaseTransition]) -> list[tuple[str, float]]:
-    """遷移列から各フェーズの滞在時間を求める（最後のフェーズは滞在中のため除外）。"""
+    """遷移列から各フェーズの滞在時間を求める（最初のサイクルのみ）。
+
+    headless 実行では step 予算が余ると 2 周目のサイクルが始まることがあるため、
+    最初に complete へ到達した時点で集計を打ち切る。最後のフェーズは滞在中のため除外。
+    """
     durations: list[tuple[str, float]] = []
     for current, following in zip(transitions, transitions[1:]):
         durations.append((current.dst, following.stamp_sec - current.stamp_sec))
+        if following.dst == "complete":
+            break
     return durations
 
 
@@ -111,6 +125,27 @@ def _relative_time(series: ObservationSeries) -> list[float]:
         return []
     origin = series.time_sec[0]
     return [t - origin for t in series.time_sec]
+
+
+def trim_idle_tail(series: ObservationSeries, *, margin_sec: float = 45.0) -> ObservationSeries:
+    """サイクル完了後のアイドル区間を除去し、グラフの可読性を確保する。
+
+    最後に tomato_status が変化した時刻 + margin_sec までを残す。
+    headless 実行では所定 step 数までアイドルで回り続けるため、
+    トリムしないと有効区間がグラフの一部に圧縮されてしまう。
+    """
+    if not series.time_sec:
+        return series
+    last_change_time = series.time_sec[0]
+    for index in range(1, len(series.status)):
+        if series.status[index] != series.status[index - 1]:
+            last_change_time = series.time_sec[index]
+    cutoff = last_change_time + margin_sec
+    keep = sum(1 for t in series.time_sec if t <= cutoff)
+    trimmed = ObservationSeries()
+    for name in vars(trimmed):
+        setattr(trimmed, name, getattr(series, name)[:keep])
+    return trimmed
 
 
 def render_plots(series: ObservationSeries, transitions: list[PhaseTransition],
@@ -224,7 +259,7 @@ def main() -> None:
     parser.add_argument("--prefix", type=str, required=True)
     args = parser.parse_args()
 
-    series = parse_observation_log(args.sim_log)
+    series = trim_idle_tail(parse_observation_log(args.sim_log))
     transitions = parse_phase_transitions(args.robot_log)
     summary = render_plots(series, transitions, args.out_dir, args.prefix)
     print(
