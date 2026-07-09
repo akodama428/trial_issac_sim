@@ -1,0 +1,115 @@
+{
+  "prefix": "run7",
+  "observation_samples": 6000,
+  "duration_sec": 55.230999999679625,
+  "max_impulse_left_ns": 0.130603,
+  "max_impulse_right_ns": 0.0,
+  "max_stem_tension_n": 2.5691,
+  "max_tomato_speed_m_s": 1.17863,
+  "phase_transitions": [
+    {
+      "time": 1783598552.7281995,
+      "from": "idle",
+      "to": "detecting"
+    },
+    {
+      "time": 1783598582.4405463,
+      "from": "detecting",
+      "to": "target_found"
+    },
+    {
+      "time": 1783598583.563144,
+      "from": "target_found",
+      "to": "moving_to_pregrasp"
+    },
+    {
+      "time": 1783598592.666674,
+      "from": "moving_to_pregrasp",
+      "to": "moving_to_grasp"
+    },
+    {
+      "time": 1783598594.6698358,
+      "from": "moving_to_grasp",
+      "to": "at_grasp"
+    },
+    {
+      "time": 1783598595.0269465,
+      "from": "at_grasp",
+      "to": "grasp_evaluation"
+    },
+    {
+      "time": 1783598595.038617,
+      "from": "grasp_evaluation",
+      "to": "detaching"
+    },
+    {
+      "time": 1783598595.0848105,
+      "from": "detaching",
+      "to": "moving_to_place"
+    },
+    {
+      "time": 1783598596.9984224,
+      "from": "moving_to_place",
+      "to": "placed"
+    },
+    {
+      "time": 1783598597.0226057,
+      "from": "placed",
+      "to": "returning_home"
+    },
+    {
+      "time": 1783598607.174627,
+      "from": "returning_home",
+      "to": "complete"
+    }
+  ],
+  "phase_durations_sec": [
+    {
+      "phase": "detecting",
+      "sec": 29.71234679222107
+    },
+    {
+      "phase": "target_found",
+      "sec": 1.1225976943969727
+    },
+    {
+      "phase": "moving_to_pregrasp",
+      "sec": 9.103529930114746
+    },
+    {
+      "phase": "moving_to_grasp",
+      "sec": 2.003161907196045
+    },
+    {
+      "phase": "at_grasp",
+      "sec": 0.35711073875427246
+    },
+    {
+      "phase": "grasp_evaluation",
+      "sec": 0.011670351028442383
+    },
+    {
+      "phase": "detaching",
+      "sec": 0.046193599700927734
+    },
+    {
+      "phase": "moving_to_place",
+      "sec": 1.913611888885498
+    },
+    {
+      "phase": "placed",
+      "sec": 0.024183273315429688
+    },
+    {
+      "phase": "returning_home",
+      "sec": 10.152021408081055
+    }
+  ],
+  "reached_complete": true,
+  "images": {
+    "contact_impulse": "docs/reports/img/run7_contact_impulse.png",
+    "tomato_motion": "docs/reports/img/run7_tomato_motion.png",
+    "distances": "docs/reports/img/run7_distances.png",
+    "phases": "docs/reports/img/run7_phases.png"
+  }
+}

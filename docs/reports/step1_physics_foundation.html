@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Step 1 検証レポート: 物理モデルの土台整備</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root {
+  --bg: #ffffff; --fg: #1c2127; --fg-muted: #5b6472; --border: #dfe3e8;
+  --accent: #2563eb; --ok-bg: #e8f7ee; --ok-fg: #14532d; --ok-border: #34a866;
+  --warn-bg: #fff6e5; --warn-fg: #6b4e00; --warn-border: #e8b93a;
+  --code-bg: #f0f1f4; --table-head: #eef1f5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a; --fg: #e4e6ea; --fg-muted: #9aa3ad; --border: #2c3138;
+    --accent: #6ea8ff; --ok-bg: #10291a; --ok-fg: #9fd8b4; --ok-border: #2c7a4f;
+    --warn-bg: #332a10; --warn-fg: #f0d78c; --warn-border: #8a6d1f;
+    --code-bg: #1f2329; --table-head: #202329;
+  }
+}
+body { margin: 0 auto; max-width: 1100px; padding: 32px 40px 80px; background: var(--bg);
+  color: var(--fg); line-height: 1.75;
+  font-family: -apple-system, "Segoe UI", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; }
+h1 { font-size: 24px; border-bottom: 2px solid var(--accent); padding-bottom: 8px; }
+h2 { font-size: 20px; margin-top: 44px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
+  font-family: "SF Mono", Consolas, monospace; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 13.5px; }
+th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--table-head); }
+img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; margin: 8px 0; }
+.meta { color: var(--fg-muted); font-size: 13.5px; }
+.pass { display: inline-block; background: var(--ok-bg); color: var(--ok-fg);
+  border: 1px solid var(--ok-border); font-weight: 700; padding: 1px 10px; border-radius: 10px; font-size: 12px; }
+.finding { background: var(--warn-bg); border-left: 4px solid var(--warn-border); color: var(--warn-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; font-size: 13.5px; }
+.verdict { background: var(--ok-bg); border-left: 4px solid var(--ok-border); color: var(--ok-fg);
+  padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; }
+figcaption { color: var(--fg-muted); font-size: 12.5px; margin-bottom: 16px; }
+pre { background: var(--code-bg); padding: 10px 14px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; }
+</style>
+</head>
+<body>
+
+<h1>Step 1 検証レポート: 物理モデルの土台整備</h1>
+<p class="meta">
+実施日: 2026-07-09 ／ Issue: <a href="https://github.com/akodama428/trial_issac_sim/issues/2">#2</a> ／ ブランチ: <code>physics/step1-physics-foundation</code>（Step 0 マージ済み main 起点）<br>
+実行環境: docker コンテナ <code>tomato-harvest-sim-physics</code>（Isaac Sim 6.0 / ROS 2 Jazzy / ROS_DOMAIN_ID=1）
+</p>
+
+<div class="verdict">
+<b>総合判定: 合格（Issue #2 の完了条件をすべて満たす）</b><br>
+① 摩擦マテリアル・コリジョン・ソルバ設定を <code>scene.yaml</code> の <code>physics:</code> セクションへ集約し、適用12項目をログで実証。
+② ATTACHED 静置 800 ステップでテレポート復元 0 回（before/after とも）。
+③ franka.usd の finger collider 検査を完了（convexHull 近似・マテリアル未割当と判明）。
+④ E2E 回帰 3/3 成功（ベースライン 5/5 から劣化なし）。
+⑤ 既存テスト全通過（新規 5 件を含む 100 件）。
+副次成果: <b>チューニング適用後、初めて両 finger の物理接触を観測</b>（run8）。
+</div>
+
+<h2>1. 完了条件と結果の対比</h2>
+<table>
+<thead><tr><th>Issue #2 の完了条件</th><th>結果</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>scene_config が新パラメータを読める単体テスト</td><td><code>test_scene_config_physics.py</code> 5 件追加・通過（全項目読込・セクション欠落時の無効化・不正 combine mode 拒否・env キルスイッチ）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>ATTACHED 静置 500 ステップでテレポート復元 0 回</td><td>800 ステップ実施し <b>0 回</b>（before/after とも）。2章</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>franka.usd の finger collider 検査結果の記録</td><td>3章に記録（検査スクリプト <code>scripts/inspect_franka_colliders.py</code> 追加）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>既存テスト全通過・E2E 無劣化</td><td>100 件通過。E2E 3/3 成功（4章）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>検証レポート（グラフ・対比表・一目で合否判断）</td><td>本レポート</td><td><span class="pass">PASS</span></td></tr>
+</tbody>
+</table>
+
+<h2>2. ATTACHED 静置検証（before/after 各 800 ステップ）</h2>
+<p>スタンドアロン viewer をヘッドレスで 800 ステップ静置し、トマトの茎アンカーからの偏差・速度・テレポート復元回数を計測した。before は <code>TOMATO_HARVEST_PHYSICS_TUNING=0</code>（適用なし）、after は適用あり（<code>[PhysicsTuning] enabled=True applied_items=12</code> をログで確認）。</p>
+<figure>
+<img src="img/step1_idle_comparison.png" alt="idle comparison">
+<figcaption>図 2-1: 静置中の偏差（上）と速度（下）。<b>before/after とも偏差 0.0 mm・速度 0.0 m/s で完全静止</b>、テレポート復元 0 回。</figcaption>
+</figure>
+<table>
+<thead><tr><th>指標</th><th>before（適用なし）</th><th>after（適用あり）</th><th>合格基準</th></tr></thead>
+<tbody>
+<tr><td>最大偏差</td><td>0.0 mm</td><td>0.0 mm</td><td>—（参考）</td></tr>
+<tr><td>テレポート復元回数</td><td>0</td><td><b>0</b></td><td>0 回</td></tr>
+</tbody>
+</table>
+<div class="finding">
+<b>解釈:</b> ATTACHED 中は stem FixedJoint が剛結しているため、静置安定性はチューニング有無に依存しない（どちらも完全静止）。本検証の意味は「<b>チューニング追加が静置を劣化させない</b>」ことの確認であり、合格基準（復元 0 回）を満たす。なお Step 0 ベースラインでもテレポート復元は観測されておらず、計画時に懸念した発散は現行構成では起きていない。
+</div>
+
+<h2>3. franka.usd finger collider 検査（計画 §9.1-R5 の実測確認）</h2>
+<p>検査スクリプト <code>scripts/inspect_franka_colliders.py</code>（SimulationApp ヘッドレス起動、インスタンスプロキシ走査）による公式アセット（<code>.../Assets/Isaac/6.0/Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd</code>）の実測結果:</p>
+<pre><code>path=/World/FrankaPanda/panda_hand/geometry/panda_hand         type=Mesh collision=1 mesh_approx=convexHull physics_material=none
+path=/World/FrankaPanda/panda_rightfinger/geometry/panda_rightfinger type=Mesh collision=1 mesh_approx=convexHull physics_material=none
+path=/World/FrankaPanda/panda_leftfinger/geometry/panda_leftfinger   type=Mesh collision=1 mesh_approx=convexHull physics_material=none</code></pre>
+<table>
+<thead><tr><th>確認項目</th><th>結果</th><th>対応</th></tr></thead>
+<tbody>
+<tr><td>collider の有無</td><td>両 finger・hand とも Mesh collider あり</td><td>そのまま利用可能</td></tr>
+<tr><td>近似方式</td><td><b>convexHull</b>（平坦な把持パッド形状ではない）</td><td>Step 2/3 で把持が不安定な場合、パッドへの解析形状（box）collider 追加を検討（計画どおり）</td></tr>
+<tr><td>物理マテリアル</td><td><b>未割当</b>（PhysX 既定値で動作していた）</td><td>本 Step で gripper_material（ゴム相当）を link prim へバインド（配下の instanced mesh に継承）</td></tr>
+<tr><td>prim 構造</td><td>instanceable 参照（既定 Traverse では collider 不可視）</td><td>検査はプロキシ走査で対応。バインドは link Xform 適用で有効</td></tr>
+</tbody>
+</table>
+
+<h2>4. E2E 回帰（チューニング適用・success モード 3 回)</h2>
+<figure>
+<img src="img/step1_e2e_success.png" alt="step1 e2e success">
+<figcaption>図 4-1: チューニング適用後の E2E 成否 — 3/3 COMPLETE。ベースライン（Step 0、5/5）から劣化なし。</figcaption>
+<img src="img/step1_e2e_phase_durations.png" alt="step1 e2e phase durations">
+<figcaption>図 4-2: フェーズ所要時間（run7〜9）。detecting 27〜32 秒・搬送系 2〜9 秒で、ベースライン run2〜5（26〜53 秒・2〜10 秒）と同水準。</figcaption>
+</figure>
+<table>
+<caption>表 4-1: ベースライン（Step 0）との比較</caption>
+<thead><tr><th>指標</th><th>Step 0 ベースライン（run2〜5）</th><th>Step 1 適用後（run7〜9）</th><th>判定</th></tr></thead>
+<tbody>
+<tr><td>E2E 成功率</td><td>4/4（run1 含め 5/5）</td><td><b>3/3</b></td><td><span class="pass">劣化なし</span></td></tr>
+<tr><td>detecting 所要</td><td>26.7〜53.4 s</td><td>27.0〜32.3 s</td><td><span class="pass">同水準</span></td></tr>
+<tr><td>moving_to_pregrasp 所要</td><td>3.0〜7.0 s</td><td>5.3〜9.1 s</td><td><span class="pass">同水準</span></td></tr>
+<tr><td>把持〜引抜時の茎張力ピーク</td><td>2.04〜2.63 N</td><td>2.57〜2.90 N</td><td>参考（Step 4 入力）</td></tr>
+</tbody>
+</table>
+
+<div class="finding">
+<b>副次成果 — 初の両 finger 物理接触（Step 2/3 への引き継ぎ）:</b>
+接触イベント数と finger 別の非ゼロ力積サンプル数は次のとおり。
+run7: 左 198 / 右 0（イベント 498）、<b>run8: 左 201 / 右 202（イベント 446）</b>、run9: 左 188 / 右 0（イベント 576）。
+Step 0 時点（修正後 run6）では右 finger の接触はゼロだったが、摩擦マテリアル・contact offset・ねじり摩擦の適用後、<b>3 回中 1 回で両指の物理接触が成立</b>した。ただし再現率は 1/3 であり、両指接触の安定化（グリッパー中心とトマトの整列、閉じ力の対称性）は計画どおり Step 2（把持力上限制御）の主課題となる。
+</div>
+
+<h2>5. 適用した設定値（scene.yaml physics セクション）</h2>
+<table>
+<thead><tr><th>項目</th><th>値</th><th>根拠</th></tr></thead>
+<tbody>
+<tr><td>tomato_material</td><td>静摩擦 1.2 / 動摩擦 1.0 / 反発 0.1</td><td>計画 §5 Step 1 の初期値（果皮相当の高摩擦・低反発）</td></tr>
+<tr><td>gripper_material</td><td>静摩擦 1.1 / 動摩擦 0.9 / 反発 0.05</td><td>ゴムパッド相当</td></tr>
+<tr><td>container_material</td><td>静摩擦 0.8 / 動摩擦 0.7 / 反発 0.2</td><td>トレイ内バウンド抑制（Step 5 の settle 判定を見据える）</td></tr>
+<tr><td>friction_combine_mode / restitution_combine_mode</td><td>max / min</td><td>接触ペアで摩擦は大きい方・反発は小さい方を採用（把持優先・バウンド抑制）</td></tr>
+<tr><td>tomato contact/rest offset</td><td>0.002 / 0.0 m</td><td>半径 0.01 m の小径球向けに接触検出帯を狭める</td></tr>
+<tr><td>torsionalPatchRadius / min</td><td>0.004 / 0.001 m</td><td>球の点接触へのねじり摩擦付与（計画 §9.1-R3、実環境スキーマで確認済み属性）</td></tr>
+<tr><td>tomato solver iterations</td><td>position 16 / velocity 4</td><td>トマト剛体のみ増強しシーン全体へ波及させない（計画 §8 リスク対応）</td></tr>
+</tbody>
+</table>
+<p class="meta">物理 dt は 60 Hz のまま変更していない（アーム制御・JTC が 60 Hz 前提でチューニング済みのため。変更は Step 2 以降で必要になった場合に再検討）。値はすべて <code>scene.yaml</code> で管理され、<code>TOMATO_HARVEST_PHYSICS_TUNING=0</code> で一時無効化できる。</p>
+
+<h2>6. 成果物と再現手順</h2>
+<table>
+<tbody>
+<tr><th>実装</th><td><code>scene_config.py</code>（physics ローダ+検証）、<code>physics_tuning.py</code>（USD 適用、新設）、<code>physics_harvest.py</code>（prepare_scene 統合）、<code>config/scene.yaml</code>（physics セクション）</td></tr>
+<tr><th>テスト</th><td><code>test_scene_config_physics.py</code> 5 件（計 100 件通過）</td></tr>
+<tr><th>スクリプト</th><td><code>scripts/inspect_franka_colliders.py</code>、<code>scripts/plot_idle_comparison.py</code></td></tr>
+<tr><th>データ</th><td><code>docs/reports/data/idle_{before,after}.log.gz</code>、<code>sim_run{7..9}.log.gz</code>、<code>robot_run{7..9}.log.gz</code>、<code>docs/reports/img/step1_*</code>・<code>run{7..9}_*</code></td></tr>
+<tr><th>再現手順</th><td>① 静置 A/B: <code>TOMATO_HARVEST_DEBUG_PHYSICS_GRASP=1 [TOMATO_HARVEST_PHYSICS_TUNING=0] ./python.sh scripts/run_harvest_viewer.py --headless --headless-steps 800</code> ② E2E: <code>HEADLESS_STEPS=6000 ./scripts/run_baseline_e2e.sh 7 9</code> ③ グラフ: <code>plot_idle_comparison.py</code> / <code>plot_physics_observation.py</code> / <code>plot_baseline_summary.py</code> ④ collider 検査: <code>./python.sh scripts/inspect_franka_colliders.py</code></td></tr>
+</tbody>
+</table>
+
+</body>
+</html>
