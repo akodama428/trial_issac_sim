@@ -5,6 +5,11 @@ import time
 from dataclasses import dataclass
 
 from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
+from tomato_harvest_sim.simulator.physics_tuning import apply_physics_tuning
+from tomato_harvest_sim.simulator.scene_config import (
+    PhysicsTuningConfig,
+    load_physics_tuning_config,
+)
 from tomato_harvest_sim.simulator.physics_observation import (
     FingerContactImpulses,
     estimate_stem_tension_n,
@@ -51,10 +56,12 @@ class IsaacPhysicsHarvestBridge:
         stage: object,
         scene_paths: PhysicsHarvestScenePaths,
         initial_tomato_pose: Pose3D,
+        physics_tuning: PhysicsTuningConfig | None = None,
     ) -> None:
         self._stage = stage
         self._scene_paths = scene_paths
         self._initial_tomato_pose = initial_tomato_pose
+        self._physics_tuning = physics_tuning or load_physics_tuning_config()
         self._last_cycle_id = 0
         self._pending_finger_contacts: set[str] = set()
         self._active_finger_contacts: set[str] = set()
@@ -80,8 +87,38 @@ class IsaacPhysicsHarvestBridge:
         self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallRight")
         self._define_stem_anchor()
         self._define_tomato_physics()
+        self._apply_physics_tuning()
         self._create_stem_joint()
         self._subscribe_contact_reports()
+
+    def _apply_physics_tuning(self) -> None:
+        """scene.yaml の physics セクションを適用する（enabled=False なら無適用）。"""
+        applied = apply_physics_tuning(
+            stage=self._stage,
+            config=self._physics_tuning,
+            tomato_prim_path=self._scene_paths.tomato_prim_path,
+            tomato_collision_prim_path=self._tomato_collision_prim_path(),
+            finger_link_prim_paths=(
+                self._left_finger_prim_path(),
+                self._right_finger_prim_path(),
+            ),
+            container_prim_paths=(
+                self._scene_paths.ground_prim_path,
+                f"{self._scene_paths.tray_prim_path}/Base",
+                f"{self._scene_paths.tray_prim_path}/WallFront",
+                f"{self._scene_paths.tray_prim_path}/WallBack",
+                f"{self._scene_paths.tray_prim_path}/WallLeft",
+                f"{self._scene_paths.tray_prim_path}/WallRight",
+            ),
+        )
+        # A/B 比較の証跡としてデバッグ無効時でも適用状態を1行残す
+        print(
+            f"[PhysicsTuning] enabled={self._physics_tuning.enabled} "
+            f"applied_items={len(applied)}",
+            flush=True,
+        )
+        for line in applied:
+            self._debug_log(f"[PhysicsTuning] {line}")
 
     def begin_physics_step(self) -> None:
         self._pending_finger_contacts = set()

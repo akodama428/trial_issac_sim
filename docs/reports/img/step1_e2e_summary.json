@@ -1,0 +1,26 @@
+{
+  "runs": [
+    "run7",
+    "run8",
+    "run9"
+  ],
+  "success_count": 3,
+  "total_runs": 3,
+  "success_rate": 1.0,
+  "mean_phase_durations_sec": {
+    "detecting": 29.664758284886677,
+    "target_found": 0.46442461013793945,
+    "moving_to_pregrasp": 7.104278484980266,
+    "moving_to_grasp": 1.452575922012329,
+    "at_grasp": 0.3586709499359131,
+    "grasp_evaluation": 0.01211237907409668,
+    "detaching": 0.2050898869832357,
+    "moving_to_place": 1.8328782717386882,
+    "placed": 0.02358277638753255,
+    "returning_home": 10.218730211257935
+  },
+  "images": {
+    "success": "docs/reports/img/baseline_success.png",
+    "phase_durations": "docs/reports/img/baseline_phase_durations.png"
+  }
+}

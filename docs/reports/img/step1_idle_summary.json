@@ -1,0 +1,16 @@
+{
+  "before (tuning off)": {
+    "samples": 800,
+    "max_deviation_mm": 0.0,
+    "mean_deviation_mm": 0.0,
+    "max_speed_m_s": 0.0,
+    "teleport_restores": 0
+  },
+  "after (tuning on)": {
+    "samples": 800,
+    "max_deviation_mm": 0.0,
+    "mean_deviation_mm": 0.0,
+    "max_speed_m_s": 0.0,
+    "teleport_restores": 0
+  }
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -7,6 +8,9 @@ from pathlib import Path
 import yaml
 
 from tomato_harvest_sim.msg.contracts import Pose3D
+
+# PhysX が受け付ける combine mode（PhysxSchema physxMaterial:*CombineMode の許容値）
+_VALID_COMBINE_MODES = ("average", "min", "multiply", "max")
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,113 @@ class SceneLayoutConfig:
     fixed_camera_clipping_range_m: tuple[float, float]
     hand_camera_focal_length_mm: float
     hand_camera_clipping_range_m: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class PhysicsMaterialConfig:
+    """摩擦・反発の物理マテリアル設定。"""
+
+    static_friction: float
+    dynamic_friction: float
+    restitution: float
+
+
+@dataclass(frozen=True)
+class PhysicsTuningConfig:
+    """Step 1 で導入した物理チューニング一式（scene.yaml physics セクション）。
+
+    enabled=False のとき、physics_harvest は従来どおり何も適用しない。
+    環境変数 TOMATO_HARVEST_PHYSICS_TUNING=0 で A/B 比較用に強制無効化できる。
+    """
+
+    enabled: bool
+    tomato_material: PhysicsMaterialConfig
+    gripper_material: PhysicsMaterialConfig
+    container_material: PhysicsMaterialConfig
+    friction_combine_mode: str
+    restitution_combine_mode: str
+    tomato_contact_offset_m: float
+    tomato_rest_offset_m: float
+    tomato_torsional_patch_radius_m: float
+    tomato_min_torsional_patch_radius_m: float
+    tomato_solver_position_iterations: int
+    tomato_solver_velocity_iterations: int
+
+
+_DISABLED_MATERIAL = PhysicsMaterialConfig(
+    static_friction=0.0, dynamic_friction=0.0, restitution=0.0
+)
+
+_DISABLED_TUNING = PhysicsTuningConfig(
+    enabled=False,
+    tomato_material=_DISABLED_MATERIAL,
+    gripper_material=_DISABLED_MATERIAL,
+    container_material=_DISABLED_MATERIAL,
+    friction_combine_mode="average",
+    restitution_combine_mode="average",
+    tomato_contact_offset_m=0.0,
+    tomato_rest_offset_m=0.0,
+    tomato_torsional_patch_radius_m=0.0,
+    tomato_min_torsional_patch_radius_m=0.0,
+    tomato_solver_position_iterations=0,
+    tomato_solver_velocity_iterations=0,
+)
+
+
+def _material_from_dict(data: dict[str, object]) -> PhysicsMaterialConfig:
+    return PhysicsMaterialConfig(
+        static_friction=float(data["static_friction"]),
+        dynamic_friction=float(data["dynamic_friction"]),
+        restitution=float(data["restitution"]),
+    )
+
+
+def _validated_combine_mode(value: object) -> str:
+    mode = str(value)
+    if mode not in _VALID_COMBINE_MODES:
+        raise ValueError(
+            f"combine mode must be one of {_VALID_COMBINE_MODES}, got {mode!r}"
+        )
+    return mode
+
+
+def physics_tuning_from_payload(payload: dict[str, object]) -> PhysicsTuningConfig:
+    """yaml payload から物理チューニング設定を組み立てる。
+
+    physics セクションが無い場合、および環境変数キルスイッチが立っている場合は
+    「適用しない」設定を返す（従来挙動の維持）。
+
+    Raises:
+        ValueError: combine mode が PhysX の許容値でない場合。
+    """
+    physics = payload.get("physics") if isinstance(payload, dict) else None
+    if not isinstance(physics, dict):
+        return _DISABLED_TUNING
+    kill_switch = os.environ.get("TOMATO_HARVEST_PHYSICS_TUNING", "").strip()
+    enabled = bool(physics.get("enabled", True)) and kill_switch not in {"0", "false", "False"}
+
+    collision = physics["tomato_collision"]
+    solver = physics["tomato_solver"]
+    return PhysicsTuningConfig(
+        enabled=enabled,
+        tomato_material=_material_from_dict(physics["tomato_material"]),
+        gripper_material=_material_from_dict(physics["gripper_material"]),
+        container_material=_material_from_dict(physics["container_material"]),
+        friction_combine_mode=_validated_combine_mode(physics["friction_combine_mode"]),
+        restitution_combine_mode=_validated_combine_mode(physics["restitution_combine_mode"]),
+        tomato_contact_offset_m=float(collision["contact_offset_m"]),
+        tomato_rest_offset_m=float(collision["rest_offset_m"]),
+        tomato_torsional_patch_radius_m=float(collision["torsional_patch_radius_m"]),
+        tomato_min_torsional_patch_radius_m=float(collision["min_torsional_patch_radius_m"]),
+        tomato_solver_position_iterations=int(solver["position_iterations"]),
+        tomato_solver_velocity_iterations=int(solver["velocity_iterations"]),
+    )
+
+
+@lru_cache(maxsize=1)
+def load_physics_tuning_config() -> PhysicsTuningConfig:
+    payload = yaml.safe_load(_scene_config_path().read_text(encoding="utf-8"))
+    return physics_tuning_from_payload(payload if isinstance(payload, dict) else {})
 
 
 def _repo_root() -> Path:

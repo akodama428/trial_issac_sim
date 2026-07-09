@@ -66,3 +66,31 @@ scene:
   fixed_camera_clipping_range_m: [0.01, 1000.0]
   hand_camera_focal_length_mm: 18.0
   hand_camera_clipping_range_m: [0.01, 1000.0]
+
+# Step 1（物理モデル土台）: 摩擦・コリジョン・ソルバのチューニング。
+# 値の根拠と検証結果は docs/reports/step1_physics_foundation.html を参照。
+# TOMATO_HARVEST_PHYSICS_TUNING=0 で一時的に無効化できる（A/B 比較用）。
+physics:
+  enabled: true
+  tomato_material:          # トマト表面（果皮）: 高摩擦・低反発
+    static_friction: 1.2
+    dynamic_friction: 1.0
+    restitution: 0.1
+  gripper_material:         # finger パッド: ゴム相当
+    static_friction: 1.1
+    dynamic_friction: 0.9
+    restitution: 0.05
+  container_material:       # トレイ・地面: 跳ねすぎない中摩擦
+    static_friction: 0.8
+    dynamic_friction: 0.7
+    restitution: 0.2
+  friction_combine_mode: max        # 接触ペアの摩擦は大きい方を採用（把持優先）
+  restitution_combine_mode: min     # 反発は小さい方（バウンド抑制）
+  tomato_collision:
+    contact_offset_m: 0.002         # 小径物体向けに既定より狭める
+    rest_offset_m: 0.0
+    torsional_patch_radius_m: 0.004 # 球の点接触にねじり摩擦を与える（計画 §9.1-R3）
+    min_torsional_patch_radius_m: 0.001
+  tomato_solver:
+    position_iterations: 16         # 小物体把持向けにトマト剛体のみ増強
+    velocity_iterations: 4
