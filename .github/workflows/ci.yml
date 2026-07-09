@@ -30,6 +30,10 @@ jobs:
         run: |
           docker run --rm -v "${{ github.workspace }}:/w" alpine \
             chown -R "$(id -u):$(id -g)" /w || true
+          if [ -d "${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}" ]; then
+            docker run --rm -v "${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}:/c" alpine \
+              chown -R "$(id -u):$(id -g)" /c || true
+          fi
 
       - name: Checkout
         uses: actions/checkout@v4

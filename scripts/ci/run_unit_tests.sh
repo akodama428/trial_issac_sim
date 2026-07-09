@@ -12,8 +12,13 @@ CACHE_ROOT="${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}"
 
 mkdir -p "${ARTIFACT_DIR}" "${CACHE_ROOT}/unit-colcon"
 
+# /isaac-sim は isaac-sim:isaac-sim の 750 のため、補助グループで読み取り権を得る
+ISAAC_SIM_GID="$(docker run --rm "${IMAGE_NAME}" bash -c 'id -g isaac-sim' 2>/dev/null | tr -d '[:space:]')"
+ISAAC_SIM_GID="${ISAAC_SIM_GID:-1234}"
+
 docker run --rm \
   --user "$(id -u):$(id -g)" \
+  --group-add "${ISAAC_SIM_GID}" \
   -e CI_ARTIFACT_DIR=/tmp/tomato-harvest-ci-artifacts \
   -e CI_COLCON_ROOT=/tmp/tomato-harvest-ci-colcon \
   -e PYTHONDONTWRITEBYTECODE=1 \

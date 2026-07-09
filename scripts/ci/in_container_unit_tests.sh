@@ -16,13 +16,12 @@ build_status=0
 colcon_status=0
 
 set +e
-colcon build \
+colcon --log-base "${LOG_BASE}" build \
   --packages-up-to franka_ros2_control \
   --symlink-install \
   --event-handlers console_direct+ \
   --build-base "${BUILD_BASE}" \
   --install-base "${INSTALL_BASE}" \
-  --log-base "${LOG_BASE}" \
   --cmake-args -DCMAKE_BUILD_TYPE=Release \
   2>&1 | tee "${ARTIFACT_DIR}/colcon-build.log"
 build_status=${PIPESTATUS[0]}
@@ -43,12 +42,11 @@ python3 -m pytest \
   2>&1 | tee "${ARTIFACT_DIR}/pytest.log"
 pytest_status=${PIPESTATUS[0]}
 
-colcon test \
+colcon --log-base "${LOG_BASE}" test \
   --packages-select franka_ros2_control \
   --event-handlers console_direct+ \
   --build-base "${BUILD_BASE}" \
   --install-base "${INSTALL_BASE}" \
-  --log-base "${LOG_BASE}" \
   --return-code-on-test-failure \
   2>&1 | tee "${ARTIFACT_DIR}/colcon-test.log"
 colcon_status=${PIPESTATUS[0]}

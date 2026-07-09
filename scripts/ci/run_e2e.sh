@@ -18,11 +18,16 @@ mkdir -p \
   "${CACHE_ROOT}/ov-logs" \
   "${CACHE_ROOT}/kit-cache"
 
+# /isaac-sim は isaac-sim:isaac-sim の 750 のため、補助グループで読み取り権を得る
+ISAAC_SIM_GID="$(docker run --rm "${IMAGE_NAME}" bash -c 'id -g isaac-sim' 2>/dev/null | tr -d '[:space:]')"
+ISAAC_SIM_GID="${ISAAC_SIM_GID:-1234}"
+
 docker run --rm \
   --gpus all \
   --network host \
   --shm-size=1g \
   --user "$(id -u):$(id -g)" \
+  --group-add "${ISAAC_SIM_GID}" \
   -e ACCEPT_EULA="${ACCEPT_EULA:-Y}" \
   -e PRIVACY_CONSENT="${PRIVACY_CONSENT:-Y}" \
   -e CI_ARTIFACT_DIR=/tmp/tomato-harvest-ci-artifacts \
