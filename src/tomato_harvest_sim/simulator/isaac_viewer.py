@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+from tomato_harvest_sim.msg.contracts import HarvestTaskPhase
 from tomato_harvest_sim.simulator.control_panel import ControlPanelController, IsaacControlPanelWindow
 from tomato_harvest_sim.simulator.isaac_franka_driver import IsaacFrankaDriver
 from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBridge, PhysicsHarvestScenePaths
@@ -15,6 +16,28 @@ from tomato_harvest_sim.simulator.scene_plan import ReviewScenePlan, build_revie
 ISAAC_SIM_ROOT = Path(os.environ.get("ISAAC_SIM_ROOT", "/isaac-sim"))
 ISAAC_SIM_EXPERIENCE = ISAAC_SIM_ROOT / "apps" / "isaacsim.exp.base.python.kit"
 OFFICIAL_FRANKA_ASSET_RELATIVE_PATH = "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd"
+
+
+# ヘッドレス実行の早期終了対象。収穫サイクルがこれ以上進まない終端フェーズのみ。
+_HEADLESS_TERMINAL_PHASES = frozenset(
+    {HarvestTaskPhase.COMPLETE.value, HarvestTaskPhase.FAILED.value}
+)
+
+
+def is_headless_terminal_phase(phase: str | None) -> bool:
+    """ヘッドレス実行を打ち切ってよい終端フェーズかを判定する。
+
+    ヘッドレス実行は CI 向けの自動終了モードであり、収穫サイクルが
+    complete / failed に到達した後はステップを消化し続ける意味がない。
+    未観測（None）や未知の値は継続と判定する。
+
+    Args:
+        phase: /tomato_harvest/phase で最後に観測したフェーズ値。未観測なら None。
+
+    Returns:
+        早期終了してよい場合 True。
+    """
+    return phase in _HEADLESS_TERMINAL_PHASES
 
 
 @dataclass(frozen=True)
@@ -36,7 +59,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--headless-steps",
         type=int,
         default=64,
-        help="Number of runtime steps to execute in headless mode.",
+        help=(
+            "Maximum number of runtime steps to execute in headless mode. "
+            "The run ends early when the harvest cycle reaches a terminal phase."
+        ),
     )
     parser.add_argument(
         "--camera-view",
@@ -523,6 +549,7 @@ def _run_simulator_node_main_loop(
     import rclpy
     from std_msgs.msg import String
     from tomato_harvest_sim.msg.bridge import CONTROL_TOPIC
+    from tomato_harvest_sim.msg.topics import PHASE_TOPIC
     from tomato_harvest_sim.simulator.scene_runtime import IsaacSceneRuntime
     from tomato_harvest_sim.simulator.simulator_node import SimulatorNode
 
@@ -644,9 +671,25 @@ def _run_simulator_node_main_loop(
     if headless:
         # headless は CI 向けの自動終了モードであり、ROS bridge / scene_runtime /
         # physics の更新順を含む処理内容は GUI モードと同一に保つ。
-        # 差分は描画表示を出さないことと、所定 step 数で終了することだけ。
-        for _ in range(headless_steps):
+        # 差分は描画表示を出さないことと、所定 step 数を上限として実行し、
+        # 収穫サイクルの終端フェーズ（complete / failed）を検知したら
+        # 早期終了することだけ。
+        observed_phase: dict[str, str] = {}
+
+        def _on_phase(msg: String) -> None:
+            observed_phase["value"] = msg.data.strip()
+
+        node.create_subscription(String, PHASE_TOPIC, _on_phase, 10)
+
+        for executed_steps in range(1, headless_steps + 1):
             _step()
+            if is_headless_terminal_phase(observed_phase.get("value")):
+                print(
+                    f"Harvest cycle reached terminal phase '{observed_phase['value']}'; "
+                    f"stopping headless run early after {executed_steps}/{headless_steps} steps.",
+                    flush=True,
+                )
+                break
         _pump_updates(simulation_app.update, frame_count=30)
         print("Headless simulator node setup completed.", flush=True)
         node.destroy_node()
