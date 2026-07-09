@@ -22,19 +22,23 @@ docker run --rm \
   --gpus all \
   --network host \
   --shm-size=1g \
+  --user "$(id -u):$(id -g)" \
   -e ACCEPT_EULA="${ACCEPT_EULA:-Y}" \
   -e PRIVACY_CONSENT="${PRIVACY_CONSENT:-Y}" \
   -e CI_ARTIFACT_DIR=/tmp/tomato-harvest-ci-artifacts \
   -e FRANKA_ROS2_WS=/tmp/tomato-harvest-ci-franka-ws \
   -e CI_HEADLESS_STEPS="${CI_HEADLESS_STEPS:-900}" \
   -e CI_E2E_TIMEOUT_SEC="${CI_E2E_TIMEOUT_SEC:-2400}" \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e HOME=/tmp/tomato-harvest-ci-home \
+  -e XDG_CACHE_HOME=/tmp/tomato-harvest-ci-home/.cache \
   -v "${ARTIFACT_DIR}:/tmp/tomato-harvest-ci-artifacts" \
   -v "${CACHE_ROOT}/franka-ws:/tmp/tomato-harvest-ci-franka-ws" \
-  -v "${CACHE_ROOT}/ov-cache:/root/.cache/ov" \
-  -v "${CACHE_ROOT}/ov-data:/root/.local/share/ov/data" \
-  -v "${CACHE_ROOT}/ov-logs:/root/.nvidia-omniverse/logs" \
+  -v "${CACHE_ROOT}/ov-cache:/tmp/tomato-harvest-ci-home/.cache/ov" \
+  -v "${CACHE_ROOT}/ov-data:/tmp/tomato-harvest-ci-home/.local/share/ov/data" \
+  -v "${CACHE_ROOT}/ov-logs:/tmp/tomato-harvest-ci-home/.nvidia-omniverse/logs" \
   -v "${CACHE_ROOT}/kit-cache:/isaac-sim/kit/cache" \
-  -v "${REPO_ROOT}:/workspace/tomato-harvest" \
+  -v "${REPO_ROOT}:/workspace/tomato-harvest:ro" \
   -w /workspace/tomato-harvest \
   "${IMAGE_NAME}" \
   bash ./scripts/ci/in_container_e2e.sh \

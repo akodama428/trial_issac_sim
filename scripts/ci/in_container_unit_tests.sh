@@ -6,9 +6,10 @@ COLCON_ROOT="${CI_COLCON_ROOT:-/tmp/tomato-harvest-ci-colcon}"
 BUILD_BASE="${COLCON_ROOT}/build"
 INSTALL_BASE="${COLCON_ROOT}/install"
 LOG_BASE="${COLCON_ROOT}/log"
+PYTEST_CACHE_DIR="${COLCON_ROOT}/pytest-cache"
 
 mkdir -p "${ARTIFACT_DIR}"
-mkdir -p "${BUILD_BASE}" "${INSTALL_BASE}" "${LOG_BASE}"
+mkdir -p "${BUILD_BASE}" "${INSTALL_BASE}" "${LOG_BASE}" "${PYTEST_CACHE_DIR}"
 
 pytest_status=0
 build_status=0
@@ -37,6 +38,7 @@ python3 -m pytest \
   tests \
   src/tomato_harvest_sim/robot \
   src/tomato_harvest_sim/simulator \
+  -o "cache_dir=${PYTEST_CACHE_DIR}" \
   --junitxml "${ARTIFACT_DIR}/pytest-results.xml" \
   2>&1 | tee "${ARTIFACT_DIR}/pytest.log"
 pytest_status=${PIPESTATUS[0]}
@@ -51,7 +53,7 @@ colcon test \
   2>&1 | tee "${ARTIFACT_DIR}/colcon-test.log"
 colcon_status=${PIPESTATUS[0]}
 
-colcon test-result \
+colcon --log-base "${LOG_BASE}" test-result \
   --test-result-base "${BUILD_BASE}" \
   --verbose \
   2>&1 | tee "${ARTIFACT_DIR}/colcon-test-result.log"

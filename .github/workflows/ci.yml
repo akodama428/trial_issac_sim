@@ -26,6 +26,11 @@ jobs:
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
     steps:
+      - name: Clean workspace residue
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/w" alpine \
+            chown -R "$(id -u):$(id -g)" /w || true
+
       - name: Checkout
         uses: actions/checkout@v4
 

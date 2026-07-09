@@ -13,11 +13,14 @@ CACHE_ROOT="${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}"
 mkdir -p "${ARTIFACT_DIR}" "${CACHE_ROOT}/unit-colcon"
 
 docker run --rm \
+  --user "$(id -u):$(id -g)" \
   -e CI_ARTIFACT_DIR=/tmp/tomato-harvest-ci-artifacts \
   -e CI_COLCON_ROOT=/tmp/tomato-harvest-ci-colcon \
+  -e PYTHONDONTWRITEBYTECODE=1 \
+  -e HOME=/tmp/tomato-harvest-ci-home \
   -v "${ARTIFACT_DIR}:/tmp/tomato-harvest-ci-artifacts" \
   -v "${CACHE_ROOT}/unit-colcon:/tmp/tomato-harvest-ci-colcon" \
-  -v "${REPO_ROOT}:/workspace/tomato-harvest" \
+  -v "${REPO_ROOT}:/workspace/tomato-harvest:ro" \
   -w /workspace/tomato-harvest \
   "${IMAGE_NAME}" \
   bash ./scripts/ci/in_container_unit_tests.sh \
