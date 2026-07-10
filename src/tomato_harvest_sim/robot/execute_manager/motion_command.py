@@ -212,6 +212,8 @@ def _make_stop_command(
 
 
 def main() -> None:
+    import time
+
     import rclpy
     from std_msgs.msg import String
     from rclpy.node import Node
@@ -220,6 +222,8 @@ def main() -> None:
         MOTION_COMMAND_TOPIC, JOINT_STATES_TOPIC,
     )
     from tomato_harvest_sim.msg.serialization import motion_command_to_json
+    from tomato_harvest_sim.robot.execute_manager.plan_adoption import evaluate_plan_adoption
+    from tomato_harvest_sim.robot.motion_planner.observability import metric_line
 
     rclpy.init()
 
@@ -247,7 +251,31 @@ def main() -> None:
 
         def _on_plan(self, msg: String) -> None:
             from tomato_harvest_sim.msg.serialization import harvest_motion_plan_from_json
-            self._plan = harvest_motion_plan_from_json(msg.data)
+            candidate = harvest_motion_plan_from_json(msg.data)
+            decision = evaluate_plan_adoption(
+                candidate=candidate,
+                current_plan=self._plan,
+                current_phase=self._phase,
+            )
+            self.get_logger().info(metric_line(
+                "plan_adopted" if decision.adopted else "plan_rejected",
+                reason=decision.reason,
+                plan_revision=candidate.plan_revision,
+                current_revision=self._plan.plan_revision if self._plan is not None else None,
+                planned_from_phase=(
+                    candidate.planned_from_phase.value
+                    if candidate.planned_from_phase is not None else None
+                ),
+                phase=self._phase.value if self._phase is not None else None,
+                producer_kind=candidate.producer_kind.value,
+                plan_age_sec=(
+                    round(time.time() - candidate.generated_at_sec, 3)
+                    if candidate.generated_at_sec is not None else None
+                ),
+            ))
+            if not decision.adopted:
+                return
+            self._plan = candidate
             self._try_publish()
 
         def _on_joint_state(self, msg: object) -> None:

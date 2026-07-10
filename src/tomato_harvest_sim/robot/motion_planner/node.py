@@ -16,9 +16,12 @@ def main() -> None:
     from sensor_msgs.msg import JointState
     from std_msgs.msg import String
 
+    from dataclasses import replace
+
     from tomato_harvest_sim.msg.contracts import (
         HarvestTaskPhase,
         JointStateSnapshot,
+        PlanProducerKind,
         TargetEstimate,
     )
     from tomato_harvest_sim.msg.topics import (
@@ -48,6 +51,7 @@ def main() -> None:
             self._estimate: TargetEstimate | None = None
             self._joint_state: JointStateSnapshot | None = None
             self._scene_snapshot = None  # 実際の SceneSnapshot (tray_pose 等を含む)
+            self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
 
             self.create_subscription(String, PHASE_TOPIC, self._on_phase, 10)
             self.create_subscription(String, TARGET_ESTIMATE_TOPIC, self._on_estimate, 10)
@@ -138,6 +142,21 @@ def main() -> None:
             ))
             if plan is None:
                 return
+            self._plan_revision += 1
+            plan = replace(
+                plan,
+                plan_revision=self._plan_revision,
+                generated_at_sec=time.time(),
+                planned_from_phase=self._phase,
+                producer_kind=PlanProducerKind.GLOBAL_PLANNER,
+            )
+            self.get_logger().info(metric_line(
+                "plan_published",
+                plan_revision=plan.plan_revision,
+                planned_from_phase=phase,
+                producer_kind=plan.producer_kind.value,
+                trigger=trigger,
+            ))
             out = String()
             out.data = harvest_motion_plan_to_json(plan)
             self._pub.publish(out)
