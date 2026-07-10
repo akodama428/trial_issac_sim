@@ -2,6 +2,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -26,6 +27,19 @@ constexpr char kGripperClosedTopic[] = "/tomato_harvest/gripper_closed";
 // 既定値は franka_controllers.yaml の joint_trajectory_controller に対応する。
 constexpr char kDefaultJointTrajectoryAction[] =
   "/joint_trajectory_controller/follow_joint_trajectory";
+
+std::string metric_line(
+  const std::string & event, const std::string & phase,
+  const std::optional<std::size_t> cumulative_count = std::nullopt)
+{
+  std::ostringstream stream;
+  stream << "MOVEIT_METRIC {\"event\":\"" << event << "\",\"phase\":\"" << phase << "\"";
+  if (cumulative_count.has_value()) {
+    stream << ",\"cumulative_count\":" << *cumulative_count;
+  }
+  stream << "}";
+  return stream.str();
+}
 
 class MotionCommandExecutorNode : public rclcpp::Node
 {
@@ -66,12 +80,13 @@ private:
     }
     if (!command.joint_trajectory.has_value()) {
       if (franka_ros2_control::should_abort_on_missing_trajectory(command.command_name)) {
+        log_metric("trajectory_aborted", command.phase_id.value_or("unknown"));
         publish_status("aborted");
       }
       return;
     }
 
-    send_trajectory(*command.joint_trajectory);
+    send_trajectory(*command.joint_trajectory, command.phase_id.value_or("unknown"));
   }
 
   void publish_gripper_if_needed(const std::optional<bool> & gripper_closed)
@@ -86,15 +101,22 @@ private:
     gripper_pub_->publish(message);
   }
 
-  void send_trajectory(const franka_ros2_control::ParsedTrajectory & trajectory)
+  void send_trajectory(
+    const franka_ros2_control::ParsedTrajectory & trajectory, const std::string & phase)
   {
     if (goal_handle_) {
+      ++cancel_count_;
+      log_metric("trajectory_cancel_requested", phase, cancel_count_);
       action_client_->async_cancel_goal(goal_handle_);
       goal_handle_.reset();
+      ++trajectory_replacement_count_;
+      log_metric("trajectory_replaced", phase, trajectory_replacement_count_);
     }
 
+    log_metric("trajectory_started", phase);
     if (!action_client_->wait_for_action_server(std::chrono::seconds(1))) {
       RCLCPP_WARN(get_logger(), "JTC action server not available");
+      log_metric("trajectory_aborted", phase);
       publish_status("aborted");
       return;
     }
@@ -113,16 +135,17 @@ private:
 
     rclcpp_action::Client<FollowJointTrajectory>::SendGoalOptions options;
     options.goal_response_callback =
-      [this](std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle) {
+      [this, phase](std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle) {
         if (!goal_handle) {
           RCLCPP_WARN(get_logger(), "JTC goal rejected");
+          log_metric("trajectory_aborted", phase);
           publish_status("aborted");
           return;
         }
         goal_handle_ = std::move(goal_handle);
       };
     options.result_callback =
-      [this](const GoalHandleFollowJointTrajectory::WrappedResult & result) {
+      [this, phase](const GoalHandleFollowJointTrajectory::WrappedResult & result) {
         goal_handle_.reset();
         switch (result.code) {
           case rclcpp_action::ResultCode::SUCCEEDED:
@@ -132,6 +155,7 @@ private:
             return;
           default:
             RCLCPP_WARN(get_logger(), "JTC goal ended with code=%d", static_cast<int>(result.code));
+            log_metric("trajectory_aborted", phase);
             publish_status("aborted");
             return;
         }
@@ -147,12 +171,21 @@ private:
     status_pub_->publish(message);
   }
 
+  void log_metric(
+    const std::string & event, const std::string & phase,
+    const std::optional<std::size_t> cumulative_count = std::nullopt)
+  {
+    RCLCPP_INFO(get_logger(), "%s", metric_line(event, phase, cumulative_count).c_str());
+  }
+
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr gripper_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr motion_command_sub_;
   rclcpp_action::Client<FollowJointTrajectory>::SharedPtr action_client_;
   std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle_;
   std::optional<bool> gripper_closed_;
+  std::size_t cancel_count_{0};
+  std::size_t trajectory_replacement_count_{0};
 };
 
 }  // namespace

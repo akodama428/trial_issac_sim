@@ -22,6 +22,7 @@ struct ParsedTrajectory
 struct ParsedMotionCommand
 {
   std::string command_name;
+  std::optional<std::string> phase_id;
   std::optional<bool> gripper_closed;
   bool has_phase_motion_plan{false};
   std::optional<ParsedTrajectory> joint_trajectory;

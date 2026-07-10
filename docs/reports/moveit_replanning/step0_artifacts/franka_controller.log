@@ -1,0 +1,113 @@
+[run_ros2_components]   robot_state_publisher 起動中...
+[run_ros2_components]   robot_state_publisher PID=203
+[INFO] [1783688067.833340671] [robot_state_publisher]: Robot initialized
+[run_ros2_components]   ros2_control_node 起動中...
+[run_ros2_components]   ros2_control_node PID=224
+[INFO] [1783688068.848120079] [controller_manager]: Using Steady (Monotonic) clock for triggering controller manager cycles.
+[INFO] [1783688068.850526237] [controller_manager]: Subscribing to '/robot_description' topic for robot description.
+[INFO] [1783688068.851882974] [controller_manager]: update rate is 100 Hz
+[INFO] [1783688068.851896305] [controller_manager]: Overruns handling is : enabled
+[INFO] [1783688068.851900774] [controller_manager]: Spawning controller_manager RT thread with scheduler priority: 50
+[WARN] [1783688068.851974784] [controller_manager]: Could not enable FIFO RT scheduling policy: with error number <1>(Operation not permitted). See [https://control.ros.org/master/doc/ros2_control/controller_manager/doc/userdoc.html] for details on how to enable realtime scheduling.
+[INFO] [1783688069.028042049] [controller_manager]: Received robot description from topic.
+[INFO] [1783688069.028075444] [controller_manager]: Enforcing command limits is disabled. Command limits from URDF will be ignored.
+[INFO] [1783688069.029437311] [controller_manager]: Loading hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688069.030821324] [controller_manager]: Loaded hardware 'IsaacSimHardwareInterface' from plugin 'franka_ros2_control/IsaacSimHardwareInterface'
+[INFO] [1783688069.030867936] [controller_manager]: Initialize hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688069.034989740] [controller_manager]: Successful initialization of hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688069.035195072] [controller_manager]: Activating component 'IsaacSimHardwareInterface'.
+[INFO] [1783688069.035208684] [resource_manager]: 'configure' hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688069.040713543] [IsaacSimHardwareInterface]: Configured: subscribing to '/isaac_joint_states' and '/tomato_harvest/gripper_closed', publishing to '/isaac_joint_commands'
+[INFO] [1783688069.040728910] [resource_manager]: Successful 'configure' of hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688069.040736801] [resource_manager]: 'activate' hardware 'IsaacSimHardwareInterface'
+[WARN] [1783688074.059776071] [IsaacSimHardwareInterface]: No joint state received from Isaac Sim within 5s — using zeros.
+[INFO] [1783688074.059810843] [resource_manager]: Successful 'activate' of hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688074.059876075] [controller_manager]: Registering statistics for : IsaacSimHardwareInterface
+[INFO] [1783688074.059955313] [controller_manager]: Resource Manager has been successfully initialized. Starting Controller Manager services...
+[INFO] [1783688075.073459282] [spawner_joint_state_broadcaster]: waiting for service /controller_manager/list_controllers to become available...
+[INFO] [1783688075.324802966] [controller_manager]: Loading controller : 'joint_state_broadcaster' of type 'joint_state_broadcaster/JointStateBroadcaster'
+[INFO] [1783688075.324853588] [controller_manager]: Loading controller 'joint_state_broadcaster'
+[INFO] [1783688075.326575771] [controller_manager]: Controller 'joint_state_broadcaster' node arguments: --ros-args --params-file /workspace/tomato-harvest/src/franka_ros2_control/config/franka_controllers.yaml
+[INFO] [1783688075.343230902] [spawner_joint_state_broadcaster]: Loaded joint_state_broadcaster
+[INFO] [1783688075.343871857] [controller_manager]: Configuring controller: 'joint_state_broadcaster'
+[INFO] [1783688075.343935926] [joint_state_broadcaster]: 'joints' or 'interfaces' parameter is empty. All available state interfaces will be published
+[INFO] [1783688075.353369403] [controller_manager]: Activating controllers: [ joint_state_broadcaster ]
+[INFO] [1783688075.362391375] [controller_manager]: Successfully switched controllers!
+[INFO] [1783688075.373191700] [spawner_joint_state_broadcaster]: Configured and activated joint_state_broadcaster
+[INFO] [1783688076.195820676] [spawner_joint_trajectory_controller]: waiting for service /controller_manager/list_controllers to become available...
+[INFO] [1783688076.447206814] [controller_manager]: Loading controller : 'joint_trajectory_controller' of type 'joint_trajectory_controller/JointTrajectoryController'
+[INFO] [1783688076.447238786] [controller_manager]: Loading controller 'joint_trajectory_controller'
+[INFO] [1783688076.449147239] [controller_manager]: Controller 'joint_trajectory_controller' node arguments: --ros-args --params-file /workspace/tomato-harvest/src/franka_ros2_control/config/franka_controllers.yaml
+[INFO] [1783688076.463376652] [spawner_joint_trajectory_controller]: Loaded joint_trajectory_controller
+[INFO] [1783688076.463986574] [controller_manager]: Configuring controller: 'joint_trajectory_controller'
+[WARN] [1783688076.464049323] [joint_trajectory_controller]: [deprecated] 'open_loop_control' parameter is deprecated. Instead, set the feedback gains to zero and use 'interpolate_from_desired_state' parameter
+[INFO] [1783688076.464178607] [joint_trajectory_controller]: No specific joint names are used for command interfaces. Using 'joints' parameter.
+[INFO] [1783688076.464196997] [joint_trajectory_controller]: Command interfaces are [position velocity] and state interfaces are [position velocity].
+[INFO] [1783688076.464213443] [joint_trajectory_controller]: Using 'splines' interpolation method.
+[INFO] [1783688076.465769921] [joint_trajectory_controller]: Action status changes will be monitored at 20.00 Hz.
+[INFO] [1783688076.468693536] [joint_trajectory_controller]: No scaling interface set. This controller will not read speed scaling from the hardware.
+[INFO] [1783688076.473286727] [controller_manager]: Activating controllers: [ joint_trajectory_controller ]
+[INFO] [1783688076.482471516] [controller_manager]: Successfully switched controllers!
+[INFO] [1783688076.493267599] [spawner_joint_trajectory_controller]: Configured and activated joint_trajectory_controller
+[run_ros2_components]   motion_command_executor_node 起動中...
+[run_ros2_components]   motion_command_executor_node PID=473
+[INFO] [1783688111.532343116] [IsaacSimHardwareInterface]: Initial joint state received from Isaac Sim. Reseeding command positions.
+[INFO] [1783688113.109458112] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_pregrasp"}
+[INFO] [1783688113.110053054] [joint_trajectory_controller]: Received new action goal
+[INFO] [1783688113.110103834] [joint_trajectory_controller]: Accepted new action goal
+[INFO] [1783688118.772368779] [joint_trajectory_controller]: Goal reached, success!
+[INFO] [1783688118.812922245] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_grasp"}
+[INFO] [1783688118.813183591] [joint_trajectory_controller]: Received new action goal
+[INFO] [1783688118.813218304] [joint_trajectory_controller]: Accepted new action goal
+[INFO] [1783688119.722346864] [joint_trajectory_controller]: Goal reached, success!
+[INFO] [1783688119.764704115] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_grasp"}
+[INFO] [1783688119.764939690] [joint_trajectory_controller]: Received new action goal
+[ERROR] [1783688119.764970715] [joint_trajectory_controller]: Joints on incoming trajectory don't match the controller joints.
+[WARN] [1783688119.765125162] [motion_command_executor_node]: JTC goal rejected
+[INFO] [1783688119.765149375] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_aborted","phase":"moving_to_grasp"}
+[INFO] [1783688119.855477372] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_grasp"}
+[INFO] [1783688119.855726235] [joint_trajectory_controller]: Received new action goal
+[ERROR] [1783688119.855752129] [joint_trajectory_controller]: Joints on incoming trajectory don't match the controller joints.
+[WARN] [1783688119.855817240] [motion_command_executor_node]: JTC goal rejected
+[INFO] [1783688119.855831731] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_aborted","phase":"moving_to_grasp"}
+[INFO] [1783688119.956062990] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_grasp"}
+[INFO] [1783688119.956335833] [joint_trajectory_controller]: Received new action goal
+[ERROR] [1783688119.956361380] [joint_trajectory_controller]: Joints on incoming trajectory don't match the controller joints.
+[WARN] [1783688119.956433115] [motion_command_executor_node]: JTC goal rejected
+[INFO] [1783688119.956449282] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_aborted","phase":"moving_to_grasp"}
+[INFO] [1783688120.157585359] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_grasp"}
+[INFO] [1783688120.157868353] [joint_trajectory_controller]: Received new action goal
+[INFO] [1783688120.157898297] [joint_trajectory_controller]: Accepted new action goal
+[INFO] [1783688120.171569204] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_cancel_requested","phase":"pull_to_detach","cumulative_count":1}
+[INFO] [1783688120.171646243] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_replaced","phase":"pull_to_detach","cumulative_count":1}
+[INFO] [1783688120.171655982] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"pull_to_detach"}
+[INFO] [1783688120.171836188] [joint_trajectory_controller]: Got request to cancel goal
+[INFO] [1783688120.171869489] [joint_trajectory_controller]: Canceling active action goal because cancel callback received.
+[INFO] [1783688120.171979374] [joint_trajectory_controller]: Received new action goal
+[INFO] [1783688120.172001332] [joint_trajectory_controller]: Accepted new action goal
+[INFO] [1783688120.358206083] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_cancel_requested","phase":"moving_to_place","cumulative_count":2}
+[INFO] [1783688120.358275868] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_replaced","phase":"moving_to_place","cumulative_count":2}
+[INFO] [1783688120.358284216] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_place"}
+[INFO] [1783688120.358376825] [joint_trajectory_controller]: Got request to cancel goal
+[INFO] [1783688120.358415302] [joint_trajectory_controller]: Canceling active action goal because cancel callback received.
+[INFO] [1783688120.358562881] [joint_trajectory_controller]: Received new action goal
+[INFO] [1783688120.358585132] [joint_trajectory_controller]: Accepted new action goal
+[INFO] [1783688120.729702380] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_cancel_requested","phase":"moving_to_place","cumulative_count":3}
+[INFO] [1783688120.729787187] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_replaced","phase":"moving_to_place","cumulative_count":3}
+[INFO] [1783688120.729798525] [motion_command_executor_node]: MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_place"}
+[INFO] [1783688120.730174305] [joint_trajectory_controller]: Received new action goal
+[INFO] [1783688120.730208586] [joint_trajectory_controller]: Accepted new action goal
+[INFO] [1783688120.730387317] [joint_trajectory_controller]: Got request to cancel goal
+[INFO] [1783688124.331878235] [rclcpp]: signal_handler(SIGINT/SIGTERM)
+[INFO] [1783688124.331923565] [controller_manager]: Shutdown request received....
+[INFO] [1783688124.331940906] [controller_manager]: Shutting down all controllers in the controller manager.
+[INFO] [1783688124.331954927] [controller_manager]: Deactivating controller 'joint_trajectory_controller'
+[INFO] [1783688124.332061302] [controller_manager]: Shutting down controller 'joint_trajectory_controller'
+[INFO] [1783688124.332177023] [controller_manager]: Deactivating controller 'joint_state_broadcaster'
+[INFO] [1783688124.332202824] [controller_manager]: Shutting down controller 'joint_state_broadcaster'
+[INFO] [1783688124.332396144] [resource_manager]: 'deactivate' hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688124.332416587] [resource_manager]: Successful 'deactivate' of hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688124.332419161] [resource_manager]: 'shutdown' hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688124.332421186] [resource_manager]: Successful 'shutdown' of hardware 'IsaacSimHardwareInterface'
+[INFO] [1783688124.332444638] [controller_manager]: Shutting down the controller manager.
+[INFO] [1783688124.335933615] [rclcpp]: signal_handler(SIGINT/SIGTERM)

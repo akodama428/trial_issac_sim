@@ -48,6 +48,17 @@ def _make_joint_state() -> JointStateSnapshot:
     )
 
 
+def _make_arm_and_finger_joint_state() -> JointStateSnapshot:
+    return JointStateSnapshot(
+        joint_names=(
+            "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+            "panda_joint5", "panda_joint6", "panda_joint7",
+            "panda_finger_joint1", "panda_finger_joint2",
+        ),
+        positions_rad=(0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7, 0.02, 0.02),
+    )
+
+
 class TestMotionCommandLogic(unittest.TestCase):
     def setUp(self) -> None:
         from tomato_harvest_sim.robot.execute_manager import build_motion_command
@@ -85,6 +96,17 @@ class TestMotionCommandLogic(unittest.TestCase):
         cmd = self.build(HarvestTaskPhase.RETURNING_HOME, _make_plan(), _make_joint_state())
         self.assertFalse(cmd.gripper_closed)
 
+    def test_returning_home_start_point_excludes_finger_positions(self) -> None:
+        cmd = self.build(
+            HarvestTaskPhase.RETURNING_HOME,
+            _make_plan(),
+            _make_arm_and_finger_joint_state(),
+        )
+        traj = cmd.phase_motion_plan.joint_trajectory
+
+        self.assertEqual(len(traj.joint_names), 7)
+        self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7))
+
     def test_all_motion_phases_have_non_null_trajectory(self) -> None:
         motion_phases = [
             HarvestTaskPhase.MOVING_TO_PREGRASP,
@@ -108,6 +130,20 @@ class TestMotionCommandLogic(unittest.TestCase):
         traj = cmd.phase_motion_plan.joint_trajectory
         self.assertEqual(len(traj.points), 1)
         self.assertEqual(traj.points[0].positions_rad, joint_state.positions_rad)
+
+    def test_stop_trajectory_excludes_finger_joints_from_arm_controller_goal(self) -> None:
+        cmd = self.build(
+            HarvestTaskPhase.AT_GRASP,
+            _make_plan(),
+            _make_arm_and_finger_joint_state(),
+        )
+        traj = cmd.phase_motion_plan.joint_trajectory
+
+        self.assertEqual(
+            traj.joint_names,
+            tuple(f"panda_joint{index}" for index in range(1, 8)),
+        )
+        self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7))
 
     def test_grasp_evaluation_uses_stop_trajectory(self) -> None:
         joint_state = _make_joint_state()

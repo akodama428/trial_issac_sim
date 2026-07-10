@@ -14,14 +14,37 @@ from tomato_harvest_sim.msg.contracts import (
     PhaseId,
     PhaseMotionPlan,
 )
+from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
+
+
+def _select_arm_joint_positions(joint_state: JointStateSnapshot) -> tuple[tuple[str, ...], tuple[float, ...]]:
+    """arm JTC が管理する関節だけを名前で選択する。
+
+    Args:
+        joint_state: arm と gripper を含み得る最新関節状態。
+
+    Returns:
+        controller 順に並べた関節名と位置。
+
+    Raises:
+        ValueError: 関節名と位置の数が不一致、または arm 関節がない場合。
+    """
+    if len(joint_state.joint_names) != len(joint_state.positions_rad):
+        raise ValueError("joint state names and positions must have the same length")
+    positions_by_name = dict(zip(joint_state.joint_names, joint_state.positions_rad, strict=True))
+    arm_joint_names = tuple(name for name in DEFAULT_JOINT_NAMES if name in positions_by_name)
+    if not arm_joint_names:
+        raise ValueError("joint state has no arm controller joints")
+    return arm_joint_names, tuple(positions_by_name[name] for name in arm_joint_names)
 
 
 def _stop_trajectory(joint_state: JointStateSnapshot) -> JointTrajectory:
     """現在関節位置を単一ウェイポイントとする停止軌道を返す。"""
+    joint_names, positions_rad = _select_arm_joint_positions(joint_state)
     return JointTrajectory(
-        joint_names=joint_state.joint_names,
+        joint_names=joint_names,
         points=(JointTrajectoryPoint(
-            positions_rad=joint_state.positions_rad,
+            positions_rad=positions_rad,
             time_from_start_sec=0.0,
         ),),
     )
@@ -66,16 +89,19 @@ def build_motion_command(
                                   plan.place_pose, False, current_joints)
 
     if phase is HarvestTaskPhase.RETURNING_HOME:
-        from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
+        joint_names, current_positions = _select_arm_joint_positions(current_joints)
+        home_positions_by_name = dict(zip(
+            DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD, strict=True
+        ))
         home_trajectory = JointTrajectory(
-            joint_names=DEFAULT_JOINT_NAMES,
+            joint_names=joint_names,
             points=(
                 JointTrajectoryPoint(
-                    positions_rad=current_joints.positions_rad,
+                    positions_rad=current_positions,
                     time_from_start_sec=0.0,
                 ),
                 JointTrajectoryPoint(
-                    positions_rad=DEFAULT_JOINT_POSITIONS_RAD,
+                    positions_rad=tuple(home_positions_by_name[name] for name in joint_names),
                     time_from_start_sec=10.0,
                 ),
             ),
