@@ -268,6 +268,7 @@ def main() -> None:
                 ),
                 phase=self._phase.value if self._phase is not None else None,
                 producer_kind=candidate.producer_kind.value,
+                producer_instance_id=candidate.producer_instance_id,
                 plan_age_sec=(
                     round(time.time() - candidate.generated_at_sec, 3)
                     if candidate.generated_at_sec is not None else None

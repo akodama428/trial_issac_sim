@@ -19,8 +19,10 @@ _POSE = Pose3D(x=0.1, y=0.2, z=0.3, roll=0.0, pitch=0.0, yaw=0.0)
 def make_plan(
     *,
     plan_revision: int = 0,
+    generated_at_sec: float | None = 100.0,
     planned_from_phase: HarvestTaskPhase | None = None,
     producer_kind: PlanProducerKind = PlanProducerKind.GLOBAL_PLANNER,
+    producer_instance_id: str | None = "global-instance-a",
 ) -> HarvestMotionPlan:
     return HarvestMotionPlan(
         planner_name="moveit2_service_bridge",
@@ -30,8 +32,10 @@ def make_plan(
         pull_pose=_POSE,
         place_pose=_POSE,
         plan_revision=plan_revision,
+        generated_at_sec=generated_at_sec,
         planned_from_phase=planned_from_phase,
         producer_kind=producer_kind,
+        producer_instance_id=producer_instance_id,
     )
 
 
@@ -76,6 +80,42 @@ class TestRevisionRule(unittest.TestCase):
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_stale_revision")
 
+    def test_new_planner_instance_can_restart_revision_from_one(self) -> None:
+        decision = evaluate_plan_adoption(
+            candidate=make_plan(
+                plan_revision=1,
+                generated_at_sec=200.0,
+                planned_from_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+                producer_instance_id="global-instance-b",
+            ),
+            current_plan=make_plan(
+                plan_revision=20,
+                generated_at_sec=100.0,
+                producer_instance_id="global-instance-a",
+            ),
+            current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+        self.assertTrue(decision.adopted)
+        self.assertEqual(decision.reason, "adopted_newer_producer_instance")
+
+    def test_delayed_plan_from_old_planner_instance_is_rejected(self) -> None:
+        decision = evaluate_plan_adoption(
+            candidate=make_plan(
+                plan_revision=21,
+                generated_at_sec=100.0,
+                planned_from_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+                producer_instance_id="global-instance-a",
+            ),
+            current_plan=make_plan(
+                plan_revision=1,
+                generated_at_sec=200.0,
+                producer_instance_id="global-instance-b",
+            ),
+            current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_stale_producer_instance")
+
 
 class TestPhaseConsistencyRule(unittest.TestCase):
     def test_replan_bound_to_passed_phase_is_rejected(self) -> None:
@@ -108,19 +148,29 @@ class TestPhaseConsistencyRule(unittest.TestCase):
         )
         self.assertTrue(decision.adopted)
 
-    def test_phase_unknown_on_consumer_side_does_not_reject(self) -> None:
+    def test_phase_bound_plan_is_rejected_until_consumer_phase_is_known(self) -> None:
         decision = evaluate_plan_adoption(
             candidate=make_plan(plan_revision=1,
                                 planned_from_phase=HarvestTaskPhase.MOVING_TO_GRASP),
             current_plan=None,
             current_phase=None,
         )
-        self.assertTrue(decision.adopted)
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_current_phase_unknown")
+
+    def test_versioned_plan_without_planned_phase_is_rejected(self) -> None:
+        decision = evaluate_plan_adoption(
+            candidate=make_plan(plan_revision=1, planned_from_phase=None),
+            current_plan=None,
+            current_phase=HarvestTaskPhase.TARGET_FOUND,
+        )
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_missing_plan_metadata")
 
 
 class TestLegacyAndProducerRule(unittest.TestCase):
     def test_legacy_plan_without_metadata_keeps_old_behavior(self) -> None:
-        """旧契約 (revision 0, phase なし) は従来どおり常に採用する。"""
+        """legacy同士では従来どおり到着planを採用する。"""
         decision = evaluate_plan_adoption(
             candidate=make_plan(),
             current_plan=make_plan(),
@@ -128,6 +178,15 @@ class TestLegacyAndProducerRule(unittest.TestCase):
         )
         self.assertTrue(decision.adopted)
         self.assertEqual(decision.reason, "adopted_legacy_contract")
+
+    def test_legacy_plan_cannot_overwrite_versioned_plan(self) -> None:
+        decision = evaluate_plan_adoption(
+            candidate=make_plan(plan_revision=0),
+            current_plan=make_plan(plan_revision=10),
+            current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_legacy_after_versioned")
 
     def test_unknown_producer_kind_is_rejected(self) -> None:
         decision = evaluate_plan_adoption(
@@ -139,6 +198,20 @@ class TestLegacyAndProducerRule(unittest.TestCase):
         )
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_unknown_producer")
+
+    def test_local_planner_is_rejected_until_arbitration_is_implemented(self) -> None:
+        decision = evaluate_plan_adoption(
+            candidate=make_plan(
+                plan_revision=1,
+                planned_from_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+                producer_kind=PlanProducerKind.LOCAL_PLANNER,
+                producer_instance_id="local-instance-a",
+            ),
+            current_plan=None,
+            current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_unsupported_producer")
 
 
 if __name__ == "__main__":

@@ -222,10 +222,12 @@ class HarvestMotionPlan:
     # generated_at_sec: 生成時刻 (epoch 秒)。観測用でありノード間の採用判定には使わない。
     # planned_from_phase: 計画起点 phase。実行 phase 起点の replan は phase-bound になる。
     # producer_kind: 生成した producer 種別。plan producer 複線化 (Step 5) の識別子。
+    # producer_instance_id: producer process の起動単位。再起動による revision reset を識別する。
     plan_revision: int = 0
     generated_at_sec: float | None = None
     planned_from_phase: HarvestTaskPhase | None = None
     producer_kind: PlanProducerKind = PlanProducerKind.GLOBAL_PLANNER
+    producer_instance_id: str | None = None
 
 
 @dataclass(frozen=True)

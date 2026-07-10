@@ -119,6 +119,7 @@ class TestHarvestMotionPlanContract(unittest.TestCase):
             generated_at_sec=1234.5,
             planned_from_phase=HarvestTaskPhase.MOVING_TO_GRASP,
             producer_kind=PlanProducerKind.GLOBAL_PLANNER,
+            producer_instance_id="global-instance-a",
         )
         restored = harvest_motion_plan_from_json(harvest_motion_plan_to_json(plan))
 
@@ -126,6 +127,7 @@ class TestHarvestMotionPlanContract(unittest.TestCase):
         self.assertAlmostEqual(restored.generated_at_sec, 1234.5)
         self.assertIs(restored.planned_from_phase, HarvestTaskPhase.MOVING_TO_GRASP)
         self.assertIs(restored.producer_kind, PlanProducerKind.GLOBAL_PLANNER)
+        self.assertEqual(restored.producer_instance_id, "global-instance-a")
 
     def test_old_contract_json_parses_with_legacy_defaults(self) -> None:
         """旧契約 JSON (メタデータなし) は legacy 既定値で読める。"""
@@ -139,7 +141,10 @@ class TestHarvestMotionPlanContract(unittest.TestCase):
         old_json_dict = harvest_motion_plan_to_dict(
             HarvestMotionPlan(**self._minimal_plan_kwargs())
         )
-        for new_field in ("plan_revision", "generated_at_sec", "planned_from_phase", "producer_kind"):
+        for new_field in (
+            "plan_revision", "generated_at_sec", "planned_from_phase",
+            "producer_kind", "producer_instance_id",
+        ):
             old_json_dict.pop(new_field, None)
 
         restored = harvest_motion_plan_from_json(json.dumps(old_json_dict))
@@ -148,6 +153,7 @@ class TestHarvestMotionPlanContract(unittest.TestCase):
         self.assertIsNone(restored.generated_at_sec)
         self.assertIsNone(restored.planned_from_phase)
         self.assertIs(restored.producer_kind, PlanProducerKind.GLOBAL_PLANNER)
+        self.assertIsNone(restored.producer_instance_id)
 
     def test_unknown_metadata_values_degrade_without_error(self) -> None:
         """未知の producer_kind / phase 値はエラーではなく安全側の値へ落ちる。"""

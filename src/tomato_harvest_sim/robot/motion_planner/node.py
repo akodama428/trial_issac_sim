@@ -11,6 +11,7 @@ from tomato_harvest_sim.robot.motion_planner.observability import metric_line
 
 def main() -> None:
     import json
+    import uuid
     import rclpy
     from rclpy.node import Node
     from sensor_msgs.msg import JointState
@@ -52,6 +53,7 @@ def main() -> None:
             self._joint_state: JointStateSnapshot | None = None
             self._scene_snapshot = None  # 実際の SceneSnapshot (tray_pose 等を含む)
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
+            self._producer_instance_id = uuid.uuid4().hex
 
             self.create_subscription(String, PHASE_TOPIC, self._on_phase, 10)
             self.create_subscription(String, TARGET_ESTIMATE_TOPIC, self._on_estimate, 10)
@@ -149,12 +151,14 @@ def main() -> None:
                 generated_at_sec=time.time(),
                 planned_from_phase=self._phase,
                 producer_kind=PlanProducerKind.GLOBAL_PLANNER,
+                producer_instance_id=self._producer_instance_id,
             )
             self.get_logger().info(metric_line(
                 "plan_published",
                 plan_revision=plan.plan_revision,
                 planned_from_phase=phase,
                 producer_kind=plan.producer_kind.value,
+                producer_instance_id=plan.producer_instance_id,
                 trigger=trigger,
             ))
             out = String()

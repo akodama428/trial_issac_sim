@@ -250,6 +250,7 @@ def harvest_motion_plan_to_dict(plan: HarvestMotionPlan) -> dict[str, object]:
         "generated_at_sec": plan.generated_at_sec,
         "planned_from_phase": plan.planned_from_phase.value if plan.planned_from_phase is not None else None,
         "producer_kind": plan.producer_kind.value,
+        "producer_instance_id": plan.producer_instance_id,
     }
 
 
@@ -298,6 +299,10 @@ def harvest_motion_plan_from_dict(data: dict[str, object]) -> HarvestMotionPlan:
         generated_at_sec=float(data["generated_at_sec"]) if data.get("generated_at_sec") is not None else None,
         planned_from_phase=_planned_from_phase_from_value(data.get("planned_from_phase")),
         producer_kind=_producer_kind_from_value(data.get("producer_kind")),
+        producer_instance_id=(
+            str(data["producer_instance_id"])
+            if data.get("producer_instance_id") is not None else None
+        ),
     )
 
 

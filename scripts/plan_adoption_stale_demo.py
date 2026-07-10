@@ -82,6 +82,7 @@ def _plan_for(arrival: PlanArrival) -> HarvestMotionPlan:
         generated_at_sec=arrival.arrival_time_sec,
         planned_from_phase=arrival.planned_from_phase,
         producer_kind=PlanProducerKind.GLOBAL_PLANNER,
+        producer_instance_id="global-instance-a",
     )
 
 
@@ -107,6 +108,7 @@ def replay_scenario() -> list[dict[str, object]]:
             "label": arrival.label,
             "arrival_time_sec": arrival.arrival_time_sec,
             "plan_revision": arrival.plan_revision,
+            "producer_instance_id": candidate.producer_instance_id,
             "planned_from_phase": arrival.planned_from_phase.value,
             "consumer_phase": arrival.consumer_phase.value,
             "note": arrival.note,
