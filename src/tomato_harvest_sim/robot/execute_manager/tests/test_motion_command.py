@@ -20,6 +20,17 @@ def _make_trajectory() -> JointTrajectory:
     )
 
 
+def _make_arm_and_finger_trajectory() -> JointTrajectory:
+    return JointTrajectory(
+        joint_names=("panda_joint1", "panda_finger_joint1", "panda_joint2"),
+        points=(JointTrajectoryPoint(
+            positions_rad=(0.1, 0.02, 0.2),
+            time_from_start_sec=1.0,
+            velocities_rad_s=(0.3, 0.01, 0.4),
+        ),),
+    )
+
+
 def _make_plan(
     pregrasp: JointTrajectory | None = None,
     grasp: JointTrajectory | None = None,
@@ -45,6 +56,17 @@ def _make_joint_state() -> JointStateSnapshot:
     return JointStateSnapshot(
         joint_names=("panda_joint1",),
         positions_rad=(0.5,),
+    )
+
+
+def _make_arm_and_finger_joint_state() -> JointStateSnapshot:
+    return JointStateSnapshot(
+        joint_names=(
+            "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+            "panda_joint5", "panda_joint6", "panda_joint7",
+            "panda_finger_joint1", "panda_finger_joint2",
+        ),
+        positions_rad=(0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7, 0.02, 0.02),
     )
 
 
@@ -85,6 +107,17 @@ class TestMotionCommandLogic(unittest.TestCase):
         cmd = self.build(HarvestTaskPhase.RETURNING_HOME, _make_plan(), _make_joint_state())
         self.assertFalse(cmd.gripper_closed)
 
+    def test_returning_home_start_point_excludes_finger_positions(self) -> None:
+        cmd = self.build(
+            HarvestTaskPhase.RETURNING_HOME,
+            _make_plan(),
+            _make_arm_and_finger_joint_state(),
+        )
+        traj = cmd.phase_motion_plan.joint_trajectory
+
+        self.assertEqual(len(traj.joint_names), 7)
+        self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7))
+
     def test_all_motion_phases_have_non_null_trajectory(self) -> None:
         motion_phases = [
             HarvestTaskPhase.MOVING_TO_PREGRASP,
@@ -109,6 +142,20 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.assertEqual(len(traj.points), 1)
         self.assertEqual(traj.points[0].positions_rad, joint_state.positions_rad)
 
+    def test_stop_trajectory_excludes_finger_joints_from_arm_controller_goal(self) -> None:
+        cmd = self.build(
+            HarvestTaskPhase.AT_GRASP,
+            _make_plan(),
+            _make_arm_and_finger_joint_state(),
+        )
+        traj = cmd.phase_motion_plan.joint_trajectory
+
+        self.assertEqual(
+            traj.joint_names,
+            tuple(f"panda_joint{index}" for index in range(1, 8)),
+        )
+        self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7))
+
     def test_grasp_evaluation_uses_stop_trajectory(self) -> None:
         joint_state = _make_joint_state()
         cmd = self.build(HarvestTaskPhase.GRASP_EVALUATION, _make_plan(), joint_state)
@@ -128,6 +175,29 @@ class TestMotionCommandLogic(unittest.TestCase):
         plan = _make_plan(pregrasp=pregrasp_traj)
         cmd = self.build(HarvestTaskPhase.MOVING_TO_PREGRASP, plan, _make_joint_state())
         self.assertIs(cmd.phase_motion_plan.joint_trajectory, pregrasp_traj)
+
+    def test_every_planned_phase_excludes_finger_joints_at_command_boundary(self) -> None:
+        mixed_trajectory = _make_arm_and_finger_trajectory()
+        plan = _make_plan(
+            pregrasp=mixed_trajectory,
+            grasp=mixed_trajectory,
+            pull=mixed_trajectory,
+            place=mixed_trajectory,
+        )
+        phases = (
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.DETACHING,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+
+        for phase in phases:
+            with self.subTest(phase=phase):
+                command = self.build(phase, plan, _make_arm_and_finger_joint_state())
+                trajectory = command.phase_motion_plan.joint_trajectory
+                self.assertEqual(trajectory.joint_names, ("panda_joint1", "panda_joint2"))
+                self.assertEqual(trajectory.points[0].positions_rad, (0.1, 0.2))
+                self.assertEqual(trajectory.points[0].velocities_rad_s, (0.3, 0.4))
 
     def test_moving_to_grasp_uses_plan_trajectory(self) -> None:
         grasp_traj = _make_trajectory()

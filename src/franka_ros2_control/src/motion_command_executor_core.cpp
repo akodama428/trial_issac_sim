@@ -100,6 +100,7 @@ ParsedMotionCommand parse_motion_command_json(const std::string & json)
   }
 
   command.has_phase_motion_plan = true;
+  command.phase_id = require_string(phase_motion_plan, "phase_id");
 
   const YAML::Node joint_trajectory = phase_motion_plan["joint_trajectory"];
   if (!joint_trajectory || joint_trajectory.IsNull()) {

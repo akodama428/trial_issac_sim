@@ -1,0 +1,145 @@
+[run_ros2_components]   tomato_detector_node 起動中...
+[run_ros2_components]   tomato_detector_node PID=468
+[run_ros2_components]   behavior_planner_node 起動中...
+[run_ros2_components]   behavior_planner_node PID=469
+[run_ros2_components]   trajectory_planner_node 起動中...
+[run_ros2_components]   trajectory_planner_node PID=470
+[run_ros2_components]   trajectory_monitor_node 起動中...
+[run_ros2_components]   trajectory_monitor_node PID=471
+[run_ros2_components]   motion_command_node 起動中...
+[run_ros2_components]   motion_command_node PID=472
+[INFO] [1783688081.613758072] [behavior_planner_node]: Phase: idle → detecting
+[INFO] [1783688112.716672168] [behavior_planner_node]: Phase: detecting → target_found
+[MoveItBridge] motion plan response points=58 has_velocities=True first_vel=(-0.002856768544166345, -0.0015, 0.00079442394549647, -0.0014439478584702885, 0.0015924088042997627, 0.000682885029531506, -4.476974665357062e-05) last_vel=(-1.214130614427596e-15, -6.375020914313692e-16, 3.376312844914399e-16, -6.136798531284364e-16, 6.767759621032157e-16, 2.902270896890047e-16, -1.9027204749669227e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=10 has_velocities=True first_vel=(-0.0010103971023873255, -5.250711779613766e-05, 0.001235159642317454, 0.0015902139335058033, 0.003, 0.0024471647491185336, 0.0024667698320297816) last_vel=(3.0504435460271525e-17, 1.5852183089527114e-18, -3.729013820722678e-17, -4.800941945304294e-17, -9.057162393339276e-17, -7.388122845340641e-17, -7.447311651894658e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=9 has_velocities=True first_vel=(0.0010867086687368747, -0.0006903443406507604, -0.0011700242392488822, -0.0025, -0.001166916431293249, -0.0014894214007771525, -0.0008481590811961547) last_vel=(2.8395653554585204e-17, -1.8038669695413993e-17, -3.0572686041784786e-17, -6.532489887006841e-17, -3.0491479145621055e-17, -3.891852095227326e-17, -2.21623624819476e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=17 has_velocities=True first_vel=(-0.00158925570412367, 0.0015, 0.0010335405506910731, 0.0005079980565626095, -0.0017017685065939033, 0.0005304813801886999, -0.0021542500618015217) last_vel=(-4.452029265104895e-17, 4.201994606865162e-17, 2.8952878799868865e-17, 1.423070062649376e-17, -4.7672147245603656e-17, 1.4860532657301998e-17, -6.034764761019279e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=13 has_velocities=True first_vel=(0.0008470640390372018, -0.0015000000000000002, -0.00021577072387803507, -0.0023272725331674087, -0.0004593607155330296, 0.001152460274168772, -0.0017603808764518653) last_vel=(5.314680477094425e-17, -9.41135539728837e-17, -1.3537966444975733e-17, -1.4601859277324015e-16, -2.882137966289345e-17, 7.23080881430579e-17, -1.104504670858564e-16) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[INFO] [1783688113.104789960] [trajectory_planner_node]: MOVEIT_METRIC {"event": "planner_completed", "latency_ms": 367.508, "phase": "target_found", "success": true, "trigger": "target_found"}
+[INFO] [1783688113.106504770] [behavior_planner_node]: Phase: target_found → moving_to_pregrasp
+[INFO] [1783688118.811294999] [behavior_planner_node]: Phase: moving_to_pregrasp → moving_to_grasp
+[INFO] [1783688119.764180092] [behavior_planner_node]: Phase: moving_to_grasp → at_grasp
+[INFO] [1783688119.766071075] [trajectory_planner_node]: MOVEIT_METRIC {"event": "phase_abort_observed", "phase": "at_grasp"}
+[MoveItBridge] motion plan response points=12 has_velocities=True first_vel=(0.0011081930528479636, -0.0007416231151181491, -0.0014523692663312032, -0.0025, -0.001842230667827624, -0.0011461535818555577, -0.0015164613121198185) last_vel=(5.710668967507785e-17, -3.821684406167003e-17, -7.48425563333461e-17, -1.2882838763588714e-16, -9.493264263584656e-17, -5.906284717341931e-17, -7.814530630103916e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=15 has_velocities=True first_vel=(-0.0011117880082073097, 0.0009832628275502882, 0.001384122471323453, 0.0025000000000000005, 0.0013150554959722174, 0.0001180880899340016, 0.0009358151075408521) last_vel=(9.76671090898258e-17, -8.637657281190776e-17, -1.2159084232110192e-16, -2.1961720302980233e-16, -1.1552352394175526e-16, -1.0373670408974883e-17, -8.220843858846228e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=13 has_velocities=True first_vel=(0.0010368470143764328, -0.0011479169134998976, -0.0012600706031706493, -0.0025000000000000005, -0.0010868059908457801, 0.00036236039920223913, -0.0008675355870050844) last_vel=(2.526248540655379e-17, -2.796867220827923e-17, -3.0701265261365745e-17, -6.091179570437125e-17, -2.6479721793873934e-17, 8.82880904302447e-18, -2.1137260176770164e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=17 has_velocities=True first_vel=(-0.0015386325470484357, 0.0015, 0.001059290382527329, 0.0004883589950702003, -0.0019582539010912603, 0.0006043814676595684, -0.002310673842547134) last_vel=(3.150728852164766e-17, -3.071619203242015e-17, -2.169157787187016e-17, -1.0000352448890667e-17, 4.0100068582770037e-17, -1.2376198147644822e-17, 4.7316734314645275e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=13 has_velocities=True first_vel=(0.0009157306102394508, -0.0010920028485745788, -0.00010409113233759999, -0.0025, 0.00040477373108464533, 0.0008275271021127638, -0.00014674407089791195) last_vel=(7.334214495591788e-17, -8.746003498942712e-17, -8.336804329969526e-18, -2.0022849551993228e-16, 3.241889408042727e-17, 6.627780266320342e-17, -1.1752937816943674e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[INFO] [1783688119.853237564] [trajectory_planner_node]: MOVEIT_METRIC {"event": "planner_completed", "latency_ms": 86.52, "phase": "at_grasp", "success": true, "trigger": "trajectory_aborted"}
+[INFO] [1783688119.857235469] [trajectory_planner_node]: MOVEIT_METRIC {"event": "phase_abort_observed", "phase": "at_grasp"}
+[MoveItBridge] motion plan response points=11 has_velocities=True first_vel=(0.001037669209128127, -0.0005390476220547252, -0.0014378476298531288, -0.0025, -0.0018596037953106396, -0.0017027062164726094, -0.0029387952639848896) last_vel=(1.938575926037786e-17, -1.0070499672831428e-17, -2.6861901423149875e-17, -4.670505564260263e-17, -3.474115949327138e-17, -3.180999543334345e-17, -5.490263853065252e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=11 has_velocities=True first_vel=(-0.0011443085030681623, 0.0003648294063274925, 0.00121932425913857, 0.002500000000000001, 0.001845836571578901, 0.0013941204655938699, 0.0028430069433591195) last_vel=(5.3641462984902565e-17, -1.7102016670197242e-17, -5.715795778656319e-17, -1.1719187360986374e-16, -8.652681848037547e-17, -6.535183576032045e-17, -1.3327092415124269e-16) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=9 has_velocities=True first_vel=(0.0011157828767432232, -3.5660212872785657e-05, -0.0007520319297942947, -0.0025000000000000005, -0.0010789446869230775, -0.0017073635223104947, -0.0019198692654790388) last_vel=(-2.9191956393578027e-17, 9.329694879406481e-19, 1.9675228719418247e-17, 6.540689277914062e-17, 2.822816778088046e-17, 4.466933713551134e-17, 5.022907327886196e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=17 has_velocities=True first_vel=(-0.0018029986299480513, 0.0015000000000000005, 0.0008740093251930428, -5.059494209935044e-05, -0.002461975652255068, 0.0014135334371355181, -0.00301946405855358) last_vel=(1.7279662152129711e-16, -1.437576978577152e-16, -8.376371233061775e-17, 4.848941599631331e-18, 2.359519679666229e-16, -1.354708751783366e-16, 2.893808012145166e-16) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=10 has_velocities=True first_vel=(0.0005295690668847085, -0.0015000000000000002, 0.0001966155285113555, -0.0020592002517969762, -0.00027996681359971167, 0.0003296359034024605, -0.00044442206026242974) last_vel=(1.181647613998592e-17, -3.3470070890371075e-17, 4.387157118281902e-18, -4.5947718936743243e-17, -6.247006065422445e-18, 7.355291369927973e-18, -9.916558574818874e-18) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[INFO] [1783688119.953459926] [trajectory_planner_node]: MOVEIT_METRIC {"event": "planner_completed", "latency_ms": 95.583, "phase": "at_grasp", "success": true, "trigger": "trajectory_aborted"}
+[INFO] [1783688119.957559041] [trajectory_planner_node]: MOVEIT_METRIC {"event": "phase_abort_observed", "phase": "at_grasp"}
+[MoveItBridge] motion plan response points=12 has_velocities=True first_vel=(0.0009536305697090846, -0.0008345385817694998, -0.0013330780497957074, -0.0025000000000000005, -0.0017253563907723673, -0.0011686260236016585, -0.0016427937141042675) last_vel=(1.6407482707930307e-17, -1.4358471492436374e-17, -2.2935983540268594e-17, -4.3013204560272197e-17, -2.9685242950265906e-17, -2.0106540083054246e-17, -2.826472883003845e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=15 has_velocities=True first_vel=(-0.0010160050469767872, 0.0007546437774009148, 0.000809550770397838, 0.0025000000000000005, 0.0010903451176748093, 0.0005399966955639681, 0.0007699455672990063) last_vel=(-5.851928585027416e-17, 4.3465546806347476e-17, 4.662804883124067e-17, 1.4399359044623686e-16, 6.280108332780797e-17, 3.110242520934378e-17, 4.434689067341952e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=11 has_velocities=True first_vel=(0.001113271594508972, -0.0005861687884321971, -0.0007418060163962705, -0.0025000000000000005, -0.0005098274415124148, -0.0005942858068752134, 0.00016048969838197417) last_vel=(-6.1401775780941e-17, 3.232976094478942e-17, 4.091383173376186e-17, 1.3788588535761425e-16, 2.8119203261018636e-17, 3.2777449854581174e-17, -8.85170566086999e-18) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[MoveItBridge] motion plan response points=17 has_velocities=True first_vel=(-0.00196642880872594, 0.0015000000000000002, 0.0009627984752817005, -4.328350228001224e-05, -0.0021995759878616307, 0.001129984229646912, -0.0032444200754848957) last_vel=(-2.2078237491241166e-17, 1.6841370554532648e-17, 1.0809897261038768e-17, -4.859690005304297e-19, -2.4695916182953277e-17, 1.268698875484117e-17, -3.6426987150537246e-17) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[INFO] [1783688120.156050619] [behavior_planner_node]: Phase: at_grasp → grasp_evaluation
+[INFO] [1783688120.169703869] [behavior_planner_node]: Phase: grasp_evaluation → detaching
+[INFO] [1783688120.356282978] [behavior_planner_node]: Phase: detaching → moving_to_place
+[MoveItBridge] motion plan response points=11 has_velocities=True first_vel=(0.0006964391911122916, -0.0015000000000000002, 0.0002788805466580145, -0.0023495247303984795, -0.00014633724059905228, 0.0007976427575812882, -0.001656077833168619) last_vel=(-3.526981425793056e-19, 7.596459541916513e-19, -1.412336526476778e-19, 1.1898713038136232e-18, 7.41096618457602e-20, -4.039507291245984e-19, 8.386885505286785e-19) joint_names=('panda_joint1', 'panda_joint2', 'panda_joint3', 'panda_joint4', 'panda_joint5', 'panda_joint6', 'panda_joint7')
+[INFO] [1783688120.726757076] [trajectory_planner_node]: MOVEIT_METRIC {"event": "planner_completed", "latency_ms": 768.542, "phase": "at_grasp", "success": true, "trigger": "trajectory_aborted"}
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/perception/__main__.py", line 3, in <module>
+    main()
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/perception/node.py", line 88, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/behavior_planner/__main__.py", line 3, in <module>
+    main()
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/behavior_planner/node.py", line 290, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/motion_planner/__main__.py", line 3, in <module>
+    main()
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/motion_planner/node.py", line 146, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/execute_manager/trajectory_monitor.py", line 54, in <module>
+    main()
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/execute_manager/trajectory_monitor.py", line 48, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/execute_manager/motion_command.py", line 205, in <module>
+    main()
+  File "/workspace/tomato-harvest/src/tomato_harvest_sim/robot/execute_manager/motion_command.py", line 199, in main
+    rclpy.spin(node)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/__init__.py", line 247, in spin
+    executor.spin_once()
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 926, in spin_once
+    self._spin_once_impl(timeout_sec)
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 907, in _spin_once_impl
+    handler, entity, node = self.wait_for_ready_callbacks(
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 877, in wait_for_ready_callbacks
+    return next(self._cb_iter)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/opt/ros/jazzy/lib/python3.12/site-packages/rclpy/executors.py", line 785, in _wait_for_ready_callbacks
+    raise ExternalShutdownException()
+rclpy.executors.ExternalShutdownException

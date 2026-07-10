@@ -34,6 +34,8 @@ TEST(MotionCommandExecutorCoreTest, ParsesTrajectoryAndGripperState)
   )json");
 
   ASSERT_EQ(command.command_name, "move_to_pregrasp");
+  ASSERT_TRUE(command.phase_id.has_value());
+  EXPECT_EQ(*command.phase_id, "moving_to_pregrasp");
   ASSERT_TRUE(command.gripper_closed.has_value());
   EXPECT_TRUE(*command.gripper_closed);
   EXPECT_TRUE(command.has_phase_motion_plan);
@@ -57,6 +59,7 @@ TEST(MotionCommandExecutorCoreTest, NullPhaseMotionPlanDoesNotRequireTrajectory)
   )json");
 
   EXPECT_FALSE(command.has_phase_motion_plan);
+  EXPECT_FALSE(command.phase_id.has_value());
   EXPECT_FALSE(command.joint_trajectory.has_value());
   ASSERT_TRUE(command.gripper_closed.has_value());
   EXPECT_FALSE(*command.gripper_closed);

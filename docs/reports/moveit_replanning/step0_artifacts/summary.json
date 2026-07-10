@@ -1,0 +1,32 @@
+{
+  "cancel_count": 3,
+  "phase_abort": {
+    "moving_to_grasp": {
+      "abort_rate": 0.6,
+      "aborted": 3,
+      "started": 5
+    },
+    "moving_to_place": {
+      "abort_rate": 0.0,
+      "aborted": 0,
+      "started": 2
+    },
+    "moving_to_pregrasp": {
+      "abort_rate": 0.0,
+      "aborted": 0,
+      "started": 1
+    },
+    "pull_to_detach": {
+      "abort_rate": 0.0,
+      "aborted": 0,
+      "started": 1
+    }
+  },
+  "planner_latency_ms": {
+    "count": 4,
+    "max": 768.542,
+    "mean": 329.53825,
+    "min": 86.52
+  },
+  "trajectory_replacement_count": 3
+}

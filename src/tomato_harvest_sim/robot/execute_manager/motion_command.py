@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     HarvestTaskPhase,
@@ -14,6 +16,58 @@ from tomato_harvest_sim.msg.contracts import (
     PhaseId,
     PhaseMotionPlan,
 )
+from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
+
+
+def _arm_only_trajectory(trajectory: JointTrajectory) -> JointTrajectory:
+    """arm JTCとの共通境界でgripper関節をtrajectoryから除外する。
+
+    Args:
+        trajectory: planner種別やphaseを問わない入力trajectory。
+
+    Returns:
+        arm controller順に関節と各pointの値を射影したtrajectory。
+
+    Raises:
+        ValueError: trajectoryの配列長が不正、またはarm関節がない場合。
+    """
+    index_by_name = {name: index for index, name in enumerate(trajectory.joint_names)}
+    arm_joint_names = tuple(name for name in DEFAULT_JOINT_NAMES if name in index_by_name)
+    if not arm_joint_names:
+        raise ValueError("trajectory has no arm controller joints")
+    arm_indices = tuple(index_by_name[name] for name in arm_joint_names)
+    points: list[JointTrajectoryPoint] = []
+    for point in trajectory.points:
+        if len(point.positions_rad) != len(trajectory.joint_names):
+            raise ValueError("trajectory names and positions must have the same length")
+        velocities = point.velocities_rad_s
+        if velocities is not None and len(velocities) != len(trajectory.joint_names):
+            raise ValueError("trajectory names and velocities must have the same length")
+        points.append(replace(
+            point,
+            positions_rad=tuple(point.positions_rad[index] for index in arm_indices),
+            velocities_rad_s=(
+                tuple(velocities[index] for index in arm_indices)
+                if velocities is not None else None
+            ),
+        ))
+    if arm_joint_names == trajectory.joint_names:
+        return trajectory
+    return replace(trajectory, joint_names=arm_joint_names, points=tuple(points))
+
+
+def _arm_only_command(command: MotionCommand) -> MotionCommand:
+    """すべてのphaseに同一のarm/gripper契約境界を適用する。"""
+    phase_plan = command.phase_motion_plan
+    if phase_plan is None or phase_plan.joint_trajectory is None:
+        return command
+    return replace(
+        command,
+        phase_motion_plan=replace(
+            phase_plan,
+            joint_trajectory=_arm_only_trajectory(phase_plan.joint_trajectory),
+        ),
+    )
 
 
 def _stop_trajectory(joint_state: JointStateSnapshot) -> JointTrajectory:
@@ -37,6 +91,15 @@ def build_motion_command(
     アーキテクチャ仕様のフェーズ別出力仕様に従い、joint_trajectory と
     gripper_closed を決定する。joint_trajectory は常に非 null。
     """
+    return _arm_only_command(_build_phase_motion_command(phase, plan, current_joints))
+
+
+def _build_phase_motion_command(
+    phase: HarvestTaskPhase,
+    plan: HarvestMotionPlan,
+    current_joints: JointStateSnapshot,
+) -> MotionCommand:
+    """phase固有のcommandを組み立て、共通境界へ渡す。"""
     if phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
         return _make_command("move_to_pregrasp", PhaseId.MOVING_TO_PREGRASP,
                              plan.pregrasp_pose, plan.pregrasp_joint_trajectory, True, plan)
@@ -66,16 +129,25 @@ def build_motion_command(
                                   plan.place_pose, False, current_joints)
 
     if phase is HarvestTaskPhase.RETURNING_HOME:
-        from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
+        home_positions_by_name = dict(zip(
+            DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD, strict=True
+        ))
         home_trajectory = JointTrajectory(
-            joint_names=DEFAULT_JOINT_NAMES,
+            joint_names=current_joints.joint_names,
             points=(
                 JointTrajectoryPoint(
                     positions_rad=current_joints.positions_rad,
                     time_from_start_sec=0.0,
                 ),
                 JointTrajectoryPoint(
-                    positions_rad=DEFAULT_JOINT_POSITIONS_RAD,
+                    positions_rad=tuple(
+                        home_positions_by_name.get(name, position)
+                        for name, position in zip(
+                            current_joints.joint_names,
+                            current_joints.positions_rad,
+                            strict=True,
+                        )
+                    ),
                     time_from_start_sec=10.0,
                 ),
             ),

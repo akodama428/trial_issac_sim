@@ -4,6 +4,10 @@
 """
 from __future__ import annotations
 
+import time
+
+from tomato_harvest_sim.robot.motion_planner.observability import metric_line
+
 
 def main() -> None:
     import json
@@ -57,7 +61,7 @@ def main() -> None:
             except ValueError:
                 return
             if self._phase is HarvestTaskPhase.TARGET_FOUND:
-                self._try_plan()
+                self._try_plan(trigger="target_found")
 
         def _on_estimate(self, msg: String) -> None:
             self._estimate = target_estimate_from_json(msg.data)
@@ -76,9 +80,12 @@ def main() -> None:
 
         def _on_trajectory_status(self, msg: String) -> None:
             if msg.data.strip() == "aborted" and self._phase is not None:
-                self._try_plan()
+                self.get_logger().info(metric_line(
+                    "phase_abort_observed", phase=self._phase.value
+                ))
+                self._try_plan(trigger="trajectory_aborted")
 
-        def _try_plan(self) -> None:
+        def _try_plan(self, *, trigger: str) -> None:
             if self._estimate is None or self._joint_state is None:
                 return
 
@@ -111,9 +118,24 @@ def main() -> None:
                 "camera_pose": _p,
                 "target_pose": self._estimate.target_world_pose,
             })()
-            plan = self._planner.plan(
-                self._estimate, self._joint_state, tf_tree_snapshot, scene_snapshot
-            )
+            phase = self._phase.value if self._phase is not None else "unknown"
+            started_at = time.perf_counter()
+            try:
+                plan = self._planner.plan(
+                    self._estimate, self._joint_state, tf_tree_snapshot, scene_snapshot
+                )
+            except Exception:
+                latency_ms = (time.perf_counter() - started_at) * 1000.0
+                self.get_logger().info(metric_line(
+                    "planner_completed", phase=phase, trigger=trigger,
+                    latency_ms=round(latency_ms, 3), success=False,
+                ))
+                raise
+            latency_ms = (time.perf_counter() - started_at) * 1000.0
+            self.get_logger().info(metric_line(
+                "planner_completed", phase=phase, trigger=trigger,
+                latency_ms=round(latency_ms, 3), success=plan is not None,
+            ))
             if plan is None:
                 return
             out = String()
