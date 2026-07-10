@@ -9,51 +9,53 @@ cancel 回数、phase 別 abort 率、trajectory 差し替え回数を構造化�
 ### 1.1 全体アーキテクチャと今回の検証範囲
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph SIM["Isaac Sim / Simulation Layer"]
+    direction TB
     Scene["Scene / Tomato Physics"]
-    Sensors["RGB-D Camera / TF / Joint States"]
+    Sensors["RGB-D Camera / TF /<br/>Joint States"]
     Franka["Franka Articulation"]
+    Scene --> Sensors
+    Franka --> Sensors
   end
 
   subgraph ROBOT["ROS 2 Robot Software Layer"]
+    direction TB
     Perception["perception_node"]
     Behavior["behavior_planner_node<br/>Harvest Phase State Machine"]
     Planner["trajectory_planner_node<br/>MoveIt Planning Adapter"]
     MoveIt["MoveIt2 move_group"]
     Command["motion_command_node<br/>Phase-specific Command Builder"]
-    Boundary["Common Arm/Gripper Contract Boundary<br/>arm-only trajectory sanitizer"]
+    Boundary["Common Arm/Gripper<br/>Contract Boundary<br/>arm-only trajectory sanitizer"]
     Executor["motion_command_executor_node<br/>FollowJointTrajectory Client"]
     JTC["ros2_control<br/>JointTrajectoryController"]
-    Gripper["Independent Gripper Command Path"]
+    Gripper["Independent Gripper<br/>Command Path"]
     Hardware["IsaacSimHardwareInterface"]
+
+    Perception --> Behavior --> Planner
+    MoveIt <--> Planner
+    Planner --> Command --> Boundary
+    Boundary --> Executor --> JTC --> Hardware
+    Boundary --> Gripper --> Hardware
   end
 
   subgraph OBS["Step 0 Observability / Analysis"]
+    direction TB
     Metrics["MOVEIT_METRIC JSON Lines"]
     Aggregate["summarize_moveit_metrics.py"]
     Report["CSV / JSON / Graphs / Report"]
+    Metrics --> Aggregate --> Report
   end
 
-  Scene --> Sensors
-  Sensors --> Perception --> Behavior
+  Sensors --> Perception
   Sensors --> Planner
-  Behavior --> Planner
-  Planner <--> MoveIt
-  Planner --> Command --> Boundary
-  Boundary --> Executor --> JTC --> Hardware --> Franka
-  Boundary --> Gripper --> Hardware
-  Franka --> Sensors
+  Hardware --> Franka
   Planner -. "latency / trigger" .-> Metrics
-  Executor -. "start / abort / cancel / replace" .-> Metrics
-  Metrics --> Aggregate --> Report
+  Executor -. "start / abort /<br/>cancel / replace" .-> Metrics
 
   classDef changed fill:#d9fdd3,stroke:#188038,stroke-width:3px,color:#0b3d16;
   classDef observed fill:#ffe8b3,stroke:#b26a00,stroke-width:3px,color:#5f3700;
   classDef context fill:#eef1f4,stroke:#697386,stroke-width:1px,color:#28323c;
-  classDef legendChanged fill:#d9fdd3,stroke:#188038,color:#0b3d16;
-  classDef legendObserved fill:#ffe8b3,stroke:#b26a00,color:#5f3700;
-  classDef legendContext fill:#eef1f4,stroke:#697386,color:#28323c;
 
   class Planner,Command,Boundary,Executor,Metrics,Aggregate,Report changed;
   class MoveIt,JTC observed;
