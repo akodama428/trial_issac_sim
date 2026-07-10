@@ -60,6 +60,14 @@ class PhaseId(StrEnum):
     RETURNING_HOME = "returning_home"
 
 
+class PlanProducerKind(StrEnum):
+    """plan を生成した producer の種別。将来の local planner 複線化で識別に使う。"""
+
+    GLOBAL_PLANNER = "global_planner"
+    LOCAL_PLANNER = "local_planner"
+    UNKNOWN = "unknown"
+
+
 class PoseSemantics(StrEnum):
     TOOL_CENTER = "tool_center"
     GRASP_CENTER = "grasp_center"
@@ -209,6 +217,15 @@ class HarvestMotionPlan:
     pull_joint_trajectory: JointTrajectory | None = None
     place_joint_trajectory: JointTrajectory | None = None
     planning_scene_object_ids: tuple[str, ...] = ()
+    # Step 1 plan 契約メタデータ (Issue #9)。
+    # plan_revision: producer 単調増加の版数。0 は旧契約 (未版数) を表す。
+    # generated_at_sec: 生成時刻 (epoch 秒)。観測用でありノード間の採用判定には使わない。
+    # planned_from_phase: 計画起点 phase。実行 phase 起点の replan は phase-bound になる。
+    # producer_kind: 生成した producer 種別。plan producer 複線化 (Step 5) の識別子。
+    plan_revision: int = 0
+    generated_at_sec: float | None = None
+    planned_from_phase: HarvestTaskPhase | None = None
+    producer_kind: PlanProducerKind = PlanProducerKind.GLOBAL_PLANNER
 
 
 @dataclass(frozen=True)
