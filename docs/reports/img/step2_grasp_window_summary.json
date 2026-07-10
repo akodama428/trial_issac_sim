@@ -1,0 +1,62 @@
+{
+  "run10": {
+    "label": "before",
+    "held_steps": 53,
+    "gap_median_mm": 14.8,
+    "gap_min_mm": 13.4,
+    "gap_max_mm": 57.4,
+    "force_left_median_n": 5.63274,
+    "force_right_median_n": 1.21086,
+    "force_left_p95_n": 8.968557,
+    "left_contact_ratio": 0.6792452830188679,
+    "right_contact_ratio": 0.6415094339622641
+  },
+  "run11": {
+    "label": "before",
+    "held_steps": 51,
+    "gap_median_mm": 24.400000000000002,
+    "gap_min_mm": 24.0,
+    "gap_max_mm": 57.4,
+    "force_left_median_n": 0.0,
+    "force_right_median_n": 4.74408,
+    "force_left_p95_n": 0.0,
+    "left_contact_ratio": 0.0,
+    "right_contact_ratio": 0.803921568627451
+  },
+  "run12": {
+    "label": "after",
+    "held_steps": 40,
+    "gap_median_mm": 18.8,
+    "gap_min_mm": 16.8,
+    "gap_max_mm": 53.1,
+    "force_left_median_n": 11.05158,
+    "force_right_median_n": 2.56908,
+    "force_left_p95_n": 14.220396,
+    "left_contact_ratio": 0.875,
+    "right_contact_ratio": 0.075
+  },
+  "run13": {
+    "label": "after",
+    "held_steps": 42,
+    "gap_median_mm": 32.300000000000004,
+    "gap_min_mm": 31.0,
+    "gap_max_mm": 52.900000000000006,
+    "force_left_median_n": 0.0,
+    "force_right_median_n": 13.9173,
+    "force_left_p95_n": 0.0,
+    "left_contact_ratio": 0.0,
+    "right_contact_ratio": 0.9285714285714286
+  },
+  "run14": {
+    "label": "after",
+    "held_steps": 31,
+    "gap_median_mm": 56.599999999999994,
+    "gap_min_mm": 54.1,
+    "gap_max_mm": 56.9,
+    "force_left_median_n": 3.0153600000000003,
+    "force_right_median_n": 0.0,
+    "force_left_p95_n": 6.242496000000001,
+    "left_contact_ratio": 1.0,
+    "right_contact_ratio": 0.0
+  }
+}

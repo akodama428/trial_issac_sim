@@ -35,11 +35,13 @@ img { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; marg
 .meta { color: var(--fg-muted); font-size: 13.5px; }
 .pass { display: inline-block; background: var(--ok-bg); color: var(--ok-fg);
   border: 1px solid var(--ok-border); font-weight: 700; padding: 1px 10px; border-radius: 10px; font-size: 12px; }
+.part { display: inline-block; background: var(--warn-bg); color: var(--warn-fg);
+  border: 1px solid var(--warn-border); font-weight: 700; padding: 1px 10px; border-radius: 10px; font-size: 12px; }
 .defer { display: inline-block; background: var(--ng-bg); color: var(--ng-fg);
   border: 1px solid var(--ng-border); font-weight: 700; padding: 1px 10px; border-radius: 10px; font-size: 12px; }
 .finding { background: var(--warn-bg); border-left: 4px solid var(--warn-border); color: var(--warn-fg);
   padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; font-size: 13.5px; }
-.verdict { background: var(--warn-bg); border-left: 4px solid var(--warn-border); color: var(--warn-fg);
+.verdict { background: var(--ok-bg); border-left: 4px solid var(--ok-border); color: var(--ok-fg);
   padding: 10px 14px; border-radius: 0 6px 6px 0; margin: 14px 0; }
 figcaption { color: var(--fg-muted); font-size: 12.5px; margin-bottom: 16px; }
 pre { background: var(--code-bg); padding: 10px 14px; border-radius: 6px; overflow-x: auto; font-size: 12.5px; }
@@ -49,34 +51,34 @@ pre { background: var(--code-bg); padding: 10px 14px; border-radius: 6px; overfl
 
 <h1>Step 2 検証レポート: finger 駆動の力制御化（drive maxForce）</h1>
 <p class="meta">
-実施日: 2026-07-10 ／ Issue: <a href="https://github.com/akodama428/trial_issac_sim/issues/3">#3</a> ／ ブランチ: <code>physics/step2-finger-force</code>（CI 修正済み main 起点）<br>
-実行環境: docker コンテナ <code>tomato-harvest-sim-physics</code>（Isaac Sim 6.0 / ROS 2 Jazzy / ROS_DOMAIN_ID=1）
+実施日: 2026-07-10（把持ウィンドウ限定分析で改訂）／ Issue: <a href="https://github.com/akodama428/trial_issac_sim/issues/3">#3</a> ／ ブランチ: <code>physics/step2-finger-force</code><br>
+実行環境: docker コンテナ <code>tomato-harvest-sim-physics</code>（Isaac Sim 6.0 / ROS 2 Jazzy / ROS_DOMAIN_ID=1）<br>
+<b>改訂注記:</b> 初版は全区間の minGap を根拠にしていたが、pregrasp 接近中は「トマト無しの全閉指令」が正常動作として含まれるため不適切だった（レビュー指摘）。本改訂版は<b>把持ウィンドウ（status=held とその直前の閉じ込み区間）に限定</b>して再分析した。
 </p>
 
 <div class="verdict">
-<b>総合判定: 条件付き合格（機構は実装・実証済み。良品条件②③の実測検証は Step 3 の前提条件へ持ち越し）</b><br>
-力制限機構（drive maxForce の yaml 管理・適用）は完成し、適用状態をログで実証、E2E 回帰 3/3 成功。
-一方、検証の過程で<b>「success モードでは②ギャップ収束・③力飽和が原理的に観測できない」</b>ことが実測で判明した
-（人工 grasp joint が保持力を支配するため）。この事実と根本原因（EE 整列オフセット）を定量記録し、
-Step 3 の検証シナリオへ明示的に引き継ぐ。<b>受け入れ可否はレビューでの人間判断を仰ぐ。</b>
+<b>総合判定: 条件付き合格</b><br>
+機構（drive maxForce の yaml 管理・適用）は完成・実証済み、E2E 回帰 5/5 成功。
+把持ウィンドウ限定の再分析により、<b>②ギャップ静定は run12 でトマト径どおり 18.8mm の静定を初実証</b>（ただし再現率 1/3、ばらつき原因は把持位置の run 間変動）、
+<b>③力飽和は run14 で上限内動作（3.0N ≤ 5N）を観測</b>したが、把持成立時（run12）は人工 grasp joint の溶接拘束と mimic 結合により上限超の内力が混入し確定できない。
+②の再現性確保と③の確定は Step 3（grasp joint なし）の前提タスクとする。
 </div>
 
 <h2>1. 完了条件と結果の対比</h2>
 <table>
-<thead><tr><th>Issue #3 の完了条件</th><th>結果</th><th>判定</th></tr></thead>
+<thead><tr><th>Issue #3 の完了条件</th><th>結果（把持ウィンドウ限定）</th><th>判定</th></tr></thead>
 <tbody>
-<tr><td>drive maxForce / stiffness / damping の明示設定（HWI・C++ 無変更）</td><td><code>scene.yaml</code> の <code>finger_drive</code> セクションで管理し USD へ適用（2章）。HWI/C++ は無変更</td><td><span class="pass">PASS</span></td></tr>
-<tr><td>①閉指令でトマトを弾き飛ばさない</td><td>速度スパイクは before/after 同水準（最大 1.30→1.30〜2.27 m/s、スパイクは把持瞬間ではなく引抜・設置時）。<b>弾き飛ばしの悪化なし</b>、E2E 5/5 完走</td><td><span class="pass">PASS（悪化なし）</span></td></tr>
-<tr><td>②finger ギャップがトマト径近傍で静定</td><td><b>全 run で minGap=0.0（完全閉鎖）</b>= 閉鎖時にトマトがパッド間に存在しない。根本原因は EE 整列オフセット（3章）</td><td><span class="defer">Step 3 へ</span></td></tr>
-<tr><td>③接触力が maxForce 近傍で飽和</td><td>保持中の接触力は人工 grasp joint の拘束力が支配し（右指=mimic で 13.9N 等）、drive 上限は観測に現れない（4章）。<b>success モードでは原理的に検証不能</b></td><td><span class="defer">Step 3 へ</span></td></tr>
-<tr><td>既存テスト全通過・E2E 無劣化</td><td>105 件通過（新規 2 件含む）。E2E after 3/3・before 2/2 完走</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>drive maxForce / stiffness / damping の明示設定（HWI・C++ 無変更）</td><td><code>scene.yaml</code> の <code>finger_drive</code> で管理し joint1 の DriveAPI へ適用。joint2 は mimic 従動と確定し尊重（2章）</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>①閉指令でトマトを弾き飛ばさない</td><td>閉じ込み区間（図3-1 の 0.55〜0.7s）でトマト速度スパイクなし。E2E 5/5 完走</td><td><span class="pass">PASS</span></td></tr>
+<tr><td>②finger ギャップがトマト径近傍で静定</td><td><b>run12: held 中央値 18.8mm ≈ トマト径 20mm で静定（初実証）</b>。ただし run13=32.3mm（片側のみ接触）・run14=56.6mm（ほぼ開いたまま保持）とばらつき、再現率 1/3（3章）</td><td><span class="part">部分実証</span></td></tr>
+<tr><td>③接触力が maxForce 近傍で飽和</td><td><b>run14: 左指 3.0N（p95 6.2N）で上限 5N 近傍の飽和的挙動</b>。ただし把持成立時（run12）は 11.1N と上限超 — grasp joint 溶接+mimic 結合の内力が混入（4章）</td><td><span class="part">部分観測</span></td></tr>
+<tr><td>既存テスト全通過・E2E 無劣化</td><td>105 件通過。E2E before 2/2・after 3/3 完走</td><td><span class="pass">PASS</span></td></tr>
 <tr><td>採用値と選定根拠の表</td><td>5章</td><td><span class="pass">PASS</span></td></tr>
 </tbody>
 </table>
 
 <h2>2. 実装と適用の実証</h2>
-<p>実アセット検査（Step 2 冒頭に実施）と適用ログ（run12）:</p>
-<pre><code># 検査結果（franka.usd の実態）
+<pre><code># 実アセット検査（franka.usd）
 panda_finger_joint1: PrismaticJoint, drive:linear stiffness=400 damping=80 maxForce=7.2N（USD 既定）
 panda_finger_joint2: PrismaticJoint, drive なし → PhysxMimicJointAPI（joint1 に従動）
 
@@ -84,51 +86,67 @@ panda_finger_joint2: PrismaticJoint, drive なし → PhysxMimicJointAPI（joint
 finger drive set: .../panda_finger_joint1 (stiffness=3000.0, damping=120.0, maxForce=5.0N, pre_existing_drive=1, mimic=0)
 finger drive skipped (mimic joint): .../panda_finger_joint2</code></pre>
 <div class="finding">
-<b>発見1 — 右指は mimic 従動:</b> joint2 には drive が無く <code>PhysxMimicJointAPI</code> で joint1 に従動する。実装は mimic を尊重して drive を新設しない設計とした（mimic と drive の二重拘束を避ける）。<b>右指の押付け力は mimic 拘束由来であり drive maxForce では制限されない</b>ことが確定（Step 0 以来の左右非対称の構造的背景）。
+<b>発見1 — 右指は mimic 従動:</b> joint2 は drive を持たず mimic で joint1 に従動する。mimic と drive の二重拘束を避けるため drive 新設はしない設計とした。右指の押付け力は mimic 拘束由来で drive maxForce の制限を受けない（4章の力測定と整合）。
 </div>
 
-<h2>3. ②ギャップ収束の実測 — 閉鎖時にトマトがパッド間に無い</h2>
+<h2>3. 把持ウィンドウの実測 — ギャップ静定</h2>
 <figure>
-<img src="img/run12_finger_gap.png" alt="run12 finger gap">
-<figcaption>図 3-1: run12（after）の finger ギャップ。閉指令で <b>0.0 m（完全閉鎖）まで到達</b>しており、トマト径 0.02 m（赤破線）で静定しない。before（run10/11）も同様。</figcaption>
+<img src="img/step2_grasp_window.png" alt="grasp window analysis">
+<figcaption>図 3-1: 把持ウィンドウ（held + 直前 1 秒）の finger ギャップ（上）と左指接触力（下）。before=破線、after=実線。
+上段: 全 run が 0.55s 付近から閉じ始め、<b>run12（緑）はトマト径 20mm の基準線上（18.8mm）で静定</b>。run13（赤）は 32mm、run14（紫）は 57mm で止まる。
+下段: run14（紫）は約 3N で平坦（上限 5N 内の飽和的挙動）。run12（緑）は 10〜14N と上限超（grasp joint 溶接後の拘束内力）。</figcaption>
 </figure>
-<div class="finding">
-<b>発見2 — 根本原因は把持位置の整列:</b> トマト（直径 2cm）がパッド間にあれば物理的に完全閉鎖は不可能。全 run で minGap=0 という事実は、閉鎖時にフィンガーパッドがトマトを挟んでいない（横を通過している）ことを意味する。既知の MoveIt EE frame と panda_hand prim の X 方向 ~1.43cm オフセット（コード内 <code>FINGER_MIDPOINT_TO_TOMATO_TOLERANCE_M</code> の由来コメント）と整合する。現行 E2E が完走するのは、幾何フォールバック+人工 grasp joint がこのズレを吸収しているため。<b>摩擦把持（Step 3）はパッドで挟めることが物理的前提のため、整列補正を Step 3 の最初のタスクとする。</b>
-</div>
-
-<h2>4. ③力飽和の実測 — 保持力は grasp joint が支配</h2>
 <table>
-<caption>表 4-1: HELD 中の接触力積中央値（力換算 = ×60Hz）</caption>
-<thead><tr><th>run</th><th>条件</th><th>左指 [N]</th><th>右指 [N]</th></tr></thead>
+<caption>表 3-1: held 区間のギャップと接触（把持ウィンドウ限定）</caption>
+<thead><tr><th>run</th><th>条件</th><th>gap 中央値 [mm]</th><th>gap 範囲 [mm]</th><th>接触率 L/R</th><th>解釈</th></tr></thead>
 <tbody>
-<tr><td>run10</td><td>before（USD 既定 7.2N/400）</td><td>5.6</td><td>1.2</td></tr>
-<tr><td>run11</td><td>before</td><td>0（接触なし）</td><td>4.7</td></tr>
-<tr><td>run12</td><td>after（5.0N/3000）</td><td><b>11.1</b></td><td>2.6</td></tr>
-<tr><td>run13</td><td>after</td><td>0（接触なし）</td><td><b>13.9</b></td></tr>
-<tr><td>run14</td><td>after</td><td>3.0</td><td>0（接触なし）</td></tr>
+<tr><td>run10</td><td>before</td><td>14.8</td><td>13.4〜57.4</td><td>68% / 64%</td><td>径より狭い=めり込み把持（力過大の兆候）</td></tr>
+<tr><td>run11</td><td>before</td><td>24.4</td><td>24.0〜57.4</td><td>0% / 80%</td><td>右片側のみ接触</td></tr>
+<tr><td><b>run12</b></td><td><b>after</b></td><td><b>18.8</b></td><td>16.8〜53.1</td><td>88% / 8%</td><td><b>トマト径どおりの静定（目標挙動）</b></td></tr>
+<tr><td>run13</td><td>after</td><td>32.3</td><td>31.0〜52.9</td><td>0% / 93%</td><td>右片側のみ・径+12mm で停止（横ずれ）</td></tr>
+<tr><td>run14</td><td>after</td><td>56.6</td><td>54.1〜56.9</td><td>100% / 0%</td><td>ほぼ開いたまま HELD（幾何フォールバック成立）</td></tr>
 </tbody>
 </table>
 <div class="finding">
-<b>発見3 — success モードでは飽和検証が原理的に不能:</b> HELD 判定と同時に人工 FixedJoint（grasp joint）が生成され、以降の指-トマト間の接触力は<b>拘束ソルバが決める内力</b>になる（drive の 5N 上限と無関係。右指 13.9N は mimic 拘束由来で当然に上限なし）。したがって「接触力が maxForce で飽和する」ことは、grasp joint を作らない physics モード（Step 3）でのみ観測できる。②と合わせ、<b>Step 3 の検証シナリオ冒頭で「整列補正 → 閉指令 → 飽和・ギャップ静定の確認」を行う</b>計画に更新する。
+<b>発見2 — 静定は達成可能、課題は再現性:</b> after 構成（stiffness 3000 + maxForce 5N）は、把持位置が合った run12 で「トマト径で止まる」目標挙動を示した（before の run10 は 14.8mm までめり込み、径の 74% まで潰し込んでいた点も改善方向）。ばらつきの原因はギャップ機構ではなく<b>run 毎の把持位置の変動</b>（run13 の横ずれ・run14 の閉じ不足）であり、既知の EE 整列オフセット ~1.4cm と MoveIt 計画解のばらつきに起因する。整列補正を Step 3 の最初のタスクとする。
+</div>
+
+<h2>4. 把持ウィンドウの実測 — 力飽和</h2>
+<table>
+<caption>表 4-1: held 区間の finger 力（接触力積×60Hz、中央値）</caption>
+<thead><tr><th>run</th><th>条件</th><th>左指 [N]（drive 上限 5N）</th><th>左指 p95 [N]</th><th>右指 [N]（mimic・上限なし）</th></tr></thead>
+<tbody>
+<tr><td>run10</td><td>before（7.2N/400）</td><td>5.6</td><td>9.0</td><td>1.2</td></tr>
+<tr><td>run11</td><td>before</td><td>—（接触なし）</td><td>—</td><td>4.7</td></tr>
+<tr><td>run12</td><td>after（5N/3000）</td><td>11.1</td><td>14.2</td><td>2.6</td></tr>
+<tr><td>run13</td><td>after</td><td>—（接触なし）</td><td>—</td><td>13.9</td></tr>
+<tr><td><b>run14</b></td><td><b>after</b></td><td><b>3.0</b></td><td><b>6.2</b></td><td>—（接触なし）</td></tr>
+</tbody>
+</table>
+<div class="finding">
+<b>発見3 — 上限内動作は観測、確定は grasp joint なしの環境で:</b>
+run14（grasp joint が幾何フォールバック成立で、指はトマトに軽接触のみ）では左指力が<b>中央値 3.0N と上限 5N 内で平坦</b>に推移し、力制限の効果と整合する。
+一方、径どおりに挟めた run12 では 11〜14N と上限を超える — HELD と同時に生成される<b>人工 FixedJoint がトマトを hand に溶接</b>するため、指-トマト間の力は drive ではなく拘束ソルバの内力（溶接反力+mimic 結合力）で決まるためである。
+つまり「上限で飽和する把持」の確定検証は、<b>grasp joint を生成しない physics モード（Step 3）でのみ可能</b>。本 Step では機構の適用と上限内動作の傍証（run14）までを成果とする。
 </div>
 
 <h2>5. 採用値と E2E 回帰</h2>
 <table>
 <thead><tr><th>パラメータ</th><th>値</th><th>根拠</th></tr></thead>
 <tbody>
-<tr><td>max_force_n</td><td>5.0 N</td><td>トマト自重 0.29N の約17倍・Franka 連続把持力 70N の 7%。Step 0 実測（保持 12N 相当）より低く安全側</td></tr>
-<tr><td>stiffness</td><td>3000 N/m</td><td>USD 既定 400 では 2cm 偏差時に 8N しか出せず上限が意味を持たないため、上限到達可能な剛性へ増強</td></tr>
-<tr><td>damping</td><td>120 N·s/m</td><td>臨界減衰近傍（2√(k·m_finger相当)）で発振抑制</td></tr>
+<tr><td>max_force_n</td><td>5.0 N</td><td>トマト自重 0.29N の約17倍・Franka 連続把持力 70N の 7%。before の run10 で観測された「径の 74% までのめり込み」を抑制する安全側</td></tr>
+<tr><td>stiffness</td><td>3000 N/m</td><td>USD 既定 400 では 2cm 偏差時 8N しか出せず上限が実質機能しないため、上限到達可能な剛性へ増強</td></tr>
+<tr><td>damping</td><td>120 N·s/m</td><td>発振抑制（図 3-1 下段の run14 で振動なしを確認）</td></tr>
 </tbody>
 </table>
-<p>E2E 回帰: before 2/2・after 3/3 の全 5 run が COMPLETE（成功率 100%）。maxForce 5N 化による完走率・所要時間の劣化なし。グラフは <code>docs/reports/img/run{10..14}_*.png</code>。</p>
+<p>E2E 回帰: before 2/2・after 3/3 の全 5 run が COMPLETE。所要時間もベースライン同水準（per-run グラフ: <code>docs/reports/img/run{10..14}_*.png</code>）。</p>
 
 <h2>6. 成果物と Step 3 への引き継ぎ</h2>
 <table>
 <tbody>
-<tr><th>実装</th><td><code>scene.yaml</code>（finger_drive セクション）、<code>scene_config.py</code>（ローダ+テスト2件）、<code>physics_tuning.py</code>（drive 適用・mimic 判定）、観測ログに finger gap 追加（<code>gap=</code> フィールド+グラフ5枚目）</td></tr>
-<tr><th>データ</th><td><code>docs/reports/data/{sim,robot}_run{10..14}.log.gz</code>、<code>docs/reports/img/run{10..14}_*</code></td></tr>
-<tr><th>Step 3 前提条件（本検証で確定）</th><td>① <b>把持位置の整列補正</b>（EE オフセット ~1.4cm、gap が 0.02m 近傍で静定することを合格条件に）② 整列後に②③（ギャップ静定・力飽和）を physics モードで再検証 ③ 右指 mimic の扱い（mimic gearing のまま進めるか、独立 drive 化するか）の方針決定</td></tr>
+<tr><th>実装</th><td><code>scene.yaml</code>（finger_drive）、<code>scene_config.py</code>（ローダ+テスト2件）、<code>physics_tuning.py</code>（drive 適用・mimic 判定）、観測ログ gap フィールド+グラフ、<code>scripts/plot_grasp_window.py</code>（把持ウィンドウ分析）</td></tr>
+<tr><th>データ</th><td><code>docs/reports/data/{sim,robot}_run{10..14}.log.gz</code>、<code>docs/reports/img/step2_grasp_window.png</code> ほか</td></tr>
+<tr><th>Step 3 前提タスク（本検証で確定）</th><td>① <b>把持位置の整列補正</b> — 合格条件「held 中の gap 中央値が 18〜22mm に 3/3 で収まること」（run12 の再現性確保）② 整列後、physics モード（grasp joint なし）で③力飽和を確定検証 ③ 右指 mimic の扱い（従動維持 or 独立 drive 化）の方針決定</td></tr>
 </tbody>
 </table>
 
