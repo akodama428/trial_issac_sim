@@ -10,45 +10,51 @@ GitHub Issue #9 と `docs/planning_movit2_improvements.html` の Step 1 に従�
 ### 1.1 全体アーキテクチャと今回の検証範囲
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph SIM["Isaac Sim / Simulation Layer"]
+    direction TB
     Scene["Scene / Tomato Physics"]
     Sensors["RGB-D Camera / TF / Joint States"]
     Franka["Franka Articulation"]
+    Scene --> Sensors
+    Franka --> Sensors
   end
 
   subgraph ROBOT["ROS 2 Robot Software Layer"]
+    direction TB
     Perception["perception_node"]
     Behavior["behavior_planner_node<br/>Harvest Phase State Machine"]
-    Planner["trajectory_planner_node<br/>plan 契約メタデータの刻印<br/>(revision / generated_at / phase / producer)"]
+    Planner["trajectory_planner_node<br/>plan 契約メタデータの刻印<br/>(revision / generated_at /<br/>phase / producer)"]
     MoveIt["MoveIt2 move_group"]
     Contract["HarvestMotionPlan 契約<br/>contracts.py + serialization.py"]
     Adoption["plan adoption policy<br/>stale plan 棄却規則 (pure logic)"]
     Command["motion_command_node<br/>Phase-specific Command Builder"]
-    Boundary["Common Arm/Gripper Contract Boundary"]
+    Boundary["Common Arm/Gripper<br/>Contract Boundary"]
     Executor["motion_command_executor_node<br/>FollowJointTrajectory Client"]
     JTC["ros2_control<br/>JointTrajectoryController"]
     Hardware["IsaacSimHardwareInterface"]
+
+    Perception --> Behavior --> Planner
+    MoveIt <--> Planner
+    Planner -- "harvest_motion_plan<br/>(新契約)" --> Contract
+    Contract --> Adoption --> Command --> Boundary
+    Boundary --> Executor --> JTC --> Hardware
   end
 
   subgraph OBS["Observability / Analysis"]
-    Metrics["MOVEIT_METRIC JSON Lines<br/>plan_published / plan_adopted / plan_rejected"]
+    direction TB
+    Metrics["MOVEIT_METRIC JSON Lines<br/>plan_published /<br/>plan_adopted / plan_rejected"]
     Demo["plan_adoption_stale_demo.py<br/>stale 再現シナリオ再生"]
     Report["JSON / Graphs / Report"]
+    Metrics --> Report
+    Demo --> Report
   end
 
-  Scene --> Sensors
-  Sensors --> Perception --> Behavior
+  Sensors --> Perception
   Sensors --> Planner
-  Behavior --> Planner
-  Planner <--> MoveIt
-  Planner -- "harvest_motion_plan (新契約)" --> Contract --> Adoption --> Command --> Boundary
-  Boundary --> Executor --> JTC --> Hardware --> Franka
-  Franka --> Sensors
+  Hardware --> Franka
   Planner -. "plan_published" .-> Metrics
-  Adoption -. "plan_adopted / plan_rejected" .-> Metrics
-  Demo --> Report
-  Metrics --> Report
+  Adoption -. "plan_adopted /<br/>plan_rejected" .-> Metrics
 
   classDef changed fill:#d9fdd3,stroke:#188038,stroke-width:3px,color:#0b3d16;
   classDef observed fill:#ffe8b3,stroke:#b26a00,stroke-width:3px,color:#5f3700;
