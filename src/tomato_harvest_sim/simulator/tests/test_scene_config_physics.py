@@ -45,6 +45,11 @@ _FULL_PAYLOAD = {
             "position_iterations": 16,
             "velocity_iterations": 4,
         },
+        "finger_drive": {
+            "stiffness": 3000.0,
+            "damping": 120.0,
+            "max_force_n": 5.0,
+        },
     }
 }
 
@@ -66,6 +71,22 @@ class PhysicsTuningFromPayloadTest(unittest.TestCase):
         self.assertAlmostEqual(config.tomato_torsional_patch_radius_m, 0.004)
         self.assertEqual(config.tomato_solver_position_iterations, 16)
         self.assertEqual(config.tomato_solver_velocity_iterations, 4)
+
+    def test_finger_drive_is_loaded(self) -> None:
+        """Step 2: finger drive の力制限パラメータが読み込まれる。"""
+        config = physics_tuning_from_payload(_FULL_PAYLOAD)
+
+        self.assertAlmostEqual(config.finger_drive_stiffness, 3000.0)
+        self.assertAlmostEqual(config.finger_drive_damping, 120.0)
+        self.assertAlmostEqual(config.finger_drive_max_force_n, 5.0)
+
+    def test_missing_finger_drive_leaves_drive_untouched(self) -> None:
+        """finger_drive 未定義なら maxForce=0（drive へ何も適用しない）。"""
+        physics = {k: v for k, v in _FULL_PAYLOAD["physics"].items() if k != "finger_drive"}
+        config = physics_tuning_from_payload({"physics": physics})
+
+        self.assertTrue(config.enabled)
+        self.assertEqual(config.finger_drive_max_force_n, 0.0)
 
     def test_missing_section_disables_tuning(self) -> None:
         """physics セクションが無い場合は enabled=False（従来挙動を維持）。"""

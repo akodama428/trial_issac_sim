@@ -80,6 +80,7 @@ def format_observation_line(
     hand_distance_m: float,
     stem_distance_m: float,
     stem_tension_n: float,
+    finger_gap_m: float = 0.0,
 ) -> str:
     """1 物理ステップ分の観測値を、プロットスクリプトが機械解析できる1行に整形する。
 
@@ -97,7 +98,8 @@ def format_observation_line(
         f"v={tomato_speed_m_s:.5f} "
         f"hand_d={hand_distance_m:.4f} "
         f"stem_d={stem_distance_m:.4f} "
-        f"stemF={stem_tension_n:.4f}"
+        f"stemF={stem_tension_n:.4f} "
+        f"gap={finger_gap_m:.4f}"
     )
 
 

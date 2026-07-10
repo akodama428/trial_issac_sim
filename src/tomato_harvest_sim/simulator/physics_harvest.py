@@ -305,6 +305,10 @@ class IsaacPhysicsHarvestBridge:
         speed = (velocity[0] ** 2 + velocity[1] ** 2 + velocity[2] ** 2) ** 0.5
         hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
         stem_pose = self._world_pose(self._scene_paths.stem_anchor_prim_path)
+        finger_gap = self._distance(
+            self._world_pose(self._left_finger_prim_path()),
+            self._world_pose(self._right_finger_prim_path()),
+        )
         stem_tension = estimate_stem_tension_n(
             mass_kg=self.TOMATO_MASS_KG,
             velocity_m_s=velocity,
@@ -323,6 +327,7 @@ class IsaacPhysicsHarvestBridge:
                 hand_distance_m=self._distance(hand_pose, tomato_pose),
                 stem_distance_m=self._distance(stem_pose, tomato_pose),
                 stem_tension_n=stem_tension,
+                finger_gap_m=finger_gap,
             ),
             flush=True,
         )
