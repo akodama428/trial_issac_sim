@@ -20,6 +20,17 @@ def _make_trajectory() -> JointTrajectory:
     )
 
 
+def _make_arm_and_finger_trajectory() -> JointTrajectory:
+    return JointTrajectory(
+        joint_names=("panda_joint1", "panda_finger_joint1", "panda_joint2"),
+        points=(JointTrajectoryPoint(
+            positions_rad=(0.1, 0.02, 0.2),
+            time_from_start_sec=1.0,
+            velocities_rad_s=(0.3, 0.01, 0.4),
+        ),),
+    )
+
+
 def _make_plan(
     pregrasp: JointTrajectory | None = None,
     grasp: JointTrajectory | None = None,
@@ -164,6 +175,29 @@ class TestMotionCommandLogic(unittest.TestCase):
         plan = _make_plan(pregrasp=pregrasp_traj)
         cmd = self.build(HarvestTaskPhase.MOVING_TO_PREGRASP, plan, _make_joint_state())
         self.assertIs(cmd.phase_motion_plan.joint_trajectory, pregrasp_traj)
+
+    def test_every_planned_phase_excludes_finger_joints_at_command_boundary(self) -> None:
+        mixed_trajectory = _make_arm_and_finger_trajectory()
+        plan = _make_plan(
+            pregrasp=mixed_trajectory,
+            grasp=mixed_trajectory,
+            pull=mixed_trajectory,
+            place=mixed_trajectory,
+        )
+        phases = (
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.DETACHING,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+
+        for phase in phases:
+            with self.subTest(phase=phase):
+                command = self.build(phase, plan, _make_arm_and_finger_joint_state())
+                trajectory = command.phase_motion_plan.joint_trajectory
+                self.assertEqual(trajectory.joint_names, ("panda_joint1", "panda_joint2"))
+                self.assertEqual(trajectory.points[0].positions_rad, (0.1, 0.2))
+                self.assertEqual(trajectory.points[0].velocities_rad_s, (0.3, 0.4))
 
     def test_moving_to_grasp_uses_plan_trajectory(self) -> None:
         grasp_traj = _make_trajectory()
