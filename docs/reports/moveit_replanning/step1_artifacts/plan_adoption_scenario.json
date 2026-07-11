@@ -1,0 +1,87 @@
+{
+  "scenario_events": [
+    {
+      "label": "A",
+      "arrival_time_sec": 0.0,
+      "plan_revision": 1,
+      "producer_instance_id": "global-instance-a",
+      "planned_from_phase": "target_found",
+      "consumer_phase": "planning",
+      "note": "初回 full-chain plan",
+      "expected_stale": false,
+      "legacy_adopted": true,
+      "step1_adopted": true,
+      "step1_reason": "adopted_initial"
+    },
+    {
+      "label": "B",
+      "arrival_time_sec": 4.2,
+      "plan_revision": 2,
+      "producer_instance_id": "global-instance-a",
+      "planned_from_phase": "moving_to_grasp",
+      "consumer_phase": "moving_to_grasp",
+      "note": "abort 起点 replan (86ms)",
+      "expected_stale": false,
+      "legacy_adopted": true,
+      "step1_adopted": true,
+      "step1_reason": "adopted_newer_revision"
+    },
+    {
+      "label": "C",
+      "arrival_time_sec": 4.5,
+      "plan_revision": 2,
+      "producer_instance_id": "global-instance-a",
+      "planned_from_phase": "moving_to_grasp",
+      "consumer_phase": "moving_to_grasp",
+      "note": "同一 revision の再配送",
+      "expected_stale": true,
+      "legacy_adopted": true,
+      "step1_adopted": false,
+      "step1_reason": "rejected_stale_revision"
+    },
+    {
+      "label": "D",
+      "arrival_time_sec": 7.8,
+      "plan_revision": 3,
+      "producer_instance_id": "global-instance-a",
+      "planned_from_phase": "moving_to_grasp",
+      "consumer_phase": "detaching",
+      "note": "遅い replan (768ms) が phase 通過後に到着",
+      "expected_stale": true,
+      "legacy_adopted": true,
+      "step1_adopted": false,
+      "step1_reason": "rejected_phase_mismatch"
+    },
+    {
+      "label": "E",
+      "arrival_time_sec": 12.0,
+      "plan_revision": 4,
+      "producer_instance_id": "global-instance-a",
+      "planned_from_phase": "moving_to_place",
+      "consumer_phase": "moving_to_place",
+      "note": "place replan",
+      "expected_stale": false,
+      "legacy_adopted": true,
+      "step1_adopted": true,
+      "step1_reason": "adopted_newer_revision"
+    },
+    {
+      "label": "F",
+      "arrival_time_sec": 12.6,
+      "plan_revision": 3,
+      "producer_instance_id": "global-instance-a",
+      "planned_from_phase": "moving_to_grasp",
+      "consumer_phase": "moving_to_place",
+      "note": "古い revision の遅延再配送",
+      "expected_stale": true,
+      "legacy_adopted": true,
+      "step1_adopted": false,
+      "step1_reason": "rejected_phase_mismatch"
+    }
+  ],
+  "stale_adoption_counts": {
+    "legacy_contract": 3,
+    "step1_contract": 0,
+    "stale_event_total": 3
+  }
+}

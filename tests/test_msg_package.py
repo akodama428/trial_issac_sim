@@ -87,6 +87,97 @@ class TestMsgContracts(unittest.TestCase):
         self.assertAlmostEqual(restored.confidence, 0.95)
 
 
+class TestHarvestMotionPlanContract(unittest.TestCase):
+    """Step 1: plan 契約 (revision / generated_at / planned_from_phase / producer_kind)。"""
+
+    def _minimal_plan_kwargs(self) -> dict:
+        from tomato_harvest_sim.msg.contracts import Pose3D
+        pose = Pose3D(x=0.1, y=0.2, z=0.3, roll=0.0, pitch=0.0, yaw=0.0)
+        return {
+            "planner_name": "moveit2_service_bridge",
+            "target_pose": pose,
+            "pregrasp_pose": pose,
+            "grasp_pose": pose,
+            "pull_pose": pose,
+            "place_pose": pose,
+        }
+
+    def test_new_contract_metadata_roundtrips_via_json(self) -> None:
+        from tomato_harvest_sim.msg.contracts import (
+            HarvestMotionPlan,
+            HarvestTaskPhase,
+            PlanProducerKind,
+        )
+        from tomato_harvest_sim.msg.serialization import (
+            harvest_motion_plan_from_json,
+            harvest_motion_plan_to_json,
+        )
+
+        plan = HarvestMotionPlan(
+            **self._minimal_plan_kwargs(),
+            plan_revision=7,
+            generated_at_sec=1234.5,
+            planned_from_phase=HarvestTaskPhase.MOVING_TO_GRASP,
+            producer_kind=PlanProducerKind.GLOBAL_PLANNER,
+            producer_instance_id="global-instance-a",
+        )
+        restored = harvest_motion_plan_from_json(harvest_motion_plan_to_json(plan))
+
+        self.assertEqual(restored.plan_revision, 7)
+        self.assertAlmostEqual(restored.generated_at_sec, 1234.5)
+        self.assertIs(restored.planned_from_phase, HarvestTaskPhase.MOVING_TO_GRASP)
+        self.assertIs(restored.producer_kind, PlanProducerKind.GLOBAL_PLANNER)
+        self.assertEqual(restored.producer_instance_id, "global-instance-a")
+
+    def test_old_contract_json_parses_as_unversioned(self) -> None:
+        """旧契約 JSON (メタデータなし) はエラーにならず未刻印 (revision 0) として読める。
+
+        採用可否は adoption policy が判定し、未刻印 plan は棄却される (fail-closed)。
+        デシリアライズ層はクラッシュしないことだけを保証する。
+        """
+        import json
+        from tomato_harvest_sim.msg.contracts import HarvestMotionPlan, PlanProducerKind
+        from tomato_harvest_sim.msg.serialization import (
+            harvest_motion_plan_from_json,
+            harvest_motion_plan_to_dict,
+        )
+
+        old_json_dict = harvest_motion_plan_to_dict(
+            HarvestMotionPlan(**self._minimal_plan_kwargs())
+        )
+        for new_field in (
+            "plan_revision", "generated_at_sec", "planned_from_phase",
+            "producer_kind", "producer_instance_id",
+        ):
+            old_json_dict.pop(new_field, None)
+
+        restored = harvest_motion_plan_from_json(json.dumps(old_json_dict))
+
+        self.assertEqual(restored.plan_revision, 0)
+        self.assertIsNone(restored.generated_at_sec)
+        self.assertIsNone(restored.planned_from_phase)
+        self.assertIs(restored.producer_kind, PlanProducerKind.GLOBAL_PLANNER)
+        self.assertIsNone(restored.producer_instance_id)
+
+    def test_unknown_metadata_values_degrade_without_error(self) -> None:
+        """未知の producer_kind / phase 値はエラーではなく安全側の値へ落ちる。"""
+        import json
+        from tomato_harvest_sim.msg.contracts import HarvestMotionPlan, PlanProducerKind
+        from tomato_harvest_sim.msg.serialization import (
+            harvest_motion_plan_from_json,
+            harvest_motion_plan_to_dict,
+        )
+
+        data = harvest_motion_plan_to_dict(HarvestMotionPlan(**self._minimal_plan_kwargs()))
+        data["producer_kind"] = "planner_from_the_future"
+        data["planned_from_phase"] = "phase_from_the_future"
+
+        restored = harvest_motion_plan_from_json(json.dumps(data))
+
+        self.assertIs(restored.producer_kind, PlanProducerKind.UNKNOWN)
+        self.assertIsNone(restored.planned_from_phase)
+
+
 class TestRobotMsg(unittest.TestCase):
     def test_robot_msg_perception_exports_target_estimator(self) -> None:
         from tomato_harvest_sim.robot.msg.perception import TargetEstimator
