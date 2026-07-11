@@ -142,6 +142,7 @@ def main() -> None:
             self._published_phases: frozenset[HarvestTaskPhase] = frozenset()
             self._latest_plan: HarvestMotionPlan | None = None
             self._current_joint_state: JointStateSnapshot | None = None
+            self._current_phase: HarvestTaskPhase | None = None
             self._revision = 0
             self._instance_id = uuid.uuid4().hex
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
@@ -167,6 +168,8 @@ def main() -> None:
                     plan_revision=plan.plan_revision,
                 ))
             self._latest_plan = plan
+            if self._current_phase is not None:
+                self._publish_local_correction(self._current_phase)
 
         def _on_joint_state(self, msg: object) -> None:
             self._current_joint_state = JointStateSnapshot(
@@ -179,6 +182,10 @@ def main() -> None:
                 phase = HarvestTaskPhase(msg.data)
             except ValueError:
                 return
+            self._current_phase = phase
+            self._publish_local_correction(phase)
+
+        def _publish_local_correction(self, phase: HarvestTaskPhase) -> None:
             if phase not in self._enabled_phases or phase in self._published_phases:
                 return
             if self._latest_plan is None or self._current_joint_state is None:

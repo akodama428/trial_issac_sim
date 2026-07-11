@@ -162,7 +162,38 @@ class _SuffixFakeBridge:
         )
 
 
+class _FlakySuffixFakeBridge(_SuffixFakeBridge):
+    def __init__(self, suffix: JointTrajectory) -> None:
+        super().__init__(suffix)
+        self.calls = 0
+
+    def plan_suffix_trajectory(self, **kwargs: object) -> MoveIt2PlanningResult:
+        self.calls += 1
+        if self.calls < 3:
+            return MoveIt2PlanningResult(
+                success=False, backend_name="suffix_bridge", reason="temporary_failure"
+            )
+        return super().plan_suffix_trajectory(**kwargs)
+
+
 class PhaseSuffixIntegrationTest(unittest.TestCase):
+    def test_temporary_suffix_failure_is_retried(self) -> None:
+        phase = HarvestTaskPhase.MOVING_TO_PLACE
+        suffix = _trajectory(1.0)
+        bridge = _FlakySuffixFakeBridge(suffix)
+        planner = MoveIt2ServiceBridgePlanner(bridge=bridge)  # type: ignore[arg-type]
+
+        candidate = planner.plan_from_phase(
+            phase,
+            _plan(phase=phase, endpoint=1.0),
+            JointStateSnapshot(("joint1", "joint2"), (0.25, 0.25)),
+            _tf_tree(),
+            _scene(),
+        )
+
+        self.assertIsNotNone(candidate)
+        self.assertEqual(bridge.calls, 3)
+
     def test_deviation_replans_only_current_phase_suffix_from_latest_joints(self) -> None:
         for phase, field in _SUFFIX_FIELD_BY_PHASE.items():
             with self.subTest(phase=phase):
