@@ -99,7 +99,7 @@ def trigger_starts_planner(
         return True
     return (
         phase is HarvestTaskPhase.MOVING_TO_PLACE
-        and trigger in {ReplanTrigger.SCENE_CHANGE, ReplanTrigger.TRACKING_ERROR}
+        and trigger is ReplanTrigger.TRACKING_ERROR
     )
 
 

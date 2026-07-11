@@ -47,10 +47,12 @@ class ReplanTriggerPolicyTest(unittest.TestCase):
         ))
 
     def test_place_phase_starts_suffix_planner_for_new_triggers(self) -> None:
-        for trigger in (ReplanTrigger.SCENE_CHANGE, ReplanTrigger.TRACKING_ERROR):
-            self.assertTrue(trigger_starts_planner(
-                trigger, HarvestTaskPhase.MOVING_TO_PLACE
-            ))
+        self.assertTrue(trigger_starts_planner(
+            ReplanTrigger.TRACKING_ERROR, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.SCENE_CHANGE, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
         self.assertFalse(trigger_starts_planner(
             ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_PLACE
         ))
