@@ -44,10 +44,9 @@ def evaluate_plan_adoption(
 
     規則は次の順で適用する。
     1. producer 規則: 未知の producer_kind の plan は採用しない。
-    2. 旧契約互換: revision 0はversioned plan未採用時だけ採用する。
-    3. metadata規則: versioned planの必須metadata欠落はfail-closedで棄却する。
-    4. phase整合規則: phase-bound planは現在phaseが一致する場合だけ採用する。
-    5. 同一producer instanceはrevision、異なるinstanceは生成時刻で順序付ける。
+    2. metadata規則: revision (1以上) と必須metadataの欠落はfail-closedで棄却する。
+    3. phase整合規則: phase-bound planは現在phaseが一致する場合だけ採用する。
+    4. 同一producer instanceはrevision、異なるinstanceは生成時刻で順序付ける。
 
     Args:
         candidate: 新しく届いた plan。
@@ -64,15 +63,8 @@ def evaluate_plan_adoption(
     if candidate.producer_kind is not PlanProducerKind.GLOBAL_PLANNER:
         return PlanAdoptionDecision(adopted=False, reason="rejected_unsupported_producer")
 
-    if candidate.plan_revision == 0:
-        if current_plan is not None and current_plan.plan_revision > 0:
-            return PlanAdoptionDecision(
-                adopted=False, reason="rejected_legacy_after_versioned"
-            )
-        return PlanAdoptionDecision(adopted=True, reason="adopted_legacy_contract")
-
     if (
-        candidate.plan_revision < 0
+        candidate.plan_revision < 1
         or candidate.generated_at_sec is None
         or not candidate.producer_instance_id
         or candidate.planned_from_phase is None
@@ -91,7 +83,7 @@ def evaluate_plan_adoption(
     ):
         return PlanAdoptionDecision(adopted=False, reason="rejected_phase_mismatch")
 
-    if current_plan is None or current_plan.plan_revision == 0:
+    if current_plan is None:
         return PlanAdoptionDecision(adopted=True, reason="adopted_initial")
 
     if candidate.producer_instance_id == current_plan.producer_instance_id:

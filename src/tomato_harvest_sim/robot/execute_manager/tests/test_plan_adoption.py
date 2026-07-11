@@ -168,25 +168,25 @@ class TestPhaseConsistencyRule(unittest.TestCase):
         self.assertEqual(decision.reason, "rejected_missing_plan_metadata")
 
 
-class TestLegacyAndProducerRule(unittest.TestCase):
-    def test_legacy_plan_without_metadata_keeps_old_behavior(self) -> None:
-        """legacy同士では従来どおり到着planを採用する。"""
+class TestProducerAndMetadataRule(unittest.TestCase):
+    def test_unversioned_plan_is_rejected_as_missing_metadata(self) -> None:
+        """revision 0 (未刻印) の plan は契約違反として fail-closed で棄却する。"""
         decision = evaluate_plan_adoption(
-            candidate=make_plan(),
-            current_plan=make_plan(),
+            candidate=make_plan(plan_revision=0),
+            current_plan=None,
             current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
         )
-        self.assertTrue(decision.adopted)
-        self.assertEqual(decision.reason, "adopted_legacy_contract")
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_missing_plan_metadata")
 
-    def test_legacy_plan_cannot_overwrite_versioned_plan(self) -> None:
+    def test_unversioned_plan_cannot_overwrite_versioned_plan(self) -> None:
         decision = evaluate_plan_adoption(
             candidate=make_plan(plan_revision=0),
             current_plan=make_plan(plan_revision=10),
             current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
         )
         self.assertFalse(decision.adopted)
-        self.assertEqual(decision.reason, "rejected_legacy_after_versioned")
+        self.assertEqual(decision.reason, "rejected_missing_plan_metadata")
 
     def test_unknown_producer_kind_is_rejected(self) -> None:
         decision = evaluate_plan_adoption(

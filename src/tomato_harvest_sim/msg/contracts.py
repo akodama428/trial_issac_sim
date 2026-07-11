@@ -218,7 +218,8 @@ class HarvestMotionPlan:
     place_joint_trajectory: JointTrajectory | None = None
     planning_scene_object_ids: tuple[str, ...] = ()
     # Step 1 plan 契約メタデータ (Issue #9)。
-    # plan_revision: producer 単調増加の版数。0 は旧契約 (未版数) を表す。
+    # plan_revision: producer 単調増加の版数 (1以上)。既定値 0 は「未刻印」を表し、
+    #   consumer の adoption policy はこれを契約違反として採用しない。
     # generated_at_sec: 生成時刻 (epoch 秒)。観測用でありノード間の採用判定には使わない。
     # planned_from_phase: 計画起点 phase。実行 phase 起点の replan は phase-bound になる。
     # producer_kind: 生成した producer 種別。plan producer 複線化 (Step 5) の識別子。

@@ -129,8 +129,12 @@ class TestHarvestMotionPlanContract(unittest.TestCase):
         self.assertIs(restored.producer_kind, PlanProducerKind.GLOBAL_PLANNER)
         self.assertEqual(restored.producer_instance_id, "global-instance-a")
 
-    def test_old_contract_json_parses_with_legacy_defaults(self) -> None:
-        """旧契約 JSON (メタデータなし) は legacy 既定値で読める。"""
+    def test_old_contract_json_parses_as_unversioned(self) -> None:
+        """旧契約 JSON (メタデータなし) はエラーにならず未刻印 (revision 0) として読める。
+
+        採用可否は adoption policy が判定し、未刻印 plan は棄却される (fail-closed)。
+        デシリアライズ層はクラッシュしないことだけを保証する。
+        """
         import json
         from tomato_harvest_sim.msg.contracts import HarvestMotionPlan, PlanProducerKind
         from tomato_harvest_sim.msg.serialization import (
