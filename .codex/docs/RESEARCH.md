@@ -313,6 +313,58 @@ Custom Docker Container
   - 今回の `trajectory_tracking` が独自に持っている `q_ref(t)` 評価、追従ゲイン、timeout / tolerance 判定の多くは、`joint_trajectory_controller` と `FollowJointTrajectory` の組み合わせへ委譲できる。
   - したがって、独自 PD executor の安定化をゲイン調整で詰めるより、`ros2_control` の `position, velocity` interface を使う標準構成へ寄せる方が、意味論と責務分離の両面で妥当である。
 
+## 21. 外乱にロバストな MoveIt2 計画には「常時フル再計画」より「グローバル計画 + ローカル追従」の分離が推奨される
+- 調査日: 2026-07-08
+- 対象:
+  - MoveIt Documentation: Rolling
+  - `Hybrid Planning`
+  - `Planning Scene Monitor`
+  - `Realtime Servo`
+- 確認できた事実:
+  - MoveIt 公式の `Hybrid Planning` では、従来の `Sense-Plan-Act` は既知の静的環境には有効だが、不安定または動的な環境には適用しづらいと説明している。
+  - 同ページでは、その対策として `global planner` と `local planner` を並列かつ反復的に動かす `Hybrid Planning` を提示している。
+  - 同ページでは、global planner は比較的遅く完備性寄り、local planner は連続実行され、現在状態・世界状態・参照軌道を見ながらロボットコマンドを逐次生成すると説明している。
+  - 同ページでは、local planner が近接衝突などの局所問題を検出した場合、event-based logic により global planner を再起動して replan できると説明している。
+  - `Planning Scene Monitor` では、最新の planning scene を維持する推奨インタフェースは `PlanningSceneMonitor` であり、`CurrentStateMonitor` は `JointState` と TF を subscribe して内部 `RobotState` を更新すると説明している。
+  - `Realtime Servo` では、MoveIt Servo はリアルタイム制御向けであり、joint velocity / end-effector velocity / end-effector pose を入力として受け、visual servoing や closed-loop position control に使えると説明している。
+  - `Realtime Servo` では、collision checking、singularity checking、motion smoothing、joint position / velocity limits enforcement を備えると説明している。
+- 推論ではなく確認済みの解釈:
+  - MoveIt2 の一次情報だけを見ると、「低周期で現在状態から再計画する」要求は妥当である。ただし、推奨アーキテクチャは「実行中に毎回フルOMPL再計画して controller goal を置換し続ける」より、「グローバル計画」と「ローカル追従 / ローカル補正」を分離する形である。
+  - したがって、このリポジトリの改善も、まずは `現在状態を起点にした低周期の suffix replan` を導入しつつ、将来的には `Hybrid Planning` または `MoveIt Servo` を使った local planner へ寄せる方が、MoveIt2 の公式整理と整合する。
+- 現時点の推奨方針:
+  1. 近短期は、現行 `trajectory_planner_node` に低周期 timer を導入し、`aborted` 時だけでなく、移動フェーズ中は最新 `joint_states` と `scene_snapshot` から再計画する。
+  2. ただし再計画対象は「全フェーズ固定」ではなく、現在フェーズ以降の `suffix` に限定する。特に `MOVING_TO_PLACE` では既存の `plan_place_trajectory()` を使う。
+  3. `DETACHING` のような接触を伴う区間は、低周期OMPL再計画の主対象にせず、停止 / 保持 / 退避といった局所挙動、または将来の `Servo` / local planner 適用候補として扱う。
+  4. 中長期は、`Hybrid Planning` の `global planner + local planner` へ移行し、global planner は疎に replan、local planner は高頻度に追従補正する構成を検討する。
+- 未解決の確認事項:
+  - 現行の `motion_command_executor_node` の cancel-and-replace 実装で、低周期再計画をどこまで許容できるか。
+  - `DETACHING` 中に必要なのはグローバル経路再探索なのか、それとも contact-aware な局所補正なのか。
+  - `MoveIt Servo` をこの構成へ入れる場合、`joint_trajectory_controller` とどう役割分担するか。
+- ソース:
+  - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
+  - https://moveit.picknik.ai/main/doc/examples/hybrid_planning/hybrid_planning_tutorial.html
+  - https://moveit.picknik.ai/main/doc/examples/planning_scene_monitor/planning_scene_monitor_tutorial.html
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+
+## 22. GitHub Actions でローカルマシンを実行基盤にする場合は self-hosted runner を使い、`runs-on` でラベル指定する
+- 調査日: 2026-07-09
+- 対象:
+  - GitHub Docs `Self-hosted runners`
+  - GitHub Docs `Choosing the runner for a job`
+  - GitHub Docs `Workflow syntax`
+- 確認できた事実:
+  - GitHub 公式では、GitHub Actions の job をローカルマシンやオンプレ環境で実行するには `self-hosted runner` を使う。
+  - self-hosted runner は、ハードウェア、OS、インストール済みソフトウェアを自分で管理する前提である。
+  - `jobs.<job_id>.runs-on` にはラベル配列を指定でき、self-hosted runner を対象にする場合は `runs-on: [self-hosted, linux, x64, gpu]` のように複数ラベルを並べられる。
+  - 配列指定の場合、job は指定したすべてのラベルに一致する runner 上でのみ実行される。
+- 推論ではなく確認済みの解釈:
+  - Isaac Sim の GPU 実行、Docker、NVIDIA Container Toolkit を前提にしたこのリポジトリの CI は、GitHub-hosted runner ではなく self-hosted runner 前提で構成するのが妥当である。
+  - したがって workflow では `self-hosted`, `linux`, `x64`, `gpu` のラベルを要求し、runner 側の前提条件を固定した方が運用しやすい。
+- ソース:
+  - https://docs.github.com/en/actions/concepts/runners/self-hosted-runners
+  - https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job
+  - https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+
 # ソース
 - NVIDIA Isaac Sim Container Installation
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html
