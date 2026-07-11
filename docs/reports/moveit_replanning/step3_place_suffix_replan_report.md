@@ -218,15 +218,15 @@ integration testは、渡されたstart stateが最新joint stateと一致する
 
 ## 主要メトリクス比較
 
-Step 0実測ではfull-chain plannerの平均latencyは `329.538 ms`、active goalのcancel / replacementは各3回だった。Step 3 integrationの1回の姿勢ずれシナリオではsignificant候補を1回採用するためcancel / replacementは最大1回、小差分シナリオでは0回となる。integration backendはtest doubleのため、MoveIt実latencyとの数値比較は行わず、CI/E2Eでは `place_suffix_replan_completed.latency_ms` を継続収集する。
+実MoveIt E2E（run `29149910073`）で`MOVING_TO_PLACE`中にtracking error `0.20 rad`を1回注入した。初回full-chain planningは `342.122 ms`、place suffix（残り区間）replanは `41.888 ms`で、suffixは約87.8%短かった。suffix replanは1回だけ成功し、収穫は`returning_home → complete`まで完走した。run全体のcancel / replacementは各4回で、Step 0基準線の各3回に対し、意図したsuffix採用1回分だけ増加した。
 
 ```mermaid
 xychart-beta
   title "Trajectory差し替え・cancel回数"
   x-axis [full_chain_baseline, suffix_significant, suffix_small_delta]
   y-axis "回数 [回]" 0 --> 4
-  bar [3, 1, 0]
-  line [3, 1, 0]
+  bar [3, 4, 3]
+  line [3, 4, 3]
 ```
 
 barはtrajectory replacement、lineはcancelを表す。
@@ -234,12 +234,12 @@ barはtrajectory replacement、lineはcancelを表す。
 ```mermaid
 xychart-beta
   title "Planner latency（実測可能範囲）"
-  x-axis [full_chain_step0]
+  x-axis [full_chain_e2e, place_suffix_e2e]
   y-axis "平均 latency [ms]" 0 --> 400
-  bar [329.538]
+  bar [342.122, 41.888]
 ```
 
-suffixの実MoveIt latencyは本PRのCI/E2Eでplace replan triggerを注入しないため未計測であり、test double値を混在させない。runtime metricは追加済みで、次の外乱注入E2Eで比較する。
+両値は同じE2E runの実MoveIt計測であり、test doubleの処理時間は含めていない。tracking error起点は1回だけ実行し、scene changeはobserve-onlyとして余計なcancel churnを抑止した。
 
 ## 実行した検証
 
