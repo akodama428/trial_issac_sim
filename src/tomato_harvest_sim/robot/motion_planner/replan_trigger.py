@@ -101,3 +101,14 @@ def trigger_starts_planner(
         phase is HarvestTaskPhase.MOVING_TO_PLACE
         and trigger in {ReplanTrigger.SCENE_CHANGE, ReplanTrigger.TRACKING_ERROR}
     )
+
+
+def should_inject_place_replan(
+    *, enabled: bool, already_injected: bool, phase: HarvestTaskPhase | None
+) -> bool:
+    """E2E外乱をMOVING_TO_PLACEで一度だけ注入するか返す。"""
+    return (
+        enabled
+        and not already_injected
+        and phase is HarvestTaskPhase.MOVING_TO_PLACE
+    )

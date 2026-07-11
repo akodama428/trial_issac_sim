@@ -11,6 +11,7 @@ from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     TriggerMemory,
     evaluate_replan_trigger,
     memory_after_trigger,
+    should_inject_place_replan,
     trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
@@ -24,6 +25,7 @@ from tomato_harvest_sim.robot.motion_planner.place_suffix_replan import (
 
 def main() -> None:
     import json
+    import os
     import uuid
     import rclpy
     from rclpy.node import Node
@@ -65,6 +67,10 @@ def main() -> None:
             self._trigger_memory = TriggerMemory()
             self._place_replan_gate = PlaceSuffixReplanGate()
             self._latest_plan = None
+            self._inject_place_replan = (
+                os.environ.get("TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE", "0") == "1"
+            )
+            self._place_replan_injected = False
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
             self._producer_instance_id = uuid.uuid4().hex
 
@@ -122,6 +128,19 @@ def main() -> None:
             self._evaluate_replan_trigger()
 
         def _on_replan_timer(self) -> None:
+            state = self._state.snapshot()
+            if should_inject_place_replan(
+                enabled=self._inject_place_replan,
+                already_injected=self._place_replan_injected,
+                phase=state.phase,
+            ):
+                self._place_replan_injected = True
+                self._state.update_tracking_error(0.20)
+                self.get_logger().info(metric_line(
+                    "place_suffix_e2e_disturbance_injected",
+                    phase=state.phase.value,
+                    tracking_error_rad=0.20,
+                ))
             self._evaluate_replan_trigger()
 
         def _evaluate_replan_trigger(self) -> None:
@@ -217,6 +236,8 @@ def main() -> None:
                     return
                 self._publish_plan(candidate, trigger=trigger, phase=state.phase)
             finally:
+                if self._place_replan_injected:
+                    self._state.update_tracking_error(None)
                 self._place_replan_gate.finish()
 
         def _try_plan(self, *, trigger: str) -> None:

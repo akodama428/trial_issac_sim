@@ -57,12 +57,27 @@ def summarize(events: Iterable[dict[str, object]]) -> dict[str, object]:
         "min": min(latencies) if latencies else None,
         "max": max(latencies) if latencies else None,
     }
+    suffix_latencies = [
+        float(event["latency_ms"])
+        for event in event_list
+        if event["event"] == "place_suffix_replan_completed"
+        and event.get("success") is True
+        and isinstance(event.get("latency_ms"), (int, float))
+    ]
     return {
         "planner_latency_ms": latency_summary,
         "cancel_count": sum(event["event"] == "trajectory_cancel_requested" for event in event_list),
         "trajectory_replacement_count": sum(
             event["event"] == "trajectory_replaced" for event in event_list
         ),
+        "place_suffix_replan": {
+            "successful_count": len(suffix_latencies),
+            "latency_ms": {
+                "mean": statistics.fmean(suffix_latencies) if suffix_latencies else None,
+                "min": min(suffix_latencies) if suffix_latencies else None,
+                "max": max(suffix_latencies) if suffix_latencies else None,
+            },
+        },
         "phase_abort": {
             phase: {
                 "started": started[phase],
