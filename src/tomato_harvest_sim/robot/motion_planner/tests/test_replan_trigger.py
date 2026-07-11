@@ -6,7 +6,8 @@ from tomato_harvest_sim.msg.contracts import (
     HarvestTaskPhase, JointStateSnapshot, Pose3D, TargetEstimate,
 )
 from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
-    ReplanTrigger, TriggerMemory, evaluate_replan_trigger, should_inject_place_replan,
+    ReplanTrigger, TriggerMemory, evaluate_replan_trigger,
+    parse_suffix_injection_phases, should_inject_suffix_replan,
     trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import PlannerState
@@ -24,38 +25,75 @@ def _ready_state(**changes: object) -> PlannerState:
 
 
 class ReplanTriggerPolicyTest(unittest.TestCase):
-    def test_e2e_place_replan_injection_runs_once_in_place_phase(self) -> None:
-        self.assertTrue(should_inject_place_replan(
-            enabled=True, already_injected=False,
+    def test_e2e_suffix_replan_injection_runs_once_per_enabled_phase(self) -> None:
+        enabled = frozenset({
+            HarvestTaskPhase.MOVING_TO_PREGRASP, HarvestTaskPhase.MOVING_TO_PLACE,
+        })
+        self.assertTrue(should_inject_suffix_replan(
+            enabled_phases=enabled, injected_phases=frozenset(),
+            phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
+        ))
+        self.assertFalse(should_inject_suffix_replan(
+            enabled_phases=enabled,
+            injected_phases=frozenset({HarvestTaskPhase.MOVING_TO_PREGRASP}),
+            phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
+        ))
+        self.assertTrue(should_inject_suffix_replan(
+            enabled_phases=enabled,
+            injected_phases=frozenset({HarvestTaskPhase.MOVING_TO_PREGRASP}),
             phase=HarvestTaskPhase.MOVING_TO_PLACE,
         ))
-        self.assertFalse(should_inject_place_replan(
-            enabled=True, already_injected=True,
-            phase=HarvestTaskPhase.MOVING_TO_PLACE,
-        ))
-        self.assertFalse(should_inject_place_replan(
-            enabled=True, already_injected=False,
+        self.assertFalse(should_inject_suffix_replan(
+            enabled_phases=enabled, injected_phases=frozenset(),
             phase=HarvestTaskPhase.MOVING_TO_GRASP,
         ))
 
-    def test_only_abort_starts_full_chain_planner_in_step2(self) -> None:
+    def test_injection_phases_are_parsed_from_environment_value(self) -> None:
+        self.assertEqual(
+            parse_suffix_injection_phases("moving_to_pregrasp, moving_to_place"),
+            frozenset({
+                HarvestTaskPhase.MOVING_TO_PREGRASP,
+                HarvestTaskPhase.MOVING_TO_PLACE,
+            }),
+        )
+        self.assertEqual(parse_suffix_injection_phases(""), frozenset())
+        self.assertEqual(parse_suffix_injection_phases("detaching, bogus"), frozenset())
+
+    def test_abort_starts_full_chain_planner_in_any_phase(self) -> None:
         self.assertTrue(trigger_starts_planner(
             ReplanTrigger.ABORT, HarvestTaskPhase.MOVING_TO_GRASP
         ))
-        self.assertFalse(trigger_starts_planner(
-            ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_GRASP
+        self.assertTrue(trigger_starts_planner(
+            ReplanTrigger.ABORT, HarvestTaskPhase.DETACHING
         ))
 
-    def test_place_phase_starts_suffix_planner_for_new_triggers(self) -> None:
-        self.assertTrue(trigger_starts_planner(
-            ReplanTrigger.TRACKING_ERROR, HarvestTaskPhase.MOVING_TO_PLACE
-        ))
+    def test_tracking_error_starts_suffix_planner_in_free_space_phases(self) -> None:
+        for phase in (
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+        ):
+            with self.subTest(phase=phase):
+                self.assertTrue(trigger_starts_planner(
+                    ReplanTrigger.TRACKING_ERROR, phase
+                ))
+
+    def test_contact_dominant_detaching_stays_observe_only(self) -> None:
         self.assertFalse(trigger_starts_planner(
-            ReplanTrigger.SCENE_CHANGE, HarvestTaskPhase.MOVING_TO_PLACE
+            ReplanTrigger.TRACKING_ERROR, HarvestTaskPhase.DETACHING
         ))
-        self.assertFalse(trigger_starts_planner(
-            ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_PLACE
-        ))
+
+    def test_timer_and_scene_change_stay_observe_only(self) -> None:
+        for phase in (
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+        ):
+            with self.subTest(phase=phase):
+                self.assertFalse(trigger_starts_planner(ReplanTrigger.TIMER, phase))
+                self.assertFalse(trigger_starts_planner(
+                    ReplanTrigger.SCENE_CHANGE, phase
+                ))
 
     def test_timer_triggers_in_enabled_phase(self) -> None:
         decision = evaluate_replan_trigger(

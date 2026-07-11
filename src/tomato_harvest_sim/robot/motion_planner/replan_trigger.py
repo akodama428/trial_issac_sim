@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from tomato_harvest_sim.msg.contracts import HarvestTaskPhase
+from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
+    SUFFIX_REPLAN_PHASES,
+)
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import PlannerState
 
 
@@ -90,25 +93,49 @@ def memory_after_trigger(
 def trigger_starts_planner(
     trigger: ReplanTrigger, phase: HarvestTaskPhase | None
 ) -> bool:
-    """Step 2 で既存 full-chain planner を実行してよい trigger を返す。
+    """planner を実際に起動してよい trigger を返す。
 
-    timer / scene change / tracking error は Step 3 の phase-scoped suffix
-    planning が入るまで観測専用とする。既存挙動の abort replan だけを維持する。
+    abort は従来どおり全 phase で full-chain replan を起動する。
+    tracking error は自由空間phase (SUFFIX_REPLAN_PHASES) に限り suffix replan を
+    起動する。接触支配の DETACHING は global replan が逆効果になり得るため
+    観測専用に保つ (Issue #12 設計判断)。timer / scene change も cancel churn を
+    避けるため、local planner 導入 (Step 6) まで観測専用とする。
     """
     if trigger is ReplanTrigger.ABORT:
         return True
-    return (
-        phase is HarvestTaskPhase.MOVING_TO_PLACE
-        and trigger is ReplanTrigger.TRACKING_ERROR
-    )
+    return phase in SUFFIX_REPLAN_PHASES and trigger is ReplanTrigger.TRACKING_ERROR
 
 
-def should_inject_place_replan(
-    *, enabled: bool, already_injected: bool, phase: HarvestTaskPhase | None
+def parse_suffix_injection_phases(raw: str) -> frozenset[HarvestTaskPhase]:
+    """E2E外乱注入の対象phaseを環境変数値から読み取る。
+
+    suffix replan対象外のphase名や不正な値は無視する。
+
+    Args:
+        raw: カンマ区切りのphase値 (例: "moving_to_pregrasp, moving_to_place")。
+
+    Returns:
+        注入対象として有効なphaseの集合。
+    """
+    phases = set()
+    for token in raw.split(","):
+        name = token.strip()
+        if not name:
+            continue
+        try:
+            phase = HarvestTaskPhase(name)
+        except ValueError:
+            continue
+        if phase in SUFFIX_REPLAN_PHASES:
+            phases.add(phase)
+    return frozenset(phases)
+
+
+def should_inject_suffix_replan(
+    *,
+    enabled_phases: frozenset[HarvestTaskPhase],
+    injected_phases: frozenset[HarvestTaskPhase],
+    phase: HarvestTaskPhase | None,
 ) -> bool:
-    """E2E外乱をMOVING_TO_PLACEで一度だけ注入するか返す。"""
-    return (
-        enabled
-        and not already_injected
-        and phase is HarvestTaskPhase.MOVING_TO_PLACE
-    )
+    """E2E外乱を対象phaseごとに一度だけ注入するか返す。"""
+    return phase in enabled_phases and phase not in injected_phases

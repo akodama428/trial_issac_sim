@@ -28,7 +28,9 @@ jobs:
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
-      TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE: "1"
+      # 自由空間の各移動phaseへtracking error外乱を一度ずつ注入し、
+      # phase-aware suffix replanが実MoveItで成功することをE2Eで検証する (Step 4)。
+      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place"
     steps:
       - name: Clean workspace residue
         run: |

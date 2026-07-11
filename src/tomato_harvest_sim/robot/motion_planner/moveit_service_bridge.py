@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
+    HarvestTaskPhase,
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
@@ -15,6 +16,9 @@ from tomato_harvest_sim.msg.contracts import (
     TfTreeSnapshot,
 )
 from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
+from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
+    SUFFIX_TRAJECTORY_FIELD_BY_PHASE,
+)
 from tomato_harvest_sim.robot.motion_planner.pregrasp_planner import MoveItStylePreGraspPlanner
 from tomato_harvest_sim.robot.motion_planner.ros_python import ensure_ros_python_modules_available
 
@@ -67,29 +71,48 @@ class MoveIt2ServiceBridgePlanner(MotionPlanner):
             planning_scene_object_ids=result.planning_scene_object_ids or fallback_plan.planning_scene_object_ids,
         )
 
-    def plan_place_from_joint_state(
+    def plan_from_phase(
         self,
+        phase: HarvestTaskPhase,
         prior_plan: HarvestMotionPlan,
         joint_state: JointStateSnapshot,
         tf_tree: TfTreeSnapshot,
         scene_snapshot: SceneSnapshot,
     ) -> HarvestMotionPlan | None:
-        """MOVING_TO_PLACE 中のリプラン専用。
-        フルチェーン（pregrasp→grasp→pull→place）を経由せず、
-        ロボットの実際の現在位置から直接 place 軌道を計画する。
+        """実行中phaseの残区間だけを最新joint stateから再計画する (Issue #12)。
+
+        フルチェーン（pregrasp→grasp→pull→place）を経由せず、phaseに対応する
+        trajectory 1区間のみを差し替えたplanを返す。差し替え区間の選択を
+        ここ（planner adapter）に寄せることで、node側のphase分岐を増やさない。
+
+        Args:
+            phase: 実行中のharvest phase。
+            prior_plan: 現在採用中のplan。差し替えないphaseの軌道はこれを保持する。
+            joint_state: 再計画の起点にする最新joint state。
+            tf_tree: 座標系snapshot。
+            scene_snapshot: planning scene更新に使うscene snapshot。
+
+        Returns:
+            phaseの残区間だけ更新したplan。suffix replan対象外のphase、または
+            計画失敗時はNone。
         """
-        plan_place_fn = getattr(self._bridge, "plan_place_trajectory", None)
-        if plan_place_fn is None:
+        field = SUFFIX_TRAJECTORY_FIELD_BY_PHASE.get(phase)
+        if field is None:
             return None
-        result = plan_place_fn(
+        plan_suffix_fn = getattr(self._bridge, "plan_suffix_trajectory", None)
+        if plan_suffix_fn is None:
+            return None
+        result = plan_suffix_fn(
+            phase=phase,
             joint_state=joint_state,
             tf_tree=tf_tree,
             scene_snapshot=scene_snapshot,
             plan=prior_plan,
         )
-        if not result.success:
+        trajectory = getattr(result, field)
+        if not result.success or trajectory is None:
             return None
-        return replace(prior_plan, planner_name=result.backend_name, place_joint_trajectory=result.place_joint_trajectory)
+        return replace(prior_plan, planner_name=result.backend_name, **{field: trajectory})
 
 
 class Ros2MoveIt2PlannerBridge:
@@ -273,16 +296,30 @@ class Ros2MoveIt2PlannerBridge:
             planning_scene_object_ids=planning_scene_object_ids,
         )
 
-    def plan_place_trajectory(
+    def plan_suffix_trajectory(
         self,
         *,
+        phase: HarvestTaskPhase,
         joint_state: JointStateSnapshot,
         tf_tree: TfTreeSnapshot,
         scene_snapshot: SceneSnapshot,
         plan: HarvestMotionPlan,
     ) -> MoveIt2PlanningResult:
-        """ロボットの現在位置から approach + place 軌道のみを計画する。
-        MOVING_TO_PLACE 中のリプランで使用し、フルチェーンによる位置ズレを防ぐ。
+        """ロボットの現在位置から、実行中phaseの残区間軌道のみを計画する。
+
+        自由空間phaseのリプランで使用し、フルチェーン再計画による位置ズレと
+        完了済み区間の無駄な作り直しを防ぐ。phaseごとの目標poseとplanning scene
+        設定（トマト把持前/後）の違いはここで吸収する。
+
+        Args:
+            phase: 実行中のharvest phase。suffix replan対象外なら失敗を返す。
+            joint_state: 再計画の起点にする最新joint state。
+            tf_tree: 座標系snapshot。
+            scene_snapshot: planning scene更新に使うscene snapshot。
+            plan: 目標poseの参照元にする現在採用中のplan。
+
+        Returns:
+            成功時はphaseに対応するtrajectoryだけを持つMoveIt2PlanningResult。
         """
         if not _moveit2_python_available():
             return self._fallback_result("moveit2_python_unavailable")
@@ -297,6 +334,65 @@ class Ros2MoveIt2PlannerBridge:
         base_frame_id = tf_tree.robot_base_frame_id
         current_joint_state = _clamp_joint_state_to_bounds(joint_state)
 
+        # 把持前phaseは単一区間の再計画で完結する。トマトはまだworld側にある。
+        if phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
+            pregrasp_trajectory = self._plan_phase(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                target_pose=plan.pregrasp_pose,
+                attach_tomato=False,
+            )
+            if pregrasp_trajectory is None:
+                return self._fallback_result("pregrasp_replan_failed")
+            return MoveIt2PlanningResult(
+                success=True,
+                backend_name="moveit2_service_bridge",
+                reason="service_ok",
+                pregrasp_joint_trajectory=pregrasp_trajectory,
+            )
+
+        if phase is HarvestTaskPhase.MOVING_TO_GRASP:
+            grasp_trajectory = self._plan_phase(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                target_pose=plan.grasp_pose,
+                attach_tomato=False,
+            )
+            if grasp_trajectory is None:
+                return self._fallback_result("grasp_replan_failed")
+            return MoveIt2PlanningResult(
+                success=True,
+                backend_name="moveit2_service_bridge",
+                reason="service_ok",
+                grasp_joint_trajectory=grasp_trajectory,
+            )
+
+        if phase is HarvestTaskPhase.MOVING_TO_PLACE:
+            return self._plan_place_suffix(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                plan=plan,
+            )
+
+        return self._fallback_result("unsupported_suffix_phase")
+
+    def _plan_place_suffix(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        scene_snapshot: SceneSnapshot,
+        plan: HarvestMotionPlan,
+    ) -> MoveIt2PlanningResult:
+        """approach waypoint経由でplaceまでの残区間を計画する。トマトは把持中。"""
+        current_joint_state = joint_state
         pre_place_pose = plan.place_waypoints[0] if plan.place_waypoints else None
         if pre_place_pose is not None:
             approach_trajectory = self._plan_phase(

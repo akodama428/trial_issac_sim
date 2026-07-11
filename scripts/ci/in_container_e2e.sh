@@ -49,13 +49,18 @@ if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
   exit 1
 fi
 
-if [[ "${TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE:-0}" == "1" ]]; then
-  if ! grep -q '"event": "place_suffix_e2e_disturbance_injected"' "${ROBOT_LOG}"; then
-    echo "Place suffix E2E disturbance was not injected." >&2
-    exit 1
-  fi
-  if ! grep -Eq '"event": "place_suffix_replan_completed".*"success": true' "${ROBOT_LOG}"; then
-    echo "Successful real MoveIt place suffix replan metric was not found." >&2
-    exit 1
-  fi
+if [[ -n "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES:-}" ]]; then
+  IFS=',' read -ra INJECTION_PHASES <<< "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES}"
+  for phase in "${INJECTION_PHASES[@]}"; do
+    phase="$(echo "${phase}" | tr -d '[:space:]')"
+    [[ -z "${phase}" ]] && continue
+    if ! grep -Eq "\"event\": \"suffix_e2e_disturbance_injected\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
+      echo "Suffix E2E disturbance was not injected in phase ${phase}." >&2
+      exit 1
+    fi
+    if ! grep -Eq "\"event\": \"suffix_replan_completed\".*\"phase\": \"${phase}\".*\"success\": true" "${ROBOT_LOG}"; then
+      echo "Successful real MoveIt suffix replan metric was not found for phase ${phase}." >&2
+      exit 1
+    fi
+  done
 fi
