@@ -135,6 +135,10 @@ def main() -> None:
                 phase=state.phase,
             ):
                 self._place_replan_injected = True
+                self._trigger_memory = replace(
+                    self._trigger_memory,
+                    handled_scene_generation=state.scene_generation,
+                )
                 self._state.update_tracking_error(0.20)
                 self.get_logger().info(metric_line(
                     "place_suffix_e2e_disturbance_injected",
