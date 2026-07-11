@@ -89,6 +89,8 @@ def main() -> None:
             self._state.update_phase(phase)
             if phase is HarvestTaskPhase.TARGET_FOUND:
                 self._try_plan(trigger="target_found")
+            if phase is HarvestTaskPhase.MOVING_TO_PLACE:
+                self._inject_place_replan_if_requested()
 
         def _on_estimate(self, msg: String) -> None:
             self._state.update_target_estimate(target_estimate_from_json(msg.data))
@@ -128,23 +130,34 @@ def main() -> None:
             self._evaluate_replan_trigger()
 
         def _on_replan_timer(self) -> None:
+            self._evaluate_replan_trigger()
+
+        def _inject_place_replan_if_requested(self) -> None:
+            """Inject and handle the E2E disturbance at the place phase boundary.
+
+            Running this synchronously from ``_on_phase`` prevents the simulator
+            from completing the place motion before the one-second timer gets a
+            chance to inject the tracking error.
+            """
             state = self._state.snapshot()
-            if should_inject_place_replan(
+            if not should_inject_place_replan(
                 enabled=self._inject_place_replan,
                 already_injected=self._place_replan_injected,
                 phase=state.phase,
             ):
-                self._place_replan_injected = True
-                self._trigger_memory = replace(
-                    self._trigger_memory,
-                    handled_scene_generation=state.scene_generation,
-                )
-                self._state.update_tracking_error(0.20)
-                self.get_logger().info(metric_line(
-                    "place_suffix_e2e_disturbance_injected",
-                    phase=state.phase.value,
-                    tracking_error_rad=0.20,
-                ))
+                return
+            self._place_replan_injected = True
+            self._trigger_memory = replace(
+                self._trigger_memory,
+                last_replan_at_sec=None,
+                handled_scene_generation=state.scene_generation,
+            )
+            self._state.update_tracking_error(0.20)
+            self.get_logger().info(metric_line(
+                "place_suffix_e2e_disturbance_injected",
+                phase=state.phase.value,
+                tracking_error_rad=0.20,
+            ))
             self._evaluate_replan_trigger()
 
         def _evaluate_replan_trigger(self) -> None:
