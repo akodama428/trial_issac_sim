@@ -193,7 +193,7 @@ sequenceDiagram
     MC->>MC: 採用 (正しい)
     BP->>MC: phase = detaching
     TP--)MC: 遅延した replan (moving_to_grasp 起点)
-    MC->>MC: ❌ 採用 → grasp 前提の軌道へ巻き戻り得る
+    MC->>MC: ❌ stale plan を採用してしまう<br/>(grasp 前提の軌道へ巻き戻るリスク)
 
     Note over BP,MC: 新契約: revision と planned_from_phase で判定
     BP->>MC: phase = moving_to_grasp
@@ -201,7 +201,7 @@ sequenceDiagram
     MC->>MC: 採用 (adopted_newer_revision)
     BP->>MC: phase = detaching
     TP--)MC: plan rev3 (from=moving_to_grasp) が遅延到着
-    MC->>MC: ✅ 棄却 (rejected_phase_mismatch)<br/>plan_rejected イベントで観測可能
+    MC->>MC: ✅ stale plan を正しく棄却 (rejected_phase_mismatch)<br/>plan_rejected イベントで観測可能
 ```
 
 ## 5. stale plan 再現ケースと抑止結果
