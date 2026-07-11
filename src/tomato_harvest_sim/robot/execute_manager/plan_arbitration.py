@@ -27,6 +27,11 @@ _SUPPORTED_PRODUCER_KINDS = frozenset({
     PlanProducerKind.GLOBAL_PLANNER,
     PlanProducerKind.LOCAL_PLANNER,
 })
+_LOCAL_CONTROL_PHASES = frozenset({
+    HarvestTaskPhase.MOVING_TO_PREGRASP,
+    HarvestTaskPhase.MOVING_TO_GRASP,
+    HarvestTaskPhase.MOVING_TO_PLACE,
+})
 
 
 @dataclass(frozen=True)
@@ -68,6 +73,7 @@ def evaluate_plan_arbitration(
         candidate.producer_kind is PlanProducerKind.GLOBAL_PLANNER
         and current_plan is not None
         and current_plan.producer_kind is PlanProducerKind.LOCAL_PLANNER
+        and current_phase in _LOCAL_CONTROL_PHASES
         and candidate.planned_from_phase is current_phase
     ):
         return PlanArbitrationDecision(
