@@ -4,6 +4,30 @@
 対象: Issue #11  
 結果: **PASS**
 
+## この検証の目的
+
+この検証で確かめたいのは、収穫動作がすでに `MOVING_TO_PLACE` まで進んだ後に姿勢ずれやscene変化が起きても、完了済みのpregrasp / grasp / pullを最初から計画し直さず、**現在の関節状態からplaceまでの残りだけを安全に再計画できるか**である。
+
+従来のfull-chain replanには、完了済みphaseを含む長い計画を作り直し、実行中goalを無条件にcancel-and-replaceする危険がある。Step 3では対象をplaceに限定し、最終的な改善案B（phaseごとに必要なsuffixだけを低周期・event-drivenで再計画する構成）が成立するかを最小範囲で先行確認する。
+
+具体的には、次の問いに答える。
+
+1. plannerへ渡すstart stateが、初回planの開始状態ではなく最新joint stateになっているか。
+2. 更新対象がplace trajectoryだけで、pregrasp / grasp / pullを変更しないか。
+3. stale候補、小差分候補、planner二重起動による不要なgoal差し替えを防げるか。
+4. Step 1のrevision / adoption契約とStep 2のstate / trigger境界を、そのまま再利用できるか。
+
+### 合格条件
+
+| 検証項目 | 合格条件 |
+| --- | --- |
+| current state起点 | suffix plannerが最新joint stateを受け取る |
+| 計画範囲 | place trajectoryだけが更新される |
+| 小差分抑止 | boundary deltaが`0.02 rad`未満ならpublishしない |
+| stale抑止 | Step 1 adoption policyでrevision / phase不整合を棄却する |
+| 二重起動抑止 | in-flight中の2回目の開始要求を棄却する |
+| 通常動作保護 | 周期timerをobserve-onlyに保ち、無条件replanしない |
+
 ## 結論
 
 `MOVING_TO_PLACE` 中だけ、集約済みの最新joint stateからplace trajectoryのみを再計画する経路を追加した。pregrasp / grasp / pullは再計画しない。候補軌道の開始・終端差分が `0.02 rad` 未満なら既存goalを維持し、planner実行中はin-flight gateで二重起動を抑止する。Step 2でobserve-onlyにしたscene change / tracking errorはplace phaseに限ってsuffix plannerへ接続し、通常進捗を乱さないよう周期timerは観測専用のままとする。
@@ -14,31 +38,69 @@
 
 ```mermaid
 flowchart TB
-  Input["phase / joint state / scene / tracking"]
-  Agg["State Aggregator"]
-  Trigger["Trigger Policy"]
-  Gate["PlaceSuffixReplanGate<br/>in-flight抑止"]
-  Suffix["plan_place_from_joint_state()<br/>place suffix only"]
-  Delta["Small-delta Policy<br/>boundary delta >= 0.02 rad"]
-  Contract["HarvestMotionPlan<br/>revision + MOVING_TO_PLACE"]
-  Adoption["Plan Adoption Policy<br/>stale / phase整合"]
-  Command["motion_command_node"]
-  Executor["FollowJointTrajectory executor"]
-  Robot["Franka / Isaac Sim"]
+  subgraph SimNode["tomato_harvest_simulator_node（変更なし）"]
+    Robot["Franka / scene physics"]
+    SceneOut["scene_snapshot / joint_states"]
+    Robot --> SceneOut
+  end
 
-  Input --> Agg --> Trigger
-  Trigger -->|place phase only| Gate --> Suffix --> Delta
-  Delta -->|significant| Contract --> Adoption --> Command --> Executor --> Robot
-  Delta -. "small delta: keep current goal" .-> Executor
-  Robot -. feedback .-> Input
+  subgraph BehaviorNode["behavior_planner_node（変更なし）"]
+    Phase["harvest phase state machine"]
+  end
+
+  subgraph MonitorNode["trajectory_monitor_node（変更なし）"]
+    Tracking["abort / tracking error"]
+  end
+
+  subgraph PlannerNode["trajectory_planner_node（Step 3で変更）"]
+    Agg["State Aggregator"]
+    Trigger["Trigger Policy"]
+    Gate["PlaceSuffixReplanGate<br/>in-flight抑止"]
+    Suffix["plan_place_from_joint_state()<br/>place suffix only"]
+    Delta["Small-delta Policy<br/>boundary delta >= 0.02 rad"]
+    Publish["HarvestMotionPlan publish<br/>revision + MOVING_TO_PLACE"]
+    Agg --> Trigger -->|place event| Gate --> Suffix --> Delta
+    Delta -->|significant| Publish
+  end
+
+  subgraph MoveGroupNode["move_group node（変更なし）"]
+    MoveIt["PlanningSceneMonitor / OMPL"]
+  end
+
+  subgraph CommandNode["motion_command_node（変更なし）"]
+    Adoption["Plan Adoption Policy<br/>stale / phase整合"]
+    Command["MotionCommand生成"]
+    Adoption --> Command
+  end
+
+  subgraph ExecutorNode["motion_command_executor_node（変更なし）"]
+    Executor["FollowJointTrajectory<br/>cancel / replace / execute"]
+  end
+
+  SceneOut --> Agg
+  Phase --> Agg
+  Tracking --> Agg
+  Suffix <--> MoveIt
+  Publish --> Adoption
+  Command --> Executor --> Robot
+  Delta -. "small delta: current goal維持" .-> Executor
 
   classDef changed fill:#ffe0e0,stroke:#c62828,stroke-width:3px,color:#3a0a0a;
   classDef established fill:#dcf4e4,stroke:#25834b,stroke-width:2px,color:#092b17;
   classDef unchanged fill:#eeeeee,stroke:#777,color:#222;
-  class Gate,Suffix,Delta changed;
-  class Agg,Trigger,Contract,Adoption established;
-  class Input,Command,Executor,Robot unchanged;
+  class Gate,Suffix,Delta,Publish changed;
+  class Agg,Trigger,Adoption established;
+  class Phase,Tracking,MoveIt,Command,Executor,Robot,SceneOut unchanged;
+  style PlannerNode fill:#fff0f0,stroke:#c62828,stroke-width:4px;
+  style SimNode fill:#f5f5f5,stroke:#777;
+  style BehaviorNode fill:#f5f5f5,stroke:#777;
+  style MonitorNode fill:#f5f5f5,stroke:#777;
+  style MoveGroupNode fill:#f5f5f5,stroke:#777;
+  style CommandNode fill:#f5f5f5,stroke:#777;
+  style ExecutorNode fill:#f5f5f5,stroke:#777;
 ```
+
+今回コードを変更したROS 2ノードは **`trajectory_planner_node`のみ**である。`move_group`、`motion_command_node`、`motion_command_executor_node`は既存インタフェースをそのまま利用する。planner node内部ではplace suffix routing、in-flight gate、小差分判定、revision付きpublishを追加した。
 
 ## 従来full-chain replanとの差
 
@@ -128,6 +190,25 @@ python3 -m py_compile ...
 - endpoint/start boundary比較を、将来は時間正規化したtrajectory distanceへ拡張する。
 - local planner導入後はcancel-and-replaceではなくtrajectory blendingを検討する。
 - `MOVING_TO_PREGRASP` / `MOVING_TO_GRASP`へのsuffix replan拡張はStep 4以降で扱う。
+
+## この検証が次に何につながるか
+
+Step 3はplace動作だけを対象に、`state aggregation → trigger判定 → suffix planning → 小差分判定 → revision付きpublish → adoption`という一連の経路を初めて接続した。この結果は次の作業へ以下のようにつながる。
+
+```mermaid
+flowchart LR
+  S3["Step 3<br/>place suffixで境界を実証"] --> E2E["実MoveIt外乱注入E2E<br/>周期・閾値を実測調整"]
+  E2E --> S4["Step 4<br/>pregrasp / graspへ<br/>phase-aware adapter拡張"]
+  S4 --> S5["Step 5<br/>複数producerの受け皿"]
+  S5 --> S6["Step 6<br/>local planner追加"]
+  S6 --> S7["Step 7 / 最終案C<br/>Hybrid Planningへ移行"]
+```
+
+- **Step 4前の実測確認**: 実MoveIt環境でplace移動中にtracking errorまたはscene changeを注入し、suffix latency、cancel回数、収穫完了率を実測する。ここで`0.02 rad`とminimum intervalの妥当性を決める。
+- **Step 4のphase拡張**: placeで安全性を確認した同じ境界を `MOVING_TO_PREGRASP` / `MOVING_TO_GRASP`へ展開し、phase-aware global planner adapterへ一般化する。
+- **中長期のlocal planner導入**: Step 1のproducer metadataとStep 2/3の共通state・trigger境界を使い、global planとlocal correctionをarbitrationする。executor契約を変更せずHybrid Planning / Servoへ移行する土台になる。
+
+したがって本検証の価値は、place動作単体の改善だけではなく、全phaseを一度に変更せず、1phaseで安全なreplan境界を実証してから段階的に拡張できることにある。
 
 ## PR本文用: 変更差分の詳細アーキテクチャ図
 
