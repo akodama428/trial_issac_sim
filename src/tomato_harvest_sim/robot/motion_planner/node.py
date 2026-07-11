@@ -7,6 +7,15 @@ from __future__ import annotations
 import time
 
 from tomato_harvest_sim.robot.motion_planner.observability import metric_line
+from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
+    TriggerMemory,
+    evaluate_replan_trigger,
+    memory_after_trigger,
+    trigger_starts_planner,
+)
+from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
+    PlannerStateAggregator,
+)
 
 
 def main() -> None:
@@ -48,10 +57,8 @@ def main() -> None:
             planner, info = build_planner()
             self._planner = planner
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
-            self._phase: HarvestTaskPhase | None = None
-            self._estimate: TargetEstimate | None = None
-            self._joint_state: JointStateSnapshot | None = None
-            self._scene_snapshot = None  # 実際の SceneSnapshot (tray_pose 等を含む)
+            self._state = PlannerStateAggregator()
+            self._trigger_memory = TriggerMemory()
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
             self._producer_instance_id = uuid.uuid4().hex
 
@@ -60,47 +67,97 @@ def main() -> None:
             self.create_subscription(JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10)
             self.create_subscription(String, TRAJECTORY_STATUS_TOPIC, self._on_trajectory_status, 10)
             self.create_subscription(String, SCENE_SNAPSHOT_TOPIC, self._on_snapshot, 10)
+            self.create_timer(1.0, self._on_replan_timer)
 
         def _on_phase(self, msg: String) -> None:
             try:
-                self._phase = HarvestTaskPhase(msg.data)
+                phase = HarvestTaskPhase(msg.data)
             except ValueError:
                 return
-            if self._phase is HarvestTaskPhase.TARGET_FOUND:
+            self._state.update_phase(phase)
+            if phase is HarvestTaskPhase.TARGET_FOUND:
                 self._try_plan(trigger="target_found")
 
         def _on_estimate(self, msg: String) -> None:
-            self._estimate = target_estimate_from_json(msg.data)
+            self._state.update_target_estimate(target_estimate_from_json(msg.data))
 
         def _on_joint_state(self, msg: JointState) -> None:
-            self._joint_state = JointStateSnapshot(
+            self._state.update_joint_state(JointStateSnapshot(
                 joint_names=tuple(str(n) for n in msg.name),
                 positions_rad=tuple(float(v) for v in msg.position),
-            )
+            ))
 
         def _on_snapshot(self, msg: String) -> None:
             try:
-                self._scene_snapshot = scene_snapshot_from_dict(json.loads(msg.data))
+                self._state.update_scene_snapshot(
+                    scene_snapshot_from_dict(json.loads(msg.data))
+                )
             except Exception:
                 pass
 
         def _on_trajectory_status(self, msg: String) -> None:
-            if msg.data.strip() == "aborted" and self._phase is not None:
+            try:
+                status = json.loads(msg.data)
+            except (json.JSONDecodeError, TypeError):
+                status = {"status": msg.data.strip()}
+            if not isinstance(status, dict):
+                status = {"status": str(status)}
+            tracking_error = status.get("tracking_error_rad")
+            self._state.update_tracking_error(
+                float(tracking_error) if tracking_error is not None else None
+            )
+            if str(status.get("status", "")).strip() == "aborted":
+                self._state.observe_abort()
+                phase = self._state.snapshot().phase
                 self.get_logger().info(metric_line(
-                    "phase_abort_observed", phase=self._phase.value
+                    "phase_abort_observed",
+                    phase=phase.value if phase is not None else "unknown",
                 ))
-                self._try_plan(trigger="trajectory_aborted")
+            self._evaluate_replan_trigger()
+
+        def _on_replan_timer(self) -> None:
+            self._evaluate_replan_trigger()
+
+        def _evaluate_replan_trigger(self) -> None:
+            state = self._state.snapshot()
+            now_sec = time.monotonic()
+            decision = evaluate_replan_trigger(
+                state=state, memory=self._trigger_memory, now_sec=now_sec
+            )
+            phase = state.phase.value if state.phase is not None else "unknown"
+            self.get_logger().info(metric_line(
+                "replan_trigger_evaluated",
+                phase=phase,
+                trigger=decision.trigger.value if decision.trigger is not None else "none",
+                triggered=decision.triggered,
+                reason=decision.reason,
+            ))
+            if not decision.triggered or decision.trigger is None:
+                return
+            self._trigger_memory = memory_after_trigger(
+                state=state, memory=self._trigger_memory, now_sec=now_sec
+            )
+            if not trigger_starts_planner(decision.trigger):
+                self.get_logger().info(metric_line(
+                    "replan_trigger_observed",
+                    phase=phase,
+                    trigger=decision.trigger.value,
+                    action="observe_only_until_suffix_planning",
+                ))
+                return
+            self._try_plan(trigger=decision.trigger.value)
 
         def _try_plan(self, *, trigger: str) -> None:
-            if self._estimate is None or self._joint_state is None:
+            state = self._state.snapshot()
+            if state.target_estimate is None or state.joint_state is None:
                 return
 
             from tomato_harvest_sim.msg.contracts import Pose3D, ScenePhase, SceneSnapshot, TomatoStatus
             _p = Pose3D(0, 0, 0, 0, 0, 0)
 
             # 実際の SceneSnapshot があればそれを使い、collision objects の配置を正確にする
-            if self._scene_snapshot is not None:
-                scene_snapshot = self._scene_snapshot
+            if state.scene_snapshot is not None:
+                scene_snapshot = state.scene_snapshot
             else:
                 scene_snapshot = SceneSnapshot(
                     phase=ScenePhase.RUNNING,
@@ -122,13 +179,13 @@ def main() -> None:
                 "target_frame_id": "target_tomato_frame",
                 "robot_base_pose": _p,
                 "camera_pose": _p,
-                "target_pose": self._estimate.target_world_pose,
+                "target_pose": state.target_estimate.target_world_pose,
             })()
-            phase = self._phase.value if self._phase is not None else "unknown"
+            phase = state.phase.value if state.phase is not None else "unknown"
             started_at = time.perf_counter()
             try:
                 plan = self._planner.plan(
-                    self._estimate, self._joint_state, tf_tree_snapshot, scene_snapshot
+                    state.target_estimate, state.joint_state, tf_tree_snapshot, scene_snapshot
                 )
             except Exception:
                 latency_ms = (time.perf_counter() - started_at) * 1000.0
@@ -149,7 +206,7 @@ def main() -> None:
                 plan,
                 plan_revision=self._plan_revision,
                 generated_at_sec=time.time(),
-                planned_from_phase=self._phase,
+                planned_from_phase=state.phase,
                 producer_kind=PlanProducerKind.GLOBAL_PLANNER,
                 producer_instance_id=self._producer_instance_id,
             )
