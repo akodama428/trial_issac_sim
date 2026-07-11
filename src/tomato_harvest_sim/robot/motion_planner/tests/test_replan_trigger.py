@@ -24,10 +24,21 @@ def _ready_state(**changes: object) -> PlannerState:
 
 class ReplanTriggerPolicyTest(unittest.TestCase):
     def test_only_abort_starts_full_chain_planner_in_step2(self) -> None:
-        self.assertTrue(trigger_starts_planner(ReplanTrigger.ABORT))
-        self.assertFalse(trigger_starts_planner(ReplanTrigger.TIMER))
-        self.assertFalse(trigger_starts_planner(ReplanTrigger.SCENE_CHANGE))
-        self.assertFalse(trigger_starts_planner(ReplanTrigger.TRACKING_ERROR))
+        self.assertTrue(trigger_starts_planner(
+            ReplanTrigger.ABORT, HarvestTaskPhase.MOVING_TO_GRASP
+        ))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_GRASP
+        ))
+
+    def test_place_phase_starts_suffix_planner_for_new_triggers(self) -> None:
+        for trigger in (ReplanTrigger.SCENE_CHANGE, ReplanTrigger.TRACKING_ERROR):
+            self.assertTrue(trigger_starts_planner(
+                trigger, HarvestTaskPhase.MOVING_TO_PLACE
+            ))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
 
     def test_timer_triggers_in_enabled_phase(self) -> None:
         decision = evaluate_replan_trigger(

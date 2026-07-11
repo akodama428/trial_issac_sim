@@ -139,7 +139,7 @@ xychart-beta
 ## 次ステップへのインタフェース
 
 - Step 3 の phase-scoped suffix planner は `PlannerState` を入力とし、node の mutable field を直接参照しない。
-- Step 3 完了時にtimer / scene change / tracking errorをobserve-onlyからsuffix planner実行へ切り替える。
+- Step 3ではscene change / tracking errorをplace suffix planner実行へ切り替え、周期timerはcancel churn防止のためobserve-onlyを維持する。
 - Step 4 の timer tuning は `ReplanPolicy.minimum_interval_sec` と `timer_phases` を変更し、planner 実装を変更しない。
 - Step 5 の local planner は global planner と同じ `PlannerState` を受け取れる。
 - trigger は「plan を作るべき」という起動判断だけを担い、Step 1 の `PlanAdoptionPolicy` は候補planの採用判断を担う。

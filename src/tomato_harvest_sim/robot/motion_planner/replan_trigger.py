@@ -87,10 +87,17 @@ def memory_after_trigger(
     )
 
 
-def trigger_starts_planner(trigger: ReplanTrigger) -> bool:
+def trigger_starts_planner(
+    trigger: ReplanTrigger, phase: HarvestTaskPhase | None
+) -> bool:
     """Step 2 で既存 full-chain planner を実行してよい trigger を返す。
 
     timer / scene change / tracking error は Step 3 の phase-scoped suffix
     planning が入るまで観測専用とする。既存挙動の abort replan だけを維持する。
     """
-    return trigger is ReplanTrigger.ABORT
+    if trigger is ReplanTrigger.ABORT:
+        return True
+    return (
+        phase is HarvestTaskPhase.MOVING_TO_PLACE
+        and trigger in {ReplanTrigger.SCENE_CHANGE, ReplanTrigger.TRACKING_ERROR}
+    )

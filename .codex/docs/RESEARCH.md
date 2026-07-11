@@ -251,6 +251,26 @@ Custom Docker Container
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
 
+## 16. MOVING_TO_PLACE suffix replan の current state 境界
+
+- 調査日: 2026-07-11
+- 対象バージョン: MoveIt 2 Rolling documentation（2026-07-11閲覧）
+- 確認済みの事実:
+  - MoveIt公式の Planning Scene Monitor は、最新のplanning sceneを維持する推奨インタフェースである。
+  - PlanningSceneはworld collision objectsだけでなくRobotStateも含むsnapshotである。
+  - CurrentStateMonitorはJointStateを購読し、最新のRobotStateを維持する。
+  - MoveIt Hybrid Planningのonline motion planningは、global solutionを反復更新しつつ、local plannerが更新trajectory segmentを既存軌道へblendする構成を説明している。
+  - `move_group` はcontrollerと `FollowJointTrajectory` actionで接続するため、更新trajectoryを無条件送信するとcontroller側goal差し替えに波及する。
+- Issue #11への設計判断:
+  - `MOVING_TO_PLACE` suffix replanは、集約済みの最新JointStateをstart stateとして使う。
+  - place以外のpregrasp/grasp/pull trajectoryは再計画しない。
+  - Hybrid Planningのblend機構はまだ導入しないため、候補trajectoryの終端差分が小さい場合はpublishせず、既存goalを維持する。
+  - planner多重起動はcoordinatorのin-flight gateで抑止し、ROS callbackの実行モデルだけに安全性を依存させない。
+- 一次情報:
+  - https://moveit.picknik.ai/main/doc/examples/planning_scene_monitor/planning_scene_monitor_tutorial.html
+  - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
+  - https://moveit.picknik.ai/main/doc/concepts/move_group.html
+
 ## 15. MoveIt の joint trajectory 実行で最も一般的なのは `FollowJointTrajectory` + `ros2_control` `joint_trajectory_controller`
 - 調査日: 2026-06-26
 - 確認できた事実:
