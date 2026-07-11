@@ -29,6 +29,48 @@ pregrasp → grasp → pull → place
 
 以降、初出や意味を強調する箇所では「suffix（残り区間）」と併記し、コード/API名では実装上の名称である`suffix`をそのまま使用する。
 
+## 用語: thread-safe in-flight gate（再計画の多重起動防止機構）とは
+
+**thread-safe in-flight gate** は、MoveItによる再計画がすでに実行中の場合、新しい再計画要求を開始させない仕組みである。本レポートでは、分かりやすさのため「再計画の多重起動防止機構」と呼ぶ。
+
+用語を分けると次の意味になる。
+
+| 用語 | 意味 |
+| --- | --- |
+| in-flight | 再計画を開始済みで、まだ結果が返っていない状態 |
+| gate | 次の再計画要求を通すか、止めるかを判断する門 |
+| thread-safe | 複数のcallbackやthreadから同時に要求されても、状態判定が壊れないこと |
+
+例えばtracking errorを契機に再計画Aを始めた直後、scene changeによる再計画Bも要求された場合を考える。
+
+```text
+tracking error → gate取得成功 → 再計画Aを開始
+scene change   → gate取得失敗 → 再計画Bを抑止
+                                   ↓
+                            再計画Aが完了
+                                   ↓
+                              gateを解放
+```
+
+内部状態は次のように変化する。
+
+```text
+待機中:       in_flight = false
+再計画開始:   false → true（実行権を取得した1件だけ開始）
+再計画実行中: true（追加要求は開始しない）
+再計画完了:   true → false（次の要求を受け付け可能）
+```
+
+この仕組みにより、次の問題を防ぐ。
+
+- 複数のMoveIt計画要求が同時に実行される
+- 後から開始した計画が先に完了し、結果の順序が逆転する
+- plan revisionが意図しない順番になる
+- 同じ実行中goalが短時間に何度も差し替えられる
+- CPU負荷やplanning service負荷が不要に増える
+
+実装では、`in_flight`の確認と`false → true`への変更をlock内で一体として行う。このため、複数の要求がほぼ同時に到着しても、再計画の実行権を取得できるのは常に1件だけである。
+
 ## この検証の目的
 
 この検証で確かめたいのは、収穫動作がすでに `MOVING_TO_PLACE` まで進んだ後に姿勢ずれやscene変化が起きても、完了済みのpregrasp / grasp / pullを最初から計画し直さず、**現在の関節状態からplaceまでの残りだけを安全に再計画できるか**である。
@@ -50,12 +92,12 @@ pregrasp → grasp → pull → place
 | 計画範囲 | place trajectoryだけが更新される |
 | 小差分抑止 | boundary deltaが`0.02 rad`未満ならpublishしない |
 | stale抑止 | Step 1 adoption policyでrevision / phase不整合を棄却する |
-| 二重起動抑止 | in-flight中の2回目の開始要求を棄却する |
+| 二重起動抑止 | 再計画の実行中（in-flight）に届いた2回目の開始要求を棄却する |
 | 通常動作保護 | 周期timerをobserve-onlyに保ち、無条件replanしない |
 
 ## 結論
 
-`MOVING_TO_PLACE` 中だけ、集約済みの最新joint stateからplace trajectoryのみを再計画する経路を追加した。pregrasp / grasp / pullは再計画しない。候補軌道の開始・終端差分が `0.02 rad` 未満なら既存goalを維持し、planner実行中はin-flight gateで二重起動を抑止する。Step 2でobserve-onlyにしたscene change / tracking errorはplace phaseに限ってsuffix plannerへ接続し、通常進捗を乱さないよう周期timerは観測専用のままとする。
+`MOVING_TO_PLACE` 中だけ、集約済みの最新joint stateからplace trajectoryのみを再計画する経路を追加した。pregrasp / grasp / pullは再計画しない。候補軌道の開始・終端差分が `0.02 rad` 未満なら既存goalを維持し、planner実行中は再計画の多重起動防止機構（in-flight gate）で二重起動を抑止する。Step 2でobserve-onlyにしたscene change / tracking errorはplace phaseに限ってsuffix plannerへ接続し、通常進捗を乱さないよう周期timerは観測専用のままとする。
 
 ## 全体アーキテクチャと検証範囲
 
@@ -80,7 +122,7 @@ flowchart TB
   subgraph PlannerNode["trajectory_planner_node（Step 3で変更）"]
     Agg["State Aggregator"]
     Trigger["Trigger Policy"]
-    Gate["PlaceSuffixReplanGate<br/>in-flight抑止"]
+    Gate["PlaceSuffixReplanGate<br/>再計画の多重起動防止"]
     Suffix["plan_place_from_joint_state()<br/>place suffix only"]
     Delta["Small-delta Policy<br/>boundary delta >= 0.02 rad"]
     Publish["HarvestMotionPlan publish<br/>revision + MOVING_TO_PLACE"]
@@ -125,7 +167,7 @@ flowchart TB
   style ExecutorNode fill:#f5f5f5,stroke:#777;
 ```
 
-今回コードを変更したROS 2ノードは **`trajectory_planner_node`のみ**である。`move_group`、`motion_command_node`、`motion_command_executor_node`は既存インタフェースをそのまま利用する。planner node内部ではplace suffix routing、in-flight gate、小差分判定、revision付きpublishを追加した。
+今回コードを変更したROS 2ノードは **`trajectory_planner_node`のみ**である。`move_group`、`motion_command_node`、`motion_command_executor_node`は既存インタフェースをそのまま利用する。planner node内部ではplace suffix routing、再計画の多重起動防止機構、小差分判定、revision付きpublishを追加した。
 
 ## 従来full-chain replanとの差
 
@@ -145,7 +187,7 @@ flowchart LR
 | start state | 初回chainの前提に戻り得る | 最新joint state |
 | 計画範囲 | pregrasp → grasp → pull → place | placeのみ |
 | 小差分 | 無条件publish | `0.02 rad`未満は棄却 |
-| 多重起動 | callback実行モデルへ暗黙依存 | thread-safe in-flight gate |
+| 多重起動 | callback実行モデルへ暗黙依存 | thread-safeな多重起動防止機構（in-flight gate） |
 | phase | 複数phaseを一括生成 | `MOVING_TO_PLACE`限定 |
 
 ## テスト条件と発火条件
