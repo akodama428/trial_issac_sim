@@ -251,6 +251,23 @@ Custom Docker Container
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
 
+## 17. 自由空間phaseへのsuffix replan一般化とDETACHING除外
+
+- 調査日: 2026-07-11
+- 対象バージョン: MoveIt 2 Rolling documentation（2026-07-11閲覧）
+- 確認済みの事実:
+  - MoveIt Hybrid Planning は、低頻度で経路全体を解くglobal plannerと、高頻度でセンサ入力へ反応するlocal plannerを分離するアーキテクチャを説明している。local plannerの役割は global trajectory への追従と反応的な微修正である。
+  - MoveIt Servo は、接触や終端補正のような高頻度・低遅延の補正を twist / joint jog として行う仕組みで、global replan とは別系統である。
+  - OMPL のサンプリングベース計画は非決定的で、同じ goal に対して毎回異なる経路を返し得る（本リポジトリの計画書 §11 でも経路 jitter リスクとして整理済み）。
+- Issue #12 への設計判断:
+  - suffix replan の対象は自由空間の移動 phase（`MOVING_TO_PREGRASP` / `MOVING_TO_GRASP` / `MOVING_TO_PLACE`）に限定する。
+  - `DETACHING` は茎からの引き剥がしという接触支配区間で、経路形状よりも接触力と終端の微修正が支配的なため、周期的な global suffix replan の対象にしない。OMPL 非決定性による経路差し替えは接触区間では逆効果になり得る。
+  - `DETACHING` の失敗救済は従来どおり abort 起点の full-chain replan と JTC の成果ベース遷移に任せ、高頻度補正は Step 6 の local planner（Servo / Hybrid Planning）候補として残す。
+  - phase ごとの残区間選択と planning scene 差（トマト把持前/後）は planner adapter 側（`plan_from_phase()` / `plan_suffix_trajectory()`）へ寄せ、node 側の phase 分岐を増やさない。
+- 一次情報:
+  - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+
 ## 16. MOVING_TO_PLACE suffix replan の current state 境界
 
 - 調査日: 2026-07-11

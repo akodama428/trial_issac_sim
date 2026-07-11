@@ -11,15 +11,17 @@ from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     TriggerMemory,
     evaluate_replan_trigger,
     memory_after_trigger,
-    should_inject_place_replan,
+    parse_suffix_injection_phases,
+    should_inject_suffix_replan,
     trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
     PlannerStateAggregator,
 )
-from tomato_harvest_sim.robot.motion_planner.place_suffix_replan import (
-    PlaceSuffixReplanGate,
-    evaluate_place_suffix_update,
+from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
+    SUFFIX_REPLAN_PHASES,
+    SuffixReplanGate,
+    evaluate_suffix_update,
 )
 
 
@@ -65,12 +67,12 @@ def main() -> None:
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
             self._state = PlannerStateAggregator()
             self._trigger_memory = TriggerMemory()
-            self._place_replan_gate = PlaceSuffixReplanGate()
+            self._suffix_replan_gate = SuffixReplanGate()
             self._latest_plan = None
-            self._inject_place_replan = (
-                os.environ.get("TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE", "0") == "1"
+            self._suffix_injection_phases = parse_suffix_injection_phases(
+                os.environ.get("TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES", "")
             )
-            self._place_replan_injected = False
+            self._suffix_injected_phases: frozenset[HarvestTaskPhase] = frozenset()
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
             self._producer_instance_id = uuid.uuid4().hex
 
@@ -89,8 +91,8 @@ def main() -> None:
             self._state.update_phase(phase)
             if phase is HarvestTaskPhase.TARGET_FOUND:
                 self._try_plan(trigger="target_found")
-            if phase is HarvestTaskPhase.MOVING_TO_PLACE:
-                self._inject_place_replan_if_requested()
+            if phase in SUFFIX_REPLAN_PHASES:
+                self._inject_suffix_replan_if_requested()
 
         def _on_estimate(self, msg: String) -> None:
             self._state.update_target_estimate(target_estimate_from_json(msg.data))
@@ -132,21 +134,21 @@ def main() -> None:
         def _on_replan_timer(self) -> None:
             self._evaluate_replan_trigger()
 
-        def _inject_place_replan_if_requested(self) -> None:
-            """Inject and handle the E2E disturbance at the place phase boundary.
+        def _inject_suffix_replan_if_requested(self) -> None:
+            """Inject and handle the E2E disturbance at a suffix phase boundary.
 
             Running this synchronously from ``_on_phase`` prevents the simulator
-            from completing the place motion before the one-second timer gets a
+            from completing the phase motion before the one-second timer gets a
             chance to inject the tracking error.
             """
             state = self._state.snapshot()
-            if not should_inject_place_replan(
-                enabled=self._inject_place_replan,
-                already_injected=self._place_replan_injected,
+            if not should_inject_suffix_replan(
+                enabled_phases=self._suffix_injection_phases,
+                injected_phases=self._suffix_injected_phases,
                 phase=state.phase,
             ):
                 return
-            self._place_replan_injected = True
+            self._suffix_injected_phases = self._suffix_injected_phases | {state.phase}
             self._trigger_memory = replace(
                 self._trigger_memory,
                 last_replan_at_sec=None,
@@ -154,7 +156,7 @@ def main() -> None:
             )
             self._state.update_tracking_error(0.20)
             self.get_logger().info(metric_line(
-                "place_suffix_e2e_disturbance_injected",
+                "suffix_e2e_disturbance_injected",
                 phase=state.phase.value,
                 tracking_error_rad=0.20,
             ))
@@ -187,24 +189,25 @@ def main() -> None:
                     action="observe_only_until_suffix_planning",
                 ))
                 return
-            if state.phase is HarvestTaskPhase.MOVING_TO_PLACE:
-                self._try_place_suffix_plan(trigger=decision.trigger.value)
+            if state.phase in SUFFIX_REPLAN_PHASES:
+                self._try_suffix_plan(trigger=decision.trigger.value)
                 return
             self._try_plan(trigger=decision.trigger.value)
 
-        def _try_place_suffix_plan(self, *, trigger: str) -> None:
+        def _try_suffix_plan(self, *, trigger: str) -> None:
             state = self._state.snapshot()
             if (
-                state.phase is not HarvestTaskPhase.MOVING_TO_PLACE
+                state.phase not in SUFFIX_REPLAN_PHASES
                 or state.joint_state is None
                 or state.scene_snapshot is None
                 or state.target_estimate is None
                 or self._latest_plan is None
             ):
                 return
-            if not self._place_replan_gate.try_begin():
+            phase = state.phase
+            if not self._suffix_replan_gate.try_begin():
                 self.get_logger().info(metric_line(
-                    "place_suffix_replan_suppressed",
+                    "suffix_replan_suppressed", phase=phase.value,
                     reason="planner_in_flight", trigger=trigger,
                 ))
                 return
@@ -220,29 +223,33 @@ def main() -> None:
                     camera_pose=zero,
                     target_pose=state.target_estimate.target_world_pose,
                 )
-                plan_place = getattr(self._planner, "plan_place_from_joint_state", None)
+                plan_from_phase = getattr(self._planner, "plan_from_phase", None)
                 candidate = (
-                    plan_place(
+                    plan_from_phase(
+                        phase,
                         self._latest_plan,
                         state.joint_state,
                         tf_tree,
                         state.scene_snapshot,
                     )
-                    if plan_place is not None else None
+                    if plan_from_phase is not None else None
                 )
                 latency_ms = (time.perf_counter() - started_at) * 1000.0
                 if candidate is None:
                     self.get_logger().info(metric_line(
-                        "place_suffix_replan_completed", success=False,
-                        trigger=trigger, latency_ms=round(latency_ms, 3),
+                        "suffix_replan_completed", phase=phase.value,
+                        success=False, trigger=trigger,
+                        latency_ms=round(latency_ms, 3),
                     ))
                     return
-                decision = evaluate_place_suffix_update(
+                decision = evaluate_suffix_update(
+                    phase=phase,
                     current_plan=self._latest_plan,
                     candidate_plan=candidate,
                 )
                 self.get_logger().info(metric_line(
-                    "place_suffix_replan_completed",
+                    "suffix_replan_completed",
+                    phase=phase.value,
                     success=decision.adopted,
                     reason=decision.reason,
                     trigger=trigger,
@@ -251,11 +258,11 @@ def main() -> None:
                 ))
                 if not decision.adopted:
                     return
-                self._publish_plan(candidate, trigger=trigger, phase=state.phase)
+                self._publish_plan(candidate, trigger=trigger, phase=phase)
             finally:
-                if self._place_replan_injected:
+                if phase in self._suffix_injected_phases:
                     self._state.update_tracking_error(None)
-                self._place_replan_gate.finish()
+                self._suffix_replan_gate.finish()
 
         def _try_plan(self, *, trigger: str) -> None:
             state = self._state.snapshot()
