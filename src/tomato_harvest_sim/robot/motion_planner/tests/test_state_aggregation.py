@@ -1,12 +1,50 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
-from tomato_harvest_sim.msg.contracts import HarvestTaskPhase, JointStateSnapshot
+from tomato_harvest_sim.msg.contracts import (
+    HarvestTaskPhase, JointStateSnapshot, Pose3D, ScenePhase, SceneSnapshot,
+    TomatoStatus,
+)
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import PlannerStateAggregator
 
 
 class PlannerStateAggregatorTest(unittest.TestCase):
+    def test_dynamic_robot_pose_does_not_report_scene_change(self) -> None:
+        pose = Pose3D(0, 0, 0, 0, 0, 0)
+        scene = SceneSnapshot(
+            phase=ScenePhase.RUNNING, active_camera="fixed", tomato_attached=False,
+            tomato_status=TomatoStatus.ATTACHED, gripper_closed=False,
+            robot_home=False, cycle_id=1, robot_model="panda",
+            robot_base_pose=pose, fixed_camera_pose=pose, hand_camera_pose=pose,
+            branch_pose=pose, stem_pose=pose, tomato_pose=pose, tray_pose=pose,
+            robot_tool_pose=pose, target_tool_pose=None, grasp_result_reason=None,
+        )
+        aggregator = PlannerStateAggregator()
+        aggregator.update_scene_snapshot(scene)
+        aggregator.update_scene_snapshot(replace(
+            scene, robot_tool_pose=replace(pose, x=0.25), gripper_closed=True
+        ))
+        self.assertEqual(aggregator.snapshot().scene_generation, 0)
+
+    def test_collision_object_change_increments_scene_generation(self) -> None:
+        pose = Pose3D(0, 0, 0, 0, 0, 0)
+        scene = SceneSnapshot(
+            phase=ScenePhase.RUNNING, active_camera="fixed", tomato_attached=False,
+            tomato_status=TomatoStatus.ATTACHED, gripper_closed=False,
+            robot_home=False, cycle_id=1, robot_model="panda",
+            robot_base_pose=pose, fixed_camera_pose=pose, hand_camera_pose=pose,
+            branch_pose=pose, stem_pose=pose, tomato_pose=pose, tray_pose=pose,
+            robot_tool_pose=pose, target_tool_pose=None, grasp_result_reason=None,
+        )
+        aggregator = PlannerStateAggregator()
+        aggregator.update_scene_snapshot(scene)
+        aggregator.update_scene_snapshot(replace(
+            scene, tray_pose=replace(pose, x=0.25)
+        ))
+        self.assertEqual(aggregator.snapshot().scene_generation, 1)
+
     def test_latest_values_are_exposed_as_one_snapshot(self) -> None:
         aggregator = PlannerStateAggregator()
         joints = JointStateSnapshot(("joint1",), (0.25,))

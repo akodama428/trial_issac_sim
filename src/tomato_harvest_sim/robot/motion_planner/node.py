@@ -11,6 +11,7 @@ from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     TriggerMemory,
     evaluate_replan_trigger,
     memory_after_trigger,
+    trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
     PlannerStateAggregator,
@@ -136,6 +137,14 @@ def main() -> None:
             self._trigger_memory = memory_after_trigger(
                 state=state, memory=self._trigger_memory, now_sec=now_sec
             )
+            if not trigger_starts_planner(decision.trigger):
+                self.get_logger().info(metric_line(
+                    "replan_trigger_observed",
+                    phase=phase,
+                    trigger=decision.trigger.value,
+                    action="observe_only_until_suffix_planning",
+                ))
+                return
             self._try_plan(trigger=decision.trigger.value)
 
         def _try_plan(self, *, trigger: str) -> None:

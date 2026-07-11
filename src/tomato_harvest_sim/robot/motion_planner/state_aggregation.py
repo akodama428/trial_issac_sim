@@ -53,10 +53,33 @@ class PlannerStateAggregator:
 
     def update_scene_snapshot(self, scene_snapshot: SceneSnapshot) -> None:
         generation = self._state.scene_generation
-        if self._state.scene_snapshot is not None and scene_snapshot != self._state.scene_snapshot:
+        if (
+            self._state.scene_snapshot is not None
+            and _planning_scene_key(scene_snapshot)
+            != _planning_scene_key(self._state.scene_snapshot)
+        ):
             generation += 1
         self._state = replace(
             self._state,
             scene_snapshot=scene_snapshot,
             scene_generation=generation,
         )
+
+
+def _planning_scene_key(scene: SceneSnapshot) -> tuple[object, ...]:
+    """replanに関係する静的scene要素だけを変更検出へ使う。
+
+    robot/tool/camera pose と gripper 状態は毎tick変わる実行状態であり、scene
+    change eventにはしない。tomato poseは把持中に手先へ追従するため、未把持時
+    だけcollision objectの外部変化として扱う。
+    """
+    tomato_pose = scene.tomato_pose if not scene.tomato_attached else None
+    return (
+        scene.cycle_id,
+        scene.tomato_attached,
+        scene.tomato_status,
+        scene.branch_pose,
+        scene.stem_pose,
+        tomato_pose,
+        scene.tray_pose,
+    )

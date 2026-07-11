@@ -2,11 +2,11 @@
 
 検証日: 2026-07-11  
 対象: Issue #10  
-結果: **PASS** (`140 passed, 2 skipped`)
+結果: **PASS** (`143 passed, 2 skipped`)
 
 ## 結論
 
-`trajectory_planner_node` が個別に保持していた phase、latest joint state、scene snapshot、target estimate を `PlannerStateAggregator` へ集約した。tracking error、abort event、scene change generation も同じ immutable `PlannerState` から参照できる。replan 条件は ROS 2 / MoveIt から独立した pure function `evaluate_replan_trigger()` に分離し、timer / abort / scene change / tracking error を個別に検証できる。
+`trajectory_planner_node` が個別に保持していた phase、latest joint state、scene snapshot、target estimate を `PlannerStateAggregator` へ集約した。tracking error、abort event、scene change generation も同じ immutable `PlannerState` から参照できる。replan 条件は ROS 2 / MoveIt から独立した pure function `evaluate_replan_trigger()` に分離し、timer / abort / scene change / tracking error を個別に検証できる。Step 2では既存互換のabortだけをplanner実行へ接続し、suffix planningが必要なtimer / scene change / tracking errorはStep 3まで観測専用とする。
 
 ## 全体アーキテクチャと今回の検証範囲
 
@@ -97,7 +97,7 @@ flowchart LR
 | Trigger | 発火条件 | 主な抑止条件 |
 | --- | --- | --- |
 | abort | `abort_generation > handled_abort_generation` | 入力不足、最小間隔内 |
-| scene change | `scene_generation > handled_scene_generation` | 同一snapshot、最小間隔内 |
+| scene change | planning collision objectの意味的変更 | robot/tool/cameraの動的pose更新、最小間隔内 |
 | tracking error | error `>= 0.10 rad` | 閾値未満、最小間隔内 |
 | timer | timer許可phase | 接触/終端phase、最小間隔内 |
 
@@ -139,6 +139,7 @@ xychart-beta
 ## 次ステップへのインタフェース
 
 - Step 3 の phase-scoped suffix planner は `PlannerState` を入力とし、node の mutable field を直接参照しない。
+- Step 3 完了時にtimer / scene change / tracking errorをobserve-onlyからsuffix planner実行へ切り替える。
 - Step 4 の timer tuning は `ReplanPolicy.minimum_interval_sec` と `timer_phases` を変更し、planner 実装を変更しない。
 - Step 5 の local planner は global planner と同じ `PlannerState` を受け取れる。
 - trigger は「plan を作るべき」という起動判断だけを担い、Step 1 の `PlanAdoptionPolicy` は候補planの採用判断を担う。
@@ -147,7 +148,7 @@ xychart-beta
 
 ```text
 PYTHONPATH=src python3 -m pytest -q tests src/tomato_harvest_sim/robot src/tomato_harvest_sim/simulator
-140 passed, 2 skipped
+143 passed, 2 skipped
 
 python3 -m py_compile \
   src/tomato_harvest_sim/robot/motion_planner/node.py \
