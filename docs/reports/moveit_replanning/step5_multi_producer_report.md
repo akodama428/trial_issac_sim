@@ -234,6 +234,7 @@ unit testでは、(1) arbitrationの棄却規則（未知producer / 土台なし
 
 ## C導入前の残ギャップ
 
+- **把持直前の外乱注入E2EはOMPL非決定性でflaky**: CIで`MOVING_TO_GRASP`進入時に外乱を注入すると、grasp suffix replanが同じEE poseへ別の関節構成で向かう経路に差し替わることがあり、把持失敗（`GRASP_EVALUATION timeout` → `failed`）を確率的に誘発する（CIで2回再現。Step 5の変更とは独立の、Step 4以前からの挙動）。常設CIの外乱注入はplace phaseに絞り、pregrasp / graspへの注入はオンデマンド検証に切り替えた。末端接近区間の経路差し替えを抑えてこれを恒久解消することが、Step 6 local plannerの主要動機の一つである。
 - **実local plannerの中身**: 本Stepのlocal producerはno-op refinement（採用済みglobal planの当該phase区間をそのまま再刻印）であり、実際の軌道補正はしない。MoveIt Servo / Hybrid Planning local plannerの導入はStep 6。
 - **高頻度publish時の流量制御**: 実local plannerは高頻度でplanを出す。現在のarbitrationは1件ずつの裁定であり、採用頻度の上限（rate limit）や「global planの区間とlocal補正のblend」はStep 6/7で扱う。
 - **producer優先度の明示**: 現在はgenerated_at_sec順で「新しい方が勝つ」。Cの最終形では「接触区間はlocal優先」「全体経路の変化はglobal優先」といったphase・状況依存のarbitrationが必要になる。
