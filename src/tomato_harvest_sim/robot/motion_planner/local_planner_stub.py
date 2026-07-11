@@ -79,11 +79,18 @@ def build_local_refinement_plan(
         )
         for point in remaining
     )
+    final_point = retimed[-1]
+    settling_point = replace(
+        final_point,
+        time_from_start_sec=final_point.time_from_start_sec + 1.0,
+        velocities_rad_s=tuple(0.0 for _ in trajectory.joint_names),
+    )
     correction = JointTrajectory(
         joint_names=trajectory.joint_names,
         points=(
             JointTrajectoryPoint(start, 0.0),
             *retimed,
+            settling_point,
         ),
     )
     trajectory_field = {

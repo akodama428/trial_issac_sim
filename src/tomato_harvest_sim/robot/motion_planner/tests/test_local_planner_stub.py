@@ -100,6 +100,11 @@ class LocalRefinementPlanTest(unittest.TestCase):
         assert trajectory is not None
         self.assertEqual(trajectory.points[0].positions_rad, (0.4, 0.2))
         self.assertEqual(trajectory.points[-1].positions_rad, (1.0, 1.0))
+        self.assertEqual(trajectory.points[-1].velocities_rad_s, (0.0, 0.0))
+        self.assertGreater(
+            trajectory.points[-1].time_from_start_sec,
+            trajectory.points[-2].time_from_start_sec,
+        )
         self.assertEqual(candidate.planner_name, "joint_space_local_planner")
 
     def test_refinement_keeps_remaining_global_waypoints(self) -> None:

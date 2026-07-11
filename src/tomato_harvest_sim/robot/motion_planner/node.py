@@ -329,6 +329,7 @@ def main() -> None:
             self._plan_revision += 1
             plan = replace(
                 plan,
+                planner_name=f"{plan.planner_name}:{trigger}",
                 plan_revision=self._plan_revision,
                 generated_at_sec=time.time(),
                 planned_from_phase=phase,

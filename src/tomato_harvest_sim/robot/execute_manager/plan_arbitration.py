@@ -75,6 +75,7 @@ def evaluate_plan_arbitration(
         and current_plan.producer_kind is PlanProducerKind.LOCAL_PLANNER
         and current_phase in _LOCAL_CONTROL_PHASES
         and candidate.planned_from_phase is current_phase
+        and not candidate.planner_name.endswith(":abort")
     ):
         return PlanArbitrationDecision(
             adopted=False,

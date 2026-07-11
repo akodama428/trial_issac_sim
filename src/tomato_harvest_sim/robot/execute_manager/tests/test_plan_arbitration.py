@@ -23,9 +23,10 @@ def make_plan(
     planned_from_phase: HarvestTaskPhase | None = HarvestTaskPhase.MOVING_TO_PLACE,
     producer_kind: PlanProducerKind = PlanProducerKind.GLOBAL_PLANNER,
     producer_instance_id: str | None = "global-instance-a",
+    planner_name: str = "test",
 ) -> HarvestMotionPlan:
     return HarvestMotionPlan(
-        planner_name="test",
+        planner_name=planner_name,
         target_pose=_POSE,
         pregrasp_pose=_POSE,
         grasp_pose=_POSE,
@@ -167,6 +168,19 @@ class LocalProducerArbitrationTest(unittest.TestCase):
                 planned_from_phase=HarvestTaskPhase.MOVING_TO_PLACE,
             ),
             current_phase=HarvestTaskPhase.RETURNING_HOME,
+        )
+        self.assertTrue(decision.adopted)
+        self.assertEqual(decision.reason, "adopted_newer_producer_instance")
+
+    def test_abort_recovery_global_plan_overrides_active_local_control(self) -> None:
+        decision = evaluate_plan_arbitration(
+            candidate=make_plan(
+                plan_revision=4,
+                generated_at_sec=300.0,
+                planner_name="moveit2_service_bridge:abort",
+            ),
+            current_plan=make_local_plan(),
+            current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
         )
         self.assertTrue(decision.adopted)
         self.assertEqual(decision.reason, "adopted_newer_producer_instance")
