@@ -18,7 +18,6 @@ from tomato_harvest_sim.msg.contracts import (
     HarvestTaskPhase,
     JointStateSnapshot,
     JointTrajectory,
-    JointTrajectoryPoint,
     PlanProducerKind,
 )
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
@@ -58,28 +57,7 @@ def build_local_refinement_plan(
     ))
     if any(name not in current_by_name for name in trajectory.joint_names):
         return None
-    start = tuple(current_by_name[name] for name in trajectory.joint_names)
-    nearest_index = min(
-        range(len(trajectory.points)),
-        key=lambda index: sum(
-            (current - planned) ** 2
-            for current, planned in zip(
-                start, trajectory.points[index].positions_rad
-            )
-        ),
-    )
-    remaining = trajectory.points[nearest_index:]
-    first_time = remaining[0].time_from_start_sec
-    retimed = tuple(
-        replace(
-            point,
-            time_from_start_sec=max(
-                0.1, point.time_from_start_sec - first_time + 0.1
-            ),
-        )
-        for point in remaining
-    )
-    final_point = retimed[-1]
+    final_point = trajectory.points[-1]
     settling_point = replace(
         final_point,
         time_from_start_sec=final_point.time_from_start_sec + 1.0,
@@ -88,8 +66,7 @@ def build_local_refinement_plan(
     correction = JointTrajectory(
         joint_names=trajectory.joint_names,
         points=(
-            JointTrajectoryPoint(start, 0.0),
-            *retimed,
+            *trajectory.points,
             settling_point,
         ),
     )

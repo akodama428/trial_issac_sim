@@ -48,7 +48,7 @@ flowchart LR
 | 対象phase | 自由空間3phase | 自由空間3phase |
 | 初回対象外 | 接触中の高速補正 | `DETACHING` |
 
-local correctionは開始点を最新JointStateへ置き、最も近いglobal waypointから先の安全な経路形状を再時刻化し、終端はglobal planの既存関節角を保持する。これはMoveIt Servoそのものではなく、Hybrid Planningのglobal/local責務分離を既存executor契約のまま先行導入する最小構成である。
+local correctionは最新JointStateで関節契約を検証し、global plannerが生成した安全な参照軌道と終端関節構成を保持したまま、ゼロ速度のsettling pointを追加する。小外乱時に別IK解へ差し替えず現在の参照を完遂させる初期local holdである。これはMoveIt Servoそのものではなく、Hybrid Planningのglobal/local責務分離を既存executor契約のまま先行導入する最小構成である。
 
 ## PR変更差分の詳細アーキテクチャ
 
