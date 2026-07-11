@@ -128,13 +128,27 @@ class LocalProducerArbitrationTest(unittest.TestCase):
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_missing_plan_metadata")
 
-    def test_global_plan_takes_over_after_local_adoption(self) -> None:
-        """local採用後も、より新しいglobal planは通常規則で採用される。"""
+    def test_same_phase_global_suffix_does_not_replace_local_correction(self) -> None:
+        """local補正中は同phaseの別IK解で実行軌道を上書きしない。"""
         decision = evaluate_plan_arbitration(
             candidate=make_plan(
                 plan_revision=4,
                 generated_at_sec=300.0,
                 producer_instance_id="global-instance-a",
+            ),
+            current_plan=make_local_plan(),
+            current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        )
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_global_during_local_control")
+
+    def test_full_global_plan_can_take_over_after_local_adoption(self) -> None:
+        """phase-boundでない新しいglobal planまで永久に遮断しない。"""
+        decision = evaluate_plan_arbitration(
+            candidate=make_plan(
+                plan_revision=4,
+                generated_at_sec=300.0,
+                planned_from_phase=HarvestTaskPhase.TARGET_FOUND,
             ),
             current_plan=make_local_plan(),
             current_phase=HarvestTaskPhase.MOVING_TO_PLACE,
@@ -156,7 +170,7 @@ class LocalProducerArbitrationTest(unittest.TestCase):
             current_phase=HarvestTaskPhase.MOVING_TO_GRASP,
         )
         self.assertFalse(decision.adopted)
-        self.assertEqual(decision.reason, "rejected_global_during_grasp_local_control")
+        self.assertEqual(decision.reason, "rejected_global_during_local_control")
 
 
 if __name__ == "__main__":
