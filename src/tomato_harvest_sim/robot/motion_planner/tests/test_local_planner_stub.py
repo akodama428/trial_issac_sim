@@ -102,6 +102,26 @@ class LocalRefinementPlanTest(unittest.TestCase):
         self.assertEqual(trajectory.points[-1].positions_rad, (1.0, 1.0))
         self.assertEqual(candidate.planner_name, "joint_space_local_planner")
 
+    def test_refinement_keeps_remaining_global_waypoints(self) -> None:
+        base = _base_plan()
+        candidate = build_local_refinement_plan(
+            base_plan=base,
+            phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.1, 0.1)
+            ),
+            now_sec=200.0,
+            instance_id="local-instance-a",
+            revision=1,
+        )
+
+        assert candidate is not None
+        trajectory = candidate.place_joint_trajectory
+        assert trajectory is not None
+        self.assertEqual(trajectory.points[0].positions_rad, (0.1, 0.1))
+        self.assertEqual(trajectory.points[1].positions_rad, (0.0, 0.0))
+        self.assertEqual(trajectory.points[-1].positions_rad, (1.0, 1.0))
+
     def test_contact_dominant_phase_is_not_refined(self) -> None:
         candidate = build_local_refinement_plan(
             base_plan=_base_plan(),

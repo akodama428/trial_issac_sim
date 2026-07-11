@@ -59,15 +59,31 @@ def build_local_refinement_plan(
     if any(name not in current_by_name for name in trajectory.joint_names):
         return None
     start = tuple(current_by_name[name] for name in trajectory.joint_names)
-    goal = trajectory.points[-1].positions_rad
-    duration = max(trajectory.points[-1].time_from_start_sec, 0.2)
-    midpoint = tuple((a + b) / 2.0 for a, b in zip(start, goal))
+    nearest_index = min(
+        range(len(trajectory.points)),
+        key=lambda index: sum(
+            (current - planned) ** 2
+            for current, planned in zip(
+                start, trajectory.points[index].positions_rad
+            )
+        ),
+    )
+    remaining = trajectory.points[nearest_index:]
+    first_time = remaining[0].time_from_start_sec
+    retimed = tuple(
+        replace(
+            point,
+            time_from_start_sec=max(
+                0.1, point.time_from_start_sec - first_time + 0.1
+            ),
+        )
+        for point in remaining
+    )
     correction = JointTrajectory(
         joint_names=trajectory.joint_names,
         points=(
             JointTrajectoryPoint(start, 0.0),
-            JointTrajectoryPoint(midpoint, duration / 2.0),
-            JointTrajectoryPoint(goal, duration),
+            *retimed,
         ),
     )
     trajectory_field = {
