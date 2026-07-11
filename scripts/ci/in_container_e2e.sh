@@ -55,11 +55,11 @@ if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" ]]; then
     phase="$(echo "${phase}" | tr -d '[:space:]')"
     [[ -z "${phase}" ]] && continue
     if ! grep -Eq "\"event\": \"local_plan_published\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
-      echo "Dummy local plan was not published in phase ${phase}." >&2
+      echo "Local correction plan was not published in phase ${phase}." >&2
       exit 1
     fi
     if ! grep -Eq "\"event\": \"plan_adopted\".*\"planned_from_phase\": \"${phase}\".*\"producer_kind\": \"local_planner\"" "${ROBOT_LOG}"; then
-      echo "Dummy local plan was not adopted through arbitration for phase ${phase}." >&2
+      echo "Local correction plan was not adopted through arbitration for phase ${phase}." >&2
       exit 1
     fi
   done

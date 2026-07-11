@@ -64,6 +64,18 @@ def evaluate_plan_arbitration(
     if candidate.producer_kind not in _SUPPORTED_PRODUCER_KINDS:
         return PlanArbitrationDecision(adopted=False, reason="rejected_unknown_producer")
 
+    if (
+        candidate.producer_kind is PlanProducerKind.GLOBAL_PLANNER
+        and current_plan is not None
+        and current_plan.producer_kind is PlanProducerKind.LOCAL_PLANNER
+        and current_phase is HarvestTaskPhase.MOVING_TO_GRASP
+        and candidate.planned_from_phase is current_phase
+    ):
+        return PlanArbitrationDecision(
+            adopted=False,
+            reason="rejected_global_during_grasp_local_control",
+        )
+
     adoption = evaluate_plan_adoption(
         candidate=candidate,
         current_plan=current_plan,

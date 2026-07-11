@@ -142,6 +142,22 @@ class LocalProducerArbitrationTest(unittest.TestCase):
         self.assertTrue(decision.adopted)
         self.assertEqual(decision.reason, "adopted_newer_producer_instance")
 
+    def test_global_suffix_does_not_replace_active_grasp_local_correction(self) -> None:
+        """把持直前はlocal終端補正を別IK解のglobal suffixで上書きしない。"""
+        decision = evaluate_plan_arbitration(
+            candidate=make_plan(
+                plan_revision=4,
+                generated_at_sec=300.0,
+                planned_from_phase=HarvestTaskPhase.MOVING_TO_GRASP,
+            ),
+            current_plan=make_local_plan(
+                planned_from_phase=HarvestTaskPhase.MOVING_TO_GRASP,
+            ),
+            current_phase=HarvestTaskPhase.MOVING_TO_GRASP,
+        )
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_global_during_grasp_local_control")
+
 
 if __name__ == "__main__":
     unittest.main()
