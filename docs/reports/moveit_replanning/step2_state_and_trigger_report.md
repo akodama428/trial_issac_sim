@@ -127,10 +127,14 @@ xychart-beta
 ```mermaid
 xychart-beta
   title "Policy判定の発火・抑止回数"
-  x-axis [発火, 抑止]
+  x-axis [triggered, suppressed]
   y-axis "判定回数 [回]" 0 --> 5
   bar [4, 4]
 ```
+
+横軸の `triggered` は発火、`suppressed` は抑止を表す。Mermaid の
+`xychart-beta` が日本語のカテゴリ識別子を字句解析できない環境との互換性を
+保つため、横軸ラベルのみ ASCII で記載する。
 
 ## 次ステップへのインタフェース
 
