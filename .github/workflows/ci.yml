@@ -31,6 +31,9 @@ jobs:
       # 自由空間の各移動phaseへtracking error外乱を一度ずつ注入し、
       # phase-aware suffix replanが実MoveItで成功することをE2Eで検証する (Step 4)。
       TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place"
+      # producer 複線化の検証 (Step 5): dummy local plan を place phase で1回注入し、
+      # arbitration 経由の採用と収穫完走（非破綻）をE2Eで検証する。
+      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_place"
     steps:
       - name: Clean workspace residue
         run: |

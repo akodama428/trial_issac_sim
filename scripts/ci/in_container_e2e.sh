@@ -49,6 +49,22 @@ if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
   exit 1
 fi
 
+if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" ]]; then
+  IFS=',' read -ra LOCAL_PLAN_PHASES <<< "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES}"
+  for phase in "${LOCAL_PLAN_PHASES[@]}"; do
+    phase="$(echo "${phase}" | tr -d '[:space:]')"
+    [[ -z "${phase}" ]] && continue
+    if ! grep -Eq "\"event\": \"local_plan_published\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
+      echo "Dummy local plan was not published in phase ${phase}." >&2
+      exit 1
+    fi
+    if ! grep -Eq "\"event\": \"plan_adopted\".*\"planned_from_phase\": \"${phase}\".*\"producer_kind\": \"local_planner\"" "${ROBOT_LOG}"; then
+      echo "Dummy local plan was not adopted through arbitration for phase ${phase}." >&2
+      exit 1
+    fi
+  done
+fi
+
 if [[ -n "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES:-}" ]]; then
   IFS=',' read -ra INJECTION_PHASES <<< "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES}"
   for phase in "${INJECTION_PHASES[@]}"; do

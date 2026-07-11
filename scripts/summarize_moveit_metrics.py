@@ -68,8 +68,16 @@ def summarize(events: Iterable[dict[str, object]]) -> dict[str, object]:
             suffix_latencies_by_phase.setdefault(phase, []).append(
                 float(event["latency_ms"])
             )
+    adoption_by_producer: dict[str, dict[str, int]] = {}
+    for event in event_list:
+        if event["event"] not in ("plan_adopted", "plan_rejected"):
+            continue
+        producer = str(event.get("producer_kind", "unknown"))
+        counts = adoption_by_producer.setdefault(producer, {"adopted": 0, "rejected": 0})
+        counts["adopted" if event["event"] == "plan_adopted" else "rejected"] += 1
     return {
         "planner_latency_ms": latency_summary,
+        "plan_adoption": dict(sorted(adoption_by_producer.items())),
         "cancel_count": sum(event["event"] == "trajectory_cancel_requested" for event in event_list),
         "trajectory_replacement_count": sum(
             event["event"] == "trajectory_replaced" for event in event_list
