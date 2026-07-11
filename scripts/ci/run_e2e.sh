@@ -32,6 +32,7 @@ docker run --rm \
   -e FRANKA_ROS2_WS=/tmp/tomato-harvest-ci-franka-ws \
   -e CI_HEADLESS_STEPS="${CI_HEADLESS_STEPS:-900}" \
   -e CI_E2E_TIMEOUT_SEC="${CI_E2E_TIMEOUT_SEC:-2400}" \
+  -e TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE="${TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE:-0}" \
   -e PYTHONDONTWRITEBYTECODE=1 \
   -e HOME=/tmp/tomato-harvest-ci-home \
   -e XDG_CACHE_HOME=/tmp/tomato-harvest-ci-home/.cache \

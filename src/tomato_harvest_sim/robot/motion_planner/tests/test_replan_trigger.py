@@ -6,7 +6,8 @@ from tomato_harvest_sim.msg.contracts import (
     HarvestTaskPhase, JointStateSnapshot, Pose3D, TargetEstimate,
 )
 from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
-    ReplanTrigger, TriggerMemory, evaluate_replan_trigger, trigger_starts_planner,
+    ReplanTrigger, TriggerMemory, evaluate_replan_trigger, should_inject_place_replan,
+    trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import PlannerState
 
@@ -23,11 +24,38 @@ def _ready_state(**changes: object) -> PlannerState:
 
 
 class ReplanTriggerPolicyTest(unittest.TestCase):
+    def test_e2e_place_replan_injection_runs_once_in_place_phase(self) -> None:
+        self.assertTrue(should_inject_place_replan(
+            enabled=True, already_injected=False,
+            phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        ))
+        self.assertFalse(should_inject_place_replan(
+            enabled=True, already_injected=True,
+            phase=HarvestTaskPhase.MOVING_TO_PLACE,
+        ))
+        self.assertFalse(should_inject_place_replan(
+            enabled=True, already_injected=False,
+            phase=HarvestTaskPhase.MOVING_TO_GRASP,
+        ))
+
     def test_only_abort_starts_full_chain_planner_in_step2(self) -> None:
-        self.assertTrue(trigger_starts_planner(ReplanTrigger.ABORT))
-        self.assertFalse(trigger_starts_planner(ReplanTrigger.TIMER))
-        self.assertFalse(trigger_starts_planner(ReplanTrigger.SCENE_CHANGE))
-        self.assertFalse(trigger_starts_planner(ReplanTrigger.TRACKING_ERROR))
+        self.assertTrue(trigger_starts_planner(
+            ReplanTrigger.ABORT, HarvestTaskPhase.MOVING_TO_GRASP
+        ))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_GRASP
+        ))
+
+    def test_place_phase_starts_suffix_planner_for_new_triggers(self) -> None:
+        self.assertTrue(trigger_starts_planner(
+            ReplanTrigger.TRACKING_ERROR, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.SCENE_CHANGE, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
 
     def test_timer_triggers_in_enabled_phase(self) -> None:
         decision = evaluate_replan_trigger(

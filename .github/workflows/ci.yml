@@ -28,6 +28,7 @@ jobs:
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
+      TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE: "1"
     steps:
       - name: Clean workspace residue
         run: |

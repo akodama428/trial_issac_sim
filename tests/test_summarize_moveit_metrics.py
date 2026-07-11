@@ -19,7 +19,8 @@ def test_summary_calculates_required_step0_metrics(tmp_path: Path) -> None:
         'MOVEIT_METRIC {"event":"trajectory_aborted","phase":"moving_to_pregrasp"}\n'
         'MOVEIT_METRIC {"event":"trajectory_started","phase":"moving_to_place"}\n'
         'MOVEIT_METRIC {"event":"trajectory_cancel_requested","phase":"moving_to_place"}\n'
-        'MOVEIT_METRIC {"event":"trajectory_replaced","phase":"moving_to_place"}\n',
+        'MOVEIT_METRIC {"event":"trajectory_replaced","phase":"moving_to_place"}\n'
+        'MOVEIT_METRIC {"event":"place_suffix_replan_completed","success":true,"latency_ms":42.5}\n',
         encoding="utf-8",
     )
 
@@ -33,6 +34,8 @@ def test_summary_calculates_required_step0_metrics(tmp_path: Path) -> None:
     }
     assert summary["cancel_count"] == 1
     assert summary["trajectory_replacement_count"] == 1
+    assert summary["place_suffix_replan"]["successful_count"] == 1
+    assert summary["place_suffix_replan"]["latency_ms"]["mean"] == 42.5
     assert summary["phase_abort"] == {
         "moving_to_place": {"started": 1, "aborted": 0, "abort_rate": 0.0},
         "moving_to_pregrasp": {"started": 1, "aborted": 1, "abort_rate": 1.0},

@@ -48,3 +48,14 @@ if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
   echo "Failure phase transition was detected in robot log." >&2
   exit 1
 fi
+
+if [[ "${TOMATO_HARVEST_INJECT_PLACE_REPLAN_ONCE:-0}" == "1" ]]; then
+  if ! grep -q '"event": "place_suffix_e2e_disturbance_injected"' "${ROBOT_LOG}"; then
+    echo "Place suffix E2E disturbance was not injected." >&2
+    exit 1
+  fi
+  if ! grep -Eq '"event": "place_suffix_replan_completed".*"success": true' "${ROBOT_LOG}"; then
+    echo "Successful real MoveIt place suffix replan metric was not found." >&2
+    exit 1
+  fi
+fi
