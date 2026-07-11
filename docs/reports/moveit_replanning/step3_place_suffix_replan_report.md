@@ -4,11 +4,36 @@
 対象: Issue #11  
 結果: **PASS**
 
+## 用語: suffix（残り区間）とは
+
+本レポートで使う **suffix** は、動作計画全体のうち、現在地点より後に残っている区間を意味する。日本語では「残り区間」または「後続区間」に相当する。
+
+収穫動作全体が次の順序だとする。
+
+```text
+pregrasp → grasp → pull → place
+```
+
+すでにpullまで完了して `MOVING_TO_PLACE` に進んでいる場合、現在から先に残っているのは次の区間だけである。
+
+```text
+現在位置 → place
+```
+
+この「現在位置からplaceまでの残り区間だけを再計画すること」を、本レポートでは **place suffix replan（placeまでの残り区間の再計画）** と呼ぶ。
+
+| 用語 | 本レポートでの意味 |
+| --- | --- |
+| full-chain replan（全区間の再計画） | `pregrasp → grasp → pull → place`を最初からすべて再計画する |
+| place suffix replan（残り区間の再計画） | 完了済み区間は変更せず、`現在位置 → place`だけを再計画する |
+
+以降、初出や意味を強調する箇所では「suffix（残り区間）」と併記し、コード/API名では実装上の名称である`suffix`をそのまま使用する。
+
 ## この検証の目的
 
 この検証で確かめたいのは、収穫動作がすでに `MOVING_TO_PLACE` まで進んだ後に姿勢ずれやscene変化が起きても、完了済みのpregrasp / grasp / pullを最初から計画し直さず、**現在の関節状態からplaceまでの残りだけを安全に再計画できるか**である。
 
-従来のfull-chain replanには、完了済みphaseを含む長い計画を作り直し、実行中goalを無条件にcancel-and-replaceする危険がある。Step 3では対象をplaceに限定し、最終的な改善案B（phaseごとに必要なsuffixだけを低周期・event-drivenで再計画する構成）が成立するかを最小範囲で先行確認する。
+従来のfull-chain replanには、完了済みphaseを含む長い計画を作り直し、実行中goalを無条件にcancel-and-replaceする危険がある。Step 3では対象をplaceに限定し、最終的な改善案B（phaseごとに必要なsuffix（残り区間）だけを低周期・event-drivenで再計画する構成）が成立するかを最小範囲で先行確認する。
 
 具体的には、次の問いに答える。
 
