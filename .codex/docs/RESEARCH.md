@@ -251,6 +251,20 @@ Custom Docker Container
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
 
+## 18. plan producer複線化におけるadoption / arbitrationの責務分離
+
+- 調査日: 2026-07-11
+- 対象バージョン: MoveIt 2 Rolling documentation（2026-07-11閲覧）
+- 確認済みの事実:
+  - MoveIt Hybrid Planning は global planner と local planner を別コンポーネントとして並走させ、local planner が global の解を参照しながら実行時補正を行うアーキテクチャである。plan の受け手側は両者の成果物を扱う必要がある。
+  - Hybrid Planning の local planner はコールバックベースで global trajectory の更新を受け取り、実行中の trajectory へ blend する。すなわち「複数の計画生成主体が同じ実行系へ流れ込む」構造が前提になっている。
+- Issue #13 への設計判断:
+  - consumer 側の判定を2層へ分離する。producer 種別を問わない共通契約検証（metadata fail-closed / phase整合 / revision・生成時刻の順序付け）は adoption policy（Step 1 で導入済み）へ残し、producer 種別ごとの受け入れ裁定は新設の arbitration policy へ置く。consumer は arbitration だけを窓口にする。
+  - local plan の裁定規則は「採用済み plan の土台があること」「planned_from_phase が現在 phase と一致すること」の2つとし、優先度制御は導入しない。producer 間の主導権交代は Step 1 の順序規則（instance 間は generated_at_sec 比較）へ委ねることで、local 採用後も新しい global plan が自然に主導権を取り戻せる。
+  - 実 local planner (Step 6) 導入前に、no-op refinement の dummy producer（local_planner_stub_node）で配管だけを先に実証する。stub は採用済み global plan を土台として再刻印するのみで、軌道補正は行わない。
+- 一次情報:
+  - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
+
 ## 17. 自由空間phaseへのsuffix replan一般化とDETACHING除外
 
 - 調査日: 2026-07-11

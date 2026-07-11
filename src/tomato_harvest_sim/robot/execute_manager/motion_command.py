@@ -222,7 +222,9 @@ def main() -> None:
         MOTION_COMMAND_TOPIC, JOINT_STATES_TOPIC,
     )
     from tomato_harvest_sim.msg.serialization import motion_command_to_json
-    from tomato_harvest_sim.robot.execute_manager.plan_adoption import evaluate_plan_adoption
+    from tomato_harvest_sim.robot.execute_manager.plan_arbitration import (
+        evaluate_plan_arbitration,
+    )
     from tomato_harvest_sim.robot.motion_planner.observability import metric_line
 
     rclpy.init()
@@ -252,7 +254,7 @@ def main() -> None:
         def _on_plan(self, msg: String) -> None:
             from tomato_harvest_sim.msg.serialization import harvest_motion_plan_from_json
             candidate = harvest_motion_plan_from_json(msg.data)
-            decision = evaluate_plan_adoption(
+            decision = evaluate_plan_arbitration(
                 candidate=candidate,
                 current_plan=self._plan,
                 current_phase=self._phase,

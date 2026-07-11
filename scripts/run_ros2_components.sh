@@ -350,6 +350,15 @@ start_bg "motion_command_node" \
   python3 -m tomato_harvest_sim.robot.execute_manager.motion_command \
   >> "${ROBOT_LOG}" 2>&1
 
+# plan producer 複線化の検証用 (Issue #13)。有効化された phase で dummy local plan を
+# 1回ずつ publish する stub producer。通常運用では起動しない。
+if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" ]]; then
+  PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  start_bg "local_planner_stub_node" \
+    python3 -m tomato_harvest_sim.robot.motion_planner.local_planner_stub \
+    >> "${ROBOT_LOG}" 2>&1
+fi
+
 # ---------------------------------------------------------------------------- #
 # 6. franka_ros2_control の motion_command_executor_node 起動（background）
 # ---------------------------------------------------------------------------- #

@@ -23,7 +23,11 @@ def test_summary_calculates_required_step0_metrics(tmp_path: Path) -> None:
         'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_place","success":true,"latency_ms":42.5}\n'
         'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_pregrasp","success":true,"latency_ms":30.0}\n'
         'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_pregrasp","success":true,"latency_ms":50.0}\n'
-        'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_grasp","success":false,"latency_ms":99.0}\n',
+        'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_grasp","success":false,"latency_ms":99.0}\n'
+        'MOVEIT_METRIC {"event":"plan_adopted","producer_kind":"global_planner","reason":"adopted_initial"}\n'
+        'MOVEIT_METRIC {"event":"plan_adopted","producer_kind":"global_planner","reason":"adopted_newer_revision"}\n'
+        'MOVEIT_METRIC {"event":"plan_adopted","producer_kind":"local_planner","reason":"adopted_newer_producer_instance"}\n'
+        'MOVEIT_METRIC {"event":"plan_rejected","producer_kind":"local_planner","reason":"rejected_local_without_adopted_plan"}\n',
         encoding="utf-8",
     )
 
@@ -50,6 +54,10 @@ def test_summary_calculates_required_step0_metrics(tmp_path: Path) -> None:
     assert summary["phase_abort"] == {
         "moving_to_place": {"started": 1, "aborted": 0, "abort_rate": 0.0},
         "moving_to_pregrasp": {"started": 1, "aborted": 1, "abort_rate": 1.0},
+    }
+    assert summary["plan_adoption"] == {
+        "global_planner": {"adopted": 2, "rejected": 0},
+        "local_planner": {"adopted": 1, "rejected": 1},
     }
 
 

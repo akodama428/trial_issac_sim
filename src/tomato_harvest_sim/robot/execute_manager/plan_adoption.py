@@ -1,9 +1,10 @@
 """plan adoption policy — stale plan を採用しない最低限の規則 (Issue #9, Step 1)。
 
-producer (trajectory_planner_node) が付与する plan 契約メタデータをもとに、
-consumer (motion_command_node) が新着 plan を採用するか棄却するかを判定する。
-判定は pure function とし、後続 Step の trigger policy / plan arbitration から
-独立して検証できるようにする。
+producer が付与する plan 契約メタデータをもとに、新着 plan を採用するか
+棄却するかを判定する。producer 種別を問わない共通規則（metadata の fail-closed、
+phase 整合、instance / 時刻による順序付け）だけを担い、producer 種別ごとの
+裁定は plan_arbitration.py が担う (Issue #13, Step 5)。
+consumer (motion_command_node) は arbitration policy を窓口として使う。
 """
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ def evaluate_plan_adoption(
     """新着 plan を採用するか判定する。
 
     規則は次の順で適用する。
-    1. producer 規則: 未知の producer_kind の plan は採用しない。
+    1. producer 規則: 未知の producer_kind の plan は採用しない (fail-closed)。
+       既知の種別間の裁定は arbitration policy の責務であり、ここでは扱わない。
     2. metadata規則: revision (1以上) と必須metadataの欠落はfail-closedで棄却する。
     3. phase整合規則: phase-bound planは現在phaseが一致する場合だけ採用する。
     4. 同一producer instanceはrevision、異なるinstanceは生成時刻で順序付ける。
@@ -59,9 +61,6 @@ def evaluate_plan_adoption(
     """
     if candidate.producer_kind is PlanProducerKind.UNKNOWN:
         return PlanAdoptionDecision(adopted=False, reason="rejected_unknown_producer")
-
-    if candidate.producer_kind is not PlanProducerKind.GLOBAL_PLANNER:
-        return PlanAdoptionDecision(adopted=False, reason="rejected_unsupported_producer")
 
     if (
         candidate.plan_revision < 1
