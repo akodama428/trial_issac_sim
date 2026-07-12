@@ -60,7 +60,11 @@ def main() -> None:
     class TrajectoryPlannerNode(Node):  # type: ignore[misc]
         def __init__(self) -> None:
             super().__init__("trajectory_planner_node")
-            planner, info = build_planner()
+            planner, info = build_planner(
+                grasp_lateral_offset_m=float(
+                    os.environ.get("TOMATO_HARVEST_GRASP_LATERAL_OFFSET_M", "0.0")
+                )
+            )
             self._planner = planner
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
             self._state = PlannerStateAggregator()

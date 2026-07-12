@@ -98,3 +98,8 @@ physics:
     stiffness: 3000.0               # USD 既定 400 では 2cm 偏差で 8N しか出ず飽和が見えないため増強
     damping: 120.0
     max_force_n: 5.0                # トマト(30g)を潰さず保持できる初期値。実測根拠は step0 レポート
+  friction_grasp:
+    required_steps: 3
+    minimum_force_n: 1.0
+    maximum_relative_speed_m_s: 0.02
+    maximum_slip_m: 0.005

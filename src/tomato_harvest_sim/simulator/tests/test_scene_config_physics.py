@@ -50,6 +50,12 @@ _FULL_PAYLOAD = {
             "damping": 120.0,
             "max_force_n": 5.0,
         },
+        "friction_grasp": {
+            "required_steps": 4,
+            "minimum_force_n": 1.2,
+            "maximum_relative_speed_m_s": 0.015,
+            "maximum_slip_m": 0.005,
+        },
     }
 }
 
@@ -87,6 +93,14 @@ class PhysicsTuningFromPayloadTest(unittest.TestCase):
 
         self.assertTrue(config.enabled)
         self.assertEqual(config.finger_drive_max_force_n, 0.0)
+
+    def test_friction_grasp_thresholds_are_loaded(self) -> None:
+        config = physics_tuning_from_payload(_FULL_PAYLOAD)
+
+        self.assertEqual(config.friction_grasp_required_steps, 4)
+        self.assertAlmostEqual(config.friction_grasp_minimum_force_n, 1.2)
+        self.assertAlmostEqual(config.friction_grasp_maximum_relative_speed_m_s, 0.015)
+        self.assertAlmostEqual(config.friction_grasp_maximum_slip_m, 0.005)
 
     def test_missing_section_disables_tuning(self) -> None:
         """physics セクションが無い場合は enabled=False（従来挙動を維持）。"""

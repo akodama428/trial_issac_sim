@@ -72,7 +72,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--grasp-mode",
-        choices=("success", "failure"),
+        choices=("success", "failure", "physics"),
         default="success",
         help="Choose the stable grasp or failed grasp demo path.",
     )
@@ -182,8 +182,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         plan = build_review_scene_plan()
         print("SimulationApp initialized.", flush=True)
-        use_physx_harvest = args.grasp_mode == "success"
+        use_physx_harvest = args.grasp_mode in {"success", "physics"}
         artifacts = _build_scene(plan, use_physx_harvest=use_physx_harvest)
+        if artifacts.physics_bridge is not None:
+            artifacts.physics_bridge.set_grasp_mode(args.grasp_mode)
         _start_timeline_playback()
         _pump_updates(simulation_app.update, frame_count=4)
         _wait_for_first_frame(simulation_app=simulation_app, max_frames=240)

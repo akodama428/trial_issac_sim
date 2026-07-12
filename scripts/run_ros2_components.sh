@@ -20,6 +20,7 @@
 #   --isaac                    Isaac Sim 統合モードで起動（デフォルト: toy physics）
 #   --headless                 Isaac Sim をヘッドレスモードで起動（--isaac 時のみ有効）
 #   --headless-steps N         ヘッドレス実行ステップ数（デフォルト: 64）
+#   --grasp-mode MODE          success / failure / physics
 #   --auto-start               起動後に自動で Start コマンドを送信
 #   --rebuild                  C++ パッケージを強制再ビルドする
 #   --moveit                   MoveIt2 move_group を起動する（GetMotionPlan サービス提供）
@@ -96,6 +97,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --headless-steps)
       HEADLESS_ARGS+=(--headless-steps "$2")
+      shift 2
+      ;;
+    --grasp-mode)
+      HEADLESS_ARGS+=(--grasp-mode "$2")
       shift 2
       ;;
     --moveit)

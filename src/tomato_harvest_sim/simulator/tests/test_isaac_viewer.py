@@ -24,6 +24,11 @@ class IsaacViewerConfigTest(unittest.TestCase):
         self.assertEqual(args.camera_view, "fixed")
         self.assertEqual(args.grasp_mode, "success")
 
+    def test_parse_args_accepts_physics_grasp_mode(self) -> None:
+        args = parse_args(["--grasp-mode", "physics"])
+
+        self.assertEqual(args.grasp_mode, "physics")
+
     def test_build_appframework_argv_includes_viewport_extensions(self) -> None:
         argv = build_appframework_argv(headless=False)
 

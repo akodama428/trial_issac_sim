@@ -20,6 +20,7 @@ timeout --signal=INT "${E2E_TIMEOUT_SEC}" \
   --moveit \
   --headless \
   --headless-steps "${HEADLESS_STEPS}" \
+  --grasp-mode "${CI_GRASP_MODE:-success}" \
   --auto-start \
   --controller-log "${CONTROLLER_LOG}" \
   --robot-log "${ROBOT_LOG}" \
