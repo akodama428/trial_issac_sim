@@ -11,16 +11,20 @@ from threading import Lock
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     HarvestTaskPhase,
+    JointStateSnapshot,
     JointTrajectory,
 )
 
 # suffix replanの対象phase。DETACHING は茎からの引き剥がしという接触支配区間で、
 # global plannerの経路再計画より局所的な力・微修正が支配的なため、周期replan対象に
 # しない (Issue #12 設計判断)。Step 6 の local planner 候補として残す。
+# RETURNING_HOME も自由空間移動であり、abort反復がstep予算切れを招くため
+# suffix replan / local補正の対象に含める (Issue #32)。
 SUFFIX_REPLAN_PHASES: frozenset[HarvestTaskPhase] = frozenset({
     HarvestTaskPhase.MOVING_TO_PREGRASP,
     HarvestTaskPhase.MOVING_TO_GRASP,
     HarvestTaskPhase.MOVING_TO_PLACE,
+    HarvestTaskPhase.RETURNING_HOME,
 })
 
 # phaseごとの残区間trajectoryを保持するHarvestMotionPlanのfield名。
@@ -28,6 +32,7 @@ SUFFIX_TRAJECTORY_FIELD_BY_PHASE: dict[HarvestTaskPhase, str] = {
     HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
+    HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
 }
 
 
@@ -48,6 +53,53 @@ def suffix_trajectory(
         return None
     trajectory = getattr(plan, field)
     return trajectory if isinstance(trajectory, JointTrajectory) else None
+
+
+def should_plan_home_on_entry(
+    previous_phase: HarvestTaskPhase | None, phase: HarvestTaskPhase | None
+) -> bool:
+    """RETURNING_HOME進入時に能動的なhome計画を起動するか判定する (Issue #32)。
+
+    直行home軌道は衝突を考慮しないため、place後のトレイ近傍から出発すると
+    腕を障害物へ引っ掛け、計画では復旧できない物理固着を誘発し得る。
+    進入時に一度だけ衝突考慮済みのhome区間計画へ置き換える。
+
+    Args:
+        previous_phase: 直前に観測していたphase。未観測ならNone。
+        phase: 新しく観測したphase。
+
+    Returns:
+        RETURNING_HOMEへの遷移を新規に観測した場合のみTrue。
+    """
+    return (
+        phase is HarvestTaskPhase.RETURNING_HOME
+        and previous_phase is not HarvestTaskPhase.RETURNING_HOME
+    )
+
+
+def terminal_joint_state_of_phase(
+    plan: HarvestMotionPlan, phase: HarvestTaskPhase
+) -> JointStateSnapshot | None:
+    """採用済みplanのphase終端関節構成を、既知の有効goalとして取り出す (Issue #28 改善2)。
+
+    採用済みtrajectoryの終端は一度planning・衝突チェックを通過した構成であり、
+    abort後のsuffix replanでpose goalのIKサンプリングが全滅したときの
+    関節空間goal fallbackに使える。
+
+    Args:
+        plan: 現在採用中のplan。
+        phase: 終端構成を取り出すphase。
+
+    Returns:
+        phase残区間trajectoryの終端関節構成。対象外phaseやtrajectory欠落時はNone。
+    """
+    trajectory = suffix_trajectory(plan, phase)
+    if trajectory is None or not trajectory.points:
+        return None
+    return JointStateSnapshot(
+        joint_names=trajectory.joint_names,
+        positions_rad=trajectory.points[-1].positions_rad,
+    )
 
 
 @dataclass(frozen=True)

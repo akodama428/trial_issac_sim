@@ -35,6 +35,27 @@ def _pose_error_m(a: object, b: object) -> float:
     return math.sqrt(dx * dx + dy * dy + dz * dz)
 
 
+def execution_status_value(raw: str) -> str:
+    """execution_statusのraw値からstatus文字列を取り出す。
+
+    executorはabort診断のためstatusをJSONで報告することがある (Issue #32)。
+    旧来のplain文字列 ("succeeded"等) とJSON形式の両方を受け付け、
+    phase遷移判定に使うstatus値だけを返す。
+    """
+    import json
+
+    text = raw.strip()
+    if not text.startswith("{"):
+        return text
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(data, dict):
+        return str(data.get("status", "unknown")).strip() or "unknown"
+    return text
+
+
 def detaching_outcome(tomato_status: TomatoStatus) -> HarvestTaskPhase | None:
     """DETACHING の物理的成果からの遷移先を返す。遷移不要なら None。
 
@@ -170,7 +191,7 @@ def main() -> None:
                 self._set_phase(HarvestTaskPhase.MOVING_TO_PREGRASP)
 
         def _on_execution_status(self, msg: String) -> None:
-            self._execution_status = msg.data.strip()
+            self._execution_status = execution_status_value(msg.data)
             if self._execution_status == "succeeded":
                 self._on_trajectory_succeeded()
             elif self._execution_status == "aborted":

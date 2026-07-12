@@ -28,6 +28,7 @@ class MoveIt2PlanningResult:
     grasp_joint_trajectory: JointTrajectory | None = None
     pull_joint_trajectory: JointTrajectory | None = None
     place_joint_trajectory: JointTrajectory | None = None
+    home_joint_trajectory: JointTrajectory | None = None
     planning_scene_object_ids: tuple[str, ...] = ()
 
 

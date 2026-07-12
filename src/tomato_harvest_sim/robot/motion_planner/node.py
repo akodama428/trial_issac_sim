@@ -22,6 +22,7 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_REPLAN_PHASES,
     SuffixReplanGate,
     evaluate_suffix_update,
+    should_plan_home_on_entry,
 )
 
 
@@ -89,9 +90,14 @@ def main() -> None:
                 phase = HarvestTaskPhase(msg.data)
             except ValueError:
                 return
+            previous_phase = self._state.snapshot().phase
             self._state.update_phase(phase)
             if phase is HarvestTaskPhase.TARGET_FOUND:
                 self._try_plan(trigger="target_found")
+            # 直行home軌道は衝突を考慮しないため、進入時に衝突考慮済みの
+            # home区間計画へ能動的に置き換える (Issue #32)。
+            if should_plan_home_on_entry(previous_phase, phase):
+                self._try_suffix_plan(trigger="home_entry")
             if phase in SUFFIX_REPLAN_PHASES:
                 self._inject_suffix_replan_if_requested()
 
@@ -126,9 +132,14 @@ def main() -> None:
             if str(status.get("status", "")).strip() == "aborted":
                 self._state.observe_abort()
                 phase = self._state.snapshot().phase
+                # executor由来のabort診断 (Issue #32)。最大追従誤差・律速joint・
+                # abort分類を同じイベントに載せ、abort原因を後追い可能にする。
                 self.get_logger().info(metric_line(
                     "phase_abort_observed",
                     phase=phase.value if phase is not None else "unknown",
+                    max_joint_error_rad=status.get("max_joint_error_rad"),
+                    limiting_joint=status.get("limiting_joint"),
+                    abort_reason=status.get("abort_reason"),
                 ))
             self._evaluate_replan_trigger()
 

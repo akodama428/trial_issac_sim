@@ -16,13 +16,16 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_REPLAN_PHASES,
     SuffixReplanGate,
     evaluate_suffix_update,
+    should_plan_home_on_entry,
     suffix_trajectory,
+    terminal_joint_state_of_phase,
 )
 
 _SUFFIX_FIELD_BY_PHASE = {
     HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
+    HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
 }
 
 
@@ -50,7 +53,12 @@ class SuffixReplanPhaseSetTest(unittest.TestCase):
             HarvestTaskPhase.MOVING_TO_PREGRASP,
             HarvestTaskPhase.MOVING_TO_GRASP,
             HarvestTaskPhase.MOVING_TO_PLACE,
+            HarvestTaskPhase.RETURNING_HOME,
         }))
+
+    def test_returning_home_is_a_suffix_replan_target(self) -> None:
+        """home復帰も自由空間移動であり、abort復旧をfull replanに依存しない (Issue #32)。"""
+        self.assertIn(HarvestTaskPhase.RETURNING_HOME, SUFFIX_REPLAN_PHASES)
 
     def test_contact_dominant_detaching_is_excluded_from_suffix_replan(self) -> None:
         self.assertNotIn(HarvestTaskPhase.DETACHING, SUFFIX_REPLAN_PHASES)
@@ -115,6 +123,64 @@ class SuffixUpdateTest(unittest.TestCase):
         )
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_unsupported_phase")
+
+
+class HomeEntryPlanningTest(unittest.TestCase):
+    """returning_home進入時の能動的home計画判定 (Issue #32)。
+
+    直行home軌道は衝突を考慮しないため、トレイ近傍から出発すると腕を
+    引っ掛けて追従不能なabortを誘発する。進入時に衝突考慮済みの計画へ
+    置き換えることで、abort後の受動的復旧では救えない固着を予防する。
+    """
+
+    def test_entering_returning_home_triggers_home_planning(self) -> None:
+        self.assertTrue(should_plan_home_on_entry(
+            HarvestTaskPhase.PLACED, HarvestTaskPhase.RETURNING_HOME
+        ))
+        self.assertTrue(should_plan_home_on_entry(
+            None, HarvestTaskPhase.RETURNING_HOME
+        ))
+
+    def test_staying_in_returning_home_does_not_replan(self) -> None:
+        self.assertFalse(should_plan_home_on_entry(
+            HarvestTaskPhase.RETURNING_HOME, HarvestTaskPhase.RETURNING_HOME
+        ))
+
+    def test_other_phases_do_not_trigger_home_planning(self) -> None:
+        self.assertFalse(should_plan_home_on_entry(
+            HarvestTaskPhase.PLACED, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
+
+
+class TerminalJointStateTest(unittest.TestCase):
+    """abort後の関節空間goal fallbackが使う既知の有効goal構成の抽出 (Issue #28 改善2)。"""
+
+    def test_terminal_configuration_of_adopted_trajectory_is_extracted(self) -> None:
+        for phase in SUFFIX_REPLAN_PHASES:
+            with self.subTest(phase=phase):
+                plan = _plan(phase=phase, endpoint=1.0)
+
+                terminal = terminal_joint_state_of_phase(plan, phase)
+
+                self.assertIsNotNone(terminal)
+                assert terminal is not None
+                self.assertEqual(terminal.joint_names, ("joint1", "joint2"))
+                self.assertEqual(terminal.positions_rad, (1.0, 1.0))
+
+    def test_unsupported_phase_has_no_terminal_configuration(self) -> None:
+        plan = _plan(phase=HarvestTaskPhase.MOVING_TO_PLACE, endpoint=1.0)
+        self.assertIsNone(
+            terminal_joint_state_of_phase(plan, HarvestTaskPhase.DETACHING)
+        )
+
+    def test_missing_phase_trajectory_has_no_terminal_configuration(self) -> None:
+        plan = replace(
+            _plan(phase=HarvestTaskPhase.MOVING_TO_GRASP, endpoint=1.0),
+            grasp_joint_trajectory=None,
+        )
+        self.assertIsNone(
+            terminal_joint_state_of_phase(plan, HarvestTaskPhase.MOVING_TO_GRASP)
+        )
 
 
 class SuffixReplanGateTest(unittest.TestCase):

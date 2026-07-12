@@ -59,6 +59,13 @@ class ReplanTriggerPolicyTest(unittest.TestCase):
         self.assertEqual(parse_suffix_injection_phases(""), frozenset())
         self.assertEqual(parse_suffix_injection_phases("detaching, bogus"), frozenset())
 
+    def test_returning_home_is_a_valid_correction_phase(self) -> None:
+        """home復帰もsuffix replan対象になったため有効化phaseとして受理する (Issue #32)。"""
+        self.assertEqual(
+            parse_suffix_injection_phases("returning_home"),
+            frozenset({HarvestTaskPhase.RETURNING_HOME}),
+        )
+
     def test_abort_starts_full_chain_planner_in_any_phase(self) -> None:
         self.assertTrue(trigger_starts_planner(
             ReplanTrigger.ABORT, HarvestTaskPhase.MOVING_TO_GRASP

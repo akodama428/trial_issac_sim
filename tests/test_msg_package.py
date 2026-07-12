@@ -129,6 +129,47 @@ class TestHarvestMotionPlanContract(unittest.TestCase):
         self.assertIs(restored.producer_kind, PlanProducerKind.GLOBAL_PLANNER)
         self.assertEqual(restored.producer_instance_id, "global-instance-a")
 
+    def test_home_joint_trajectory_roundtrips_via_json(self) -> None:
+        from tomato_harvest_sim.msg.contracts import (
+            HarvestMotionPlan,
+            JointTrajectory,
+            JointTrajectoryPoint,
+        )
+        from tomato_harvest_sim.msg.serialization import (
+            harvest_motion_plan_from_json,
+            harvest_motion_plan_to_json,
+        )
+
+        home = JointTrajectory(
+            joint_names=("panda_joint1", "panda_joint2"),
+            points=(
+                JointTrajectoryPoint((0.3, 0.2), 0.0),
+                JointTrajectoryPoint((0.0, -0.4), 2.0),
+            ),
+        )
+        plan = HarvestMotionPlan(
+            **self._minimal_plan_kwargs(),
+            home_joint_trajectory=home,
+        )
+
+        restored = harvest_motion_plan_from_json(harvest_motion_plan_to_json(plan))
+
+        self.assertEqual(restored.home_joint_trajectory, home)
+
+    def test_missing_home_joint_trajectory_defaults_to_none(self) -> None:
+        """home区間trajectoryを持たない旧契約JSONも読める。"""
+        from tomato_harvest_sim.msg.contracts import HarvestMotionPlan
+        from tomato_harvest_sim.msg.serialization import (
+            harvest_motion_plan_from_json,
+            harvest_motion_plan_to_json,
+        )
+
+        plan = HarvestMotionPlan(**self._minimal_plan_kwargs())
+
+        restored = harvest_motion_plan_from_json(harvest_motion_plan_to_json(plan))
+
+        self.assertIsNone(restored.home_joint_trajectory)
+
     def test_old_contract_json_parses_as_unversioned(self) -> None:
         """旧契約 JSON (メタデータなし) はエラーにならず未刻印 (revision 0) として読める。
 
