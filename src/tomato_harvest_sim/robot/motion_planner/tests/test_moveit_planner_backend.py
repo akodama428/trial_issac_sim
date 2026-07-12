@@ -20,6 +20,7 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     _moveit_link_target_pose_from_runtime_tool_pose,
     _trajectory_is_noop,
     _tomato_planning_scene_ops,
+    goal_joint_window,
 )
 
 
@@ -299,6 +300,28 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         clamped = _clamp_joint_state_to_bounds(home_state)
 
         self.assertEqual(clamped.positions_rad, home_state.positions_rad)
+
+    def test_goal_joint_window_centers_on_current_base_joint(self) -> None:
+        """pose goalへ併置するjoint1窓は現在値中心で、遠いIK枝を刈る (Issue #37)。
+
+        abort診断の実測で、graspのpose goalがjoint1=2.45 radの遠いIK枝を選び、
+        JTCが追従不能なbase旋回 (goal_tolerance_violated) を誘発していた。
+        """
+        window = goal_joint_window(_joint_state(), window_rad=1.5)
+
+        self.assertIsNotNone(window)
+        assert window is not None
+        joint_name, position, tolerance = window
+        self.assertEqual(joint_name, "panda_joint1")
+        self.assertAlmostEqual(position, 0.0)
+        self.assertAlmostEqual(tolerance, 1.5)
+
+    def test_goal_joint_window_disabled_by_zero_width(self) -> None:
+        self.assertIsNone(goal_joint_window(_joint_state(), window_rad=0.0))
+
+    def test_goal_joint_window_requires_base_joint(self) -> None:
+        state = JointStateSnapshot(joint_names=("panda_joint2",), positions_rad=(0.5,))
+        self.assertIsNone(goal_joint_window(state, window_rad=1.5))
 
     def test_noop_trajectory_is_detected(self) -> None:
         self.assertTrue(

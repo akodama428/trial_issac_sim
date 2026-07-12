@@ -1,9 +1,9 @@
 """joint-space local planner — 追従誤差イベントの実補正producer (Issue #28 改善3)。
 
-Step 5でproducer複線化の受け皿として置いたスタブを実体化し、tracking error
-イベント受信時に「現在関節状態から採用済みglobal planの終端へ接続し直す」
-短いjoint-space trajectoryを生成する。終端関節構成を変えないため、把持直前の
-global suffix replanが別IK解へ差し替わる問題を避けつつ、executor契約を維持する。
+tracking errorイベント受信時に「現在関節状態から採用済みglobal planの終端へ
+接続し直す」短いjoint-space trajectoryを生成する。終端関節構成を変えないため、
+把持直前のglobal suffix replanが別IK解へ差し替わる問題を避けつつ、
+executor契約を維持する。
 
 将来MoveIt Servo等の実時間solverへ交換する場合も、このproducer境界
 (producer_kind / instance_id / revision刻印と`harvest_motion_plan` topic) を保つ。
@@ -26,7 +26,7 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     suffix_trajectory,
 )
 
-LOCAL_PLANNER_STUB_NAME = "joint_space_local_planner"
+LOCAL_PLANNER_NAME = "joint_space_local_planner"
 
 # 接続軌道の速度・時間パラメータ。JTCの許容時間内で確実に完了するよう、
 # global plannerのvelocity scaling (0.2) と同程度の保守的な速度に抑える。
@@ -147,7 +147,7 @@ def build_local_refinement_plan(
     return replace(
         base_plan,
         **{trajectory_field: correction},
-        planner_name=LOCAL_PLANNER_STUB_NAME,
+        planner_name=LOCAL_PLANNER_NAME,
         plan_revision=revision,
         generated_at_sec=now_sec,
         planned_from_phase=phase,
@@ -197,11 +197,11 @@ def main() -> None:
 
     rclpy.init()
 
-    class LocalPlannerStubNode(Node):  # type: ignore[misc]
+    class LocalPlannerNode(Node):  # type: ignore[misc]
         """有効化された phase へ進入したとき、一度だけ local plan を publish する。"""
 
         def __init__(self) -> None:
-            super().__init__("local_planner_stub_node")
+            super().__init__("local_planner_node")
             # INJECT_* は外乱注入E2E (採用アサーション付き) の有効化、
             # LOCAL_PLANNER_PHASES は通常運転での補正有効化。どちらでも動く。
             self._enabled_phases = parse_suffix_injection_phases(
@@ -224,7 +224,7 @@ def main() -> None:
             from tomato_harvest_sim.msg.topics import JOINT_STATES_TOPIC
             self.create_subscription(JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10)
             self.get_logger().info(metric_line(
-                "local_planner_stub_started",
+                "local_planner_started",
                 enabled_phases=",".join(sorted(p.value for p in self._enabled_phases)),
                 producer_instance_id=self._instance_id,
             ))
@@ -236,7 +236,7 @@ def main() -> None:
                 return
             if self._latest_plan is None:
                 self.get_logger().info(metric_line(
-                    "local_planner_stub_base_plan_captured",
+                    "local_planner_base_plan_captured",
                     plan_revision=plan.plan_revision,
                 ))
             self._latest_plan = plan
@@ -320,7 +320,7 @@ def main() -> None:
                 producer_instance_id=candidate.producer_instance_id,
             ))
 
-    node = LocalPlannerStubNode()
+    node = LocalPlannerNode()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

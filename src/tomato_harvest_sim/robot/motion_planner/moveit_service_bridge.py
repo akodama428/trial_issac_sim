@@ -52,6 +52,31 @@ class _MotionPlanOutcome:
     error_code: int | None
     failure_reason: str | None
 
+
+def goal_joint_window(
+    joint_state: JointStateSnapshot, *, window_rad: float
+) -> tuple[str, float, float] | None:
+    """pose goalへ併置する、base関節 (panda_joint1) の許容窓を返す (Issue #37)。
+
+    OMPLのgoal IKサンプリングは同じ手先poseに対して遠いIK枝 (base大旋回) を
+    選ぶことがあり、JTCが追従不能な軌道 (goal_tolerance_violated) を生む。
+    goal制約に「joint1は現在値±窓」を併置することで近いIK枝だけを許す。
+    窓内に解が無い場合に備え、呼び出し側は窓なしの再試行を持つこと。
+
+    Args:
+        joint_state: 現在の関節状態。
+        window_rad: 許容半幅 [rad]。0以下で無効。
+
+    Returns:
+        (関節名, 中心値, 許容半幅)。無効時やbase関節が無い場合はNone。
+    """
+    if window_rad <= 0.0:
+        return None
+    for name, position in zip(joint_state.joint_names, joint_state.positions_rad):
+        if name == "panda_joint1":
+            return (name, float(position), float(window_rad))
+    return None
+
 class MoveIt2ServiceBridgePlanner(MotionPlanner):
     """MoveIt2-aware planner that applies a planning scene and returns joint trajectories."""
 
@@ -183,6 +208,10 @@ class Ros2MoveIt2PlannerBridge:
         self._orientation_tolerance_rad = float(
             os.environ.get("TOMATO_HARVEST_MOVEIT_ORIENTATION_TOLERANCE_RAD", orientation_tolerance_rad)
         )
+        # pose goalのIK枝を現在構成の近傍へ制限する窓 (Issue #37)。0で無効。
+        self._goal_joint1_window_rad = float(os.environ.get(
+            "TOMATO_HARVEST_MOVEIT_GOAL_JOINT1_WINDOW_RAD", "1.5"
+        ))
         self._enforce_orientation_constraint = os.environ.get(
             "TOMATO_HARVEST_MOVEIT_ENFORCE_ORIENTATION",
             "1",
@@ -586,28 +615,33 @@ class Ros2MoveIt2PlannerBridge:
             attach_tomato=attach_tomato,
         ):
             return None
-        request = self._build_motion_plan_request(
+        # 近いIK枝を優先する窓付きgoalで試行し、解が無ければ窓なしで再試行する
+        # (Issue #37)。遠いIK枝はJTCが追従できないbase大旋回を生む。
+        joint_window = goal_joint_window(
+            joint_state, window_rad=self._goal_joint1_window_rad
+        )
+        outcome = self._plan_pose_goal(
+            clients=clients,
             joint_state=joint_state,
             base_frame_id=base_frame_id,
             target_pose=target_pose,
+            joint_window=joint_window,
         )
-        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        if outcome.trajectory is None and joint_window is not None:
+            print(
+                f"[MoveItBridge] goal_joint_window exhausted phase={phase_label} "
+                f"window_rad={joint_window[2]} — retrying without window",
+                flush=True,
+            )
+            outcome = self._plan_pose_goal(
+                clients=clients,
+                joint_state=joint_state,
+                base_frame_id=base_frame_id,
+                target_pose=target_pose,
+                joint_window=None,
+            )
         trajectory = outcome.trajectory
         failure_reason = outcome.failure_reason
-        if trajectory is not None and _trajectory_is_noop(
-            trajectory,
-            start_joint_state=joint_state,
-            tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
-        ):
-            self._debug_log(
-                "[MoveItBridge] rejecting no-op trajectory and falling back to geometric execution. "
-                f"ee_link={self._end_effector_link} "
-                f"target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f}) "
-                f"start_q={joint_state.positions_rad} "
-                f"end_q={trajectory.points[-1].positions_rad}"
-            )
-            trajectory = None
-            failure_reason = "noop_trajectory"
         if trajectory is None:
             self._debug_log(
                 f"[MoveItBridge] phase planning failed: ee_link={self._end_effector_link} "
@@ -639,6 +673,38 @@ class Ros2MoveIt2PlannerBridge:
             f"end_q={trajectory.points[-1].positions_rad}"
         )
         return trajectory
+
+    def _plan_pose_goal(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        target_pose: Pose3D,
+        joint_window: tuple[str, float, float] | None,
+    ) -> _MotionPlanOutcome:
+        """pose goal計画1回分 (request構築→service→no-op検査) を実行する。"""
+        request = self._build_motion_plan_request(
+            joint_state=joint_state,
+            base_frame_id=base_frame_id,
+            target_pose=target_pose,
+            joint_window=joint_window,
+        )
+        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        if outcome.trajectory is not None and _trajectory_is_noop(
+            outcome.trajectory,
+            start_joint_state=joint_state,
+            tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
+        ):
+            self._debug_log(
+                "[MoveItBridge] rejecting no-op trajectory and falling back to geometric execution. "
+                f"ee_link={self._end_effector_link} "
+                f"target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f}) "
+                f"start_q={joint_state.positions_rad} "
+                f"end_q={outcome.trajectory.points[-1].positions_rad}"
+            )
+            return _MotionPlanOutcome(None, outcome.error_code, "noop_trajectory")
+        return outcome
 
     def _apply_phase_planning_scene(
         self,
@@ -778,11 +844,13 @@ class Ros2MoveIt2PlannerBridge:
         joint_state: JointStateSnapshot,
         base_frame_id: str,
         target_pose: Pose3D,
+        joint_window: tuple[str, float, float] | None = None,
     ) -> object:
         from geometry_msgs.msg import Pose
         from moveit_msgs.msg import (
             BoundingVolume,
             Constraints,
+            JointConstraint,
             OrientationConstraint,
             PositionConstraint,
         )
@@ -826,6 +894,17 @@ class Ros2MoveIt2PlannerBridge:
             orientation_constraint.absolute_z_axis_tolerance = self._orientation_tolerance_rad
             orientation_constraint.weight = 1.0
             goal_constraints.orientation_constraints = [orientation_constraint]
+
+        # 近いIK枝だけを許すbase関節窓 (Issue #37)。pose拘束とANDで効く。
+        if joint_window is not None:
+            window_name, window_center, window_half_rad = joint_window
+            window_constraint = JointConstraint()
+            window_constraint.joint_name = window_name
+            window_constraint.position = window_center
+            window_constraint.tolerance_above = window_half_rad
+            window_constraint.tolerance_below = window_half_rad
+            window_constraint.weight = 1.0
+            goal_constraints.joint_constraints = [window_constraint]
 
         motion_plan_request = self._new_motion_plan_request(
             joint_state=joint_state, base_frame_id=base_frame_id

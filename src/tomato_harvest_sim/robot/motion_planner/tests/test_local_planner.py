@@ -1,4 +1,4 @@
-"""local planner stub — producer複線化の最小受け皿のテスト (Issue #13)。"""
+"""joint-space local planner — 追従誤差補正planの生成テスト (Issue #13, #28)。"""
 from __future__ import annotations
 
 import unittest
@@ -13,7 +13,7 @@ from tomato_harvest_sim.msg.contracts import (
     PlanProducerKind,
     Pose3D,
 )
-from tomato_harvest_sim.robot.motion_planner.local_planner_stub import (
+from tomato_harvest_sim.robot.motion_planner.local_planner import (
     build_local_refinement_plan,
 )
 
