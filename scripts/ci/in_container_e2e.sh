@@ -9,6 +9,9 @@ ROBOT_LOG="${ARTIFACT_DIR}/robot_node.log"
 STACK_LOG="${ARTIFACT_DIR}/run_ros2_components.log"
 
 mkdir -p "${ARTIFACT_DIR}"
+# self-hosted runnerのartifact volumeはrun間で再利用される。grep判定が過去runの
+# metricを拾わないよう、今回の判定対象ログを必ず空にしてから開始する。
+truncate -s 0 "${CONTROLLER_LOG}" "${ROBOT_LOG}" "${STACK_LOG}"
 
 set +e
 timeout --signal=INT "${E2E_TIMEOUT_SEC}" \

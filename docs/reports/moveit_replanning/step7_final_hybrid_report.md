@@ -95,7 +95,7 @@ sequenceDiagram
 | 外乱対象phase | なし | place | pregrasp / grasp / place |
 | Step 6実測abort率（比較根拠） | - | 0% | 0%（3 phase） |
 
-Step 7の単体検証は169件成功、2件skip。E2Eでは各phaseについて `hybrid_event_routed(route=local)`、local plan publish、arbitration採用、およびtracking error起点の `suffix_replan_completed` が存在しないことをCI条件にした。実機相当E2Eの最終数値はGitHub Actions artifactから追記する。
+Step 7の単体検証は169件成功、2件skip。ローカル実MoveIt E2Eでは3phaseすべてで `hybrid_event_routed(route=local)`、local plan publish、arbitration採用、収穫完走を確認し、tracking error起点のglobal suffix計画は0件だった。self-hosted runnerの過去ログ混入を防ぐため、CI判定前にartifact logをtruncateする。GitHub Actionsの最終run IDはPRへ記録する。
 
 ## latency、abort、tracking error、cancel、replacement
 
