@@ -96,7 +96,9 @@ def main() -> None:
     from rclpy.node import Node
     from std_msgs.msg import String
 
-    from tomato_harvest_sim.msg.topics import HARVEST_MOTION_PLAN_TOPIC, PHASE_TOPIC
+    from tomato_harvest_sim.msg.topics import (
+        HARVEST_MOTION_PLAN_TOPIC, HYBRID_PLANNING_EVENT_TOPIC, PHASE_TOPIC,
+    )
     from tomato_harvest_sim.msg.serialization import (
         harvest_motion_plan_from_json,
         harvest_motion_plan_to_json,
@@ -116,7 +118,8 @@ def main() -> None:
             self._enabled_phases = parse_suffix_injection_phases(
                 os.environ.get("TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES", "")
             )
-            self._published_phases: frozenset[HarvestTaskPhase] = frozenset()
+            from tomato_harvest_sim.robot.motion_planner.hybrid_event import LocalEventMemory
+            self._event_memory = LocalEventMemory()
             self._latest_plan: HarvestMotionPlan | None = None
             self._current_joint_state: JointStateSnapshot | None = None
             self._current_phase: HarvestTaskPhase | None = None
@@ -125,6 +128,7 @@ def main() -> None:
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
             self.create_subscription(String, PHASE_TOPIC, self._on_phase, 10)
             self.create_subscription(String, HARVEST_MOTION_PLAN_TOPIC, self._on_plan, 10)
+            self.create_subscription(String, HYBRID_PLANNING_EVENT_TOPIC, self._on_event, 10)
             from sensor_msgs.msg import JointState
             from tomato_harvest_sim.msg.topics import JOINT_STATES_TOPIC
             self.create_subscription(JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10)
@@ -145,8 +149,6 @@ def main() -> None:
                     plan_revision=plan.plan_revision,
                 ))
             self._latest_plan = plan
-            if self._current_phase is not None:
-                self._publish_local_correction(self._current_phase)
 
         def _on_joint_state(self, msg: object) -> None:
             self._current_joint_state = JointStateSnapshot(
@@ -160,10 +162,37 @@ def main() -> None:
             except ValueError:
                 return
             self._current_phase = phase
+
+        def _on_event(self, msg: String) -> None:
+            import json
+            from tomato_harvest_sim.robot.motion_planner.hybrid_event import (
+                LocalEventMemory, PlannerRoute, admit_local_event,
+            )
+            try:
+                event = json.loads(msg.data)
+                route = PlannerRoute(str(event["route"]))
+                phase = HarvestTaskPhase(str(event["phase"]))
+                event_id = str(event["event_id"])
+                event_at_sec = float(event["event_at_sec"])
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                return
+            if route is not PlannerRoute.LOCAL or phase != self._current_phase:
+                return
+            now_sec = time.time()
+            decision = admit_local_event(
+                event_id=event_id, event_at_sec=event_at_sec, now_sec=now_sec,
+                phase=phase, memory=self._event_memory,
+            )
+            if not decision.accepted:
+                self.get_logger().info(metric_line(
+                    "local_event_suppressed", phase=phase.value, reason=decision.reason,
+                ))
+                return
+            self._event_memory = LocalEventMemory(now_sec, event_id)
             self._publish_local_correction(phase)
 
         def _publish_local_correction(self, phase: HarvestTaskPhase) -> None:
-            if phase not in self._enabled_phases or phase in self._published_phases:
+            if phase not in self._enabled_phases:
                 return
             if self._latest_plan is None or self._current_joint_state is None:
                 self.get_logger().info(metric_line(
@@ -189,7 +218,6 @@ def main() -> None:
                 ))
                 return
             self._revision += 1
-            self._published_phases = self._published_phases | {phase}
             out = String()
             out.data = harvest_motion_plan_to_json(candidate)
             self._pub.publish(out)

@@ -9,6 +9,9 @@ ROBOT_LOG="${ARTIFACT_DIR}/robot_node.log"
 STACK_LOG="${ARTIFACT_DIR}/run_ros2_components.log"
 
 mkdir -p "${ARTIFACT_DIR}"
+# self-hosted runnerのartifact volumeはrun間で再利用される。grep判定が過去runの
+# metricを拾わないよう、今回の判定対象ログを必ず空にしてから開始する。
+truncate -s 0 "${CONTROLLER_LOG}" "${ROBOT_LOG}" "${STACK_LOG}"
 
 set +e
 timeout --signal=INT "${E2E_TIMEOUT_SEC}" \
@@ -74,8 +77,12 @@ if [[ -n "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES:-}" ]]; then
       echo "Suffix E2E disturbance was not injected in phase ${phase}." >&2
       exit 1
     fi
-    if ! grep -Eq "\"event\": \"suffix_replan_completed\".*\"phase\": \"${phase}\".*\"success\": true" "${ROBOT_LOG}"; then
-      echo "Successful real MoveIt suffix replan metric was not found for phase ${phase}." >&2
+    if ! grep -Eq "\"event\": \"hybrid_event_routed\".*\"phase\": \"${phase}\".*\"route\": \"local\".*\"trigger\": \"tracking_error\"" "${ROBOT_LOG}"; then
+      echo "Tracking-error event was not routed exclusively to the local planner in phase ${phase}." >&2
+      exit 1
+    fi
+    if grep -Eq "\"event\": \"suffix_replan_completed\".*\"phase\": \"${phase}\".*\"trigger\": \"tracking_error\"" "${ROBOT_LOG}"; then
+      echo "Tracking error incorrectly started the global suffix planner in phase ${phase}." >&2
       exit 1
     fi
   done

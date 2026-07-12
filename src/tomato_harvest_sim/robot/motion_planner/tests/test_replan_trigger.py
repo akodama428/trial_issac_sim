@@ -67,14 +67,14 @@ class ReplanTriggerPolicyTest(unittest.TestCase):
             ReplanTrigger.ABORT, HarvestTaskPhase.DETACHING
         ))
 
-    def test_tracking_error_starts_suffix_planner_in_free_space_phases(self) -> None:
+    def test_tracking_error_does_not_start_global_planner(self) -> None:
         for phase in (
             HarvestTaskPhase.MOVING_TO_PREGRASP,
             HarvestTaskPhase.MOVING_TO_GRASP,
             HarvestTaskPhase.MOVING_TO_PLACE,
         ):
             with self.subTest(phase=phase):
-                self.assertTrue(trigger_starts_planner(
+                self.assertFalse(trigger_starts_planner(
                     ReplanTrigger.TRACKING_ERROR, phase
                 ))
 
@@ -95,11 +95,11 @@ class ReplanTriggerPolicyTest(unittest.TestCase):
                     ReplanTrigger.SCENE_CHANGE, phase
                 ))
 
-    def test_timer_triggers_in_enabled_phase(self) -> None:
+    def test_timer_does_not_trigger_in_step7(self) -> None:
         decision = evaluate_replan_trigger(
             state=_ready_state(), memory=TriggerMemory(), now_sec=10.0
         )
-        self.assertEqual(decision.trigger, ReplanTrigger.TIMER)
+        self.assertFalse(decision.triggered)
 
     def test_abort_triggers_independently(self) -> None:
         decision = evaluate_replan_trigger(

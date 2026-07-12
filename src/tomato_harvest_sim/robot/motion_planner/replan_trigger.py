@@ -70,8 +70,8 @@ def evaluate_replan_trigger(
         and state.tracking_error_rad >= policy.tracking_error_threshold_rad
     ):
         return TriggerDecision(True, ReplanTrigger.TRACKING_ERROR, "triggered_tracking_error")
-    if state.phase in policy.timer_phases:
-        return TriggerDecision(True, ReplanTrigger.TIMER, "triggered_timer")
+    # Step 7: periodic replanning is intentionally disabled. Planner work is
+    # driven by explicit execution events to avoid cancel-and-replace churn.
     return TriggerDecision(False, None, "suppressed_phase")
 
 
@@ -101,9 +101,7 @@ def trigger_starts_planner(
     観測専用に保つ (Issue #12 設計判断)。timer / scene change も cancel churn を
     避けるため、local planner 導入 (Step 6) まで観測専用とする。
     """
-    if trigger is ReplanTrigger.ABORT:
-        return True
-    return phase in SUFFIX_REPLAN_PHASES and trigger is ReplanTrigger.TRACKING_ERROR
+    return trigger is ReplanTrigger.ABORT
 
 
 def parse_suffix_injection_phases(raw: str) -> frozenset[HarvestTaskPhase]:
