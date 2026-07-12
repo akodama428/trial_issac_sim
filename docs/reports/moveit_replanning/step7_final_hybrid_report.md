@@ -35,24 +35,60 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  Status[trajectory status] --> Aggregate[PlannerStateAggregator]
-  Aggregate --> Policy[ReplanTriggerPolicy]
-  Policy --> Router[HybridEventRouter]
-  Router -->|abort| Global[global full or suffix planning]
-  Router -->|tracking error in free-space phase| Topic[hybrid planning event topic]
-  Router -->|timer, scene, contact phase| Observe[observe only]
-  Topic --> Admission[LocalEventAdmission]
-  Admission --> Duplicate[duplicate guard]
-  Admission --> Stale[2 second stale guard]
-  Admission --> Rate[0.25 second rate limit]
-  Admission --> Phase[phase consistency]
-  Phase --> Local[local refinement]
-  Local --> Arbitration[producer-aware arbitration]
-  Global --> Arbitration
-  Arbitration --> Execute[adopt exactly one plan]
+  Status[trajectory status topic]
+  Joint[joint states topic]
+  PhaseTopic[phase topic]
+
+  subgraph TrajectoryNode[trajectory_planner_node]
+    Aggregate[PlannerStateAggregator]
+    Policy[ReplanTriggerPolicy]
+    Router[HybridEventRouter]
+    Global[global full or suffix planning]
+    Observe[observe only and metrics]
+    Aggregate --> Policy
+    Policy --> Router
+    Router -->|abort| Global
+    Router -->|timer, scene, contact phase| Observe
+  end
+
+  Topic[hybrid planning event topic]
+  PlanTopic[harvest motion plan topic]
+
+  subgraph LocalNode[local_planner_stub_node]
+    Admission[LocalEventAdmission]
+    Duplicate[duplicate guard]
+    Stale[2 second stale guard]
+    Rate[0.25 second rate limit]
+    Phase[route, current and supported phase guards]
+    Local[local refinement]
+    Admission --> Duplicate --> Stale --> Rate --> Phase --> Local
+  end
+
+  subgraph CommandNode[motion_command_node]
+    Arbitration[producer-aware arbitration]
+    Execute[adopt exactly one plan]
+    Arbitration --> Execute
+  end
+
+  Executor[trajectory executor and controller]
+
+  Status --> Aggregate
+  Joint --> Aggregate
+  PhaseTopic --> Aggregate
+  PhaseTopic --> Phase
+  Router -->|tracking error in free-space phase| Topic
+  Topic --> Admission
+  Global --> PlanTopic
+  Local --> PlanTopic
+  PlanTopic --> Arbitration
+  Execute --> Executor
   classDef changed fill:#ffd6d6,stroke:#c62828,stroke-width:3px
+  classDef nodebox fill:#fff8e1,stroke:#9a6700,stroke-width:2px
   class Router,Topic,Admission,Duplicate,Stale,Rate,Phase,Local changed
+  class TrajectoryNode,LocalNode,CommandNode nodebox
 ```
+
+黄色の大枠がROS 2 node、赤がStep 7で追加・変更した処理またはtopicを表す。`HybridEventRouter`は`trajectory_planner_node`内、各guardと`LocalEventAdmission`は`local_planner_stub_node`内、最終的なproducer競合判定は`motion_command_node`内にある。これにより、図中の論理モジュールがどの実行nodeに属するかを追跡できる。
 
 ### HybridEventRouterの役割
 
