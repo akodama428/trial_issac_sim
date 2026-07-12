@@ -450,6 +450,19 @@ Custom Docker Container
   - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
   - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
 
+## 24. 初期姿勢ロバスト性には関節制限内の特異姿勢近傍を独立ケースとして含める
+- 調査日: 2026-07-12
+- 確認済み事項:
+  - Franka公式仕様は7軸それぞれのjoint position limitを定義している。
+  - MoveIt Servo公式資料はsingularity checkingを安全機能として持ち、特異点への接近時に減速、十分近い場合に停止することを説明している。
+- Issue #28への適用:
+  - 10姿勢は固定ID・固定関節角とし、全件をFranka関節制限内に置く。
+  - `near_singularity_extended`は肩・肘・手首軸が整列する伸展特異姿勢近傍として明示し、通常ケースと区別できるflagを持たせる。
+  - 特異姿勢は成功を保証する入力ではなく、planner/controllerの回復能力と失敗理由を継続計測する評価入力である。
+- ソース:
+  - https://frankarobotics.github.io/docs/robot_specifications.html
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+
 # ソース
 - NVIDIA Isaac Sim Container Installation
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html

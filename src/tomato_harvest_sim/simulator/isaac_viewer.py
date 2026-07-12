@@ -709,8 +709,16 @@ def _initialize_robot_to_home(*, simulation_app: object, franka_driver: IsaacFra
     シミュレーション開始前にホーム位置へテレポートし、
     MoveIt2 がスタート状態を有効と判定できるようにする。
     """
+    import os
     import numpy as np
     from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_POSITIONS_RAD
+    from tomato_harvest_sim.simulator.initial_pose_cases import initial_pose_from_environment
+
+    case_id = os.environ.get("TOMATO_HARVEST_INITIAL_POSE_ID", "default").strip()
+    initial_positions = (
+        DEFAULT_JOINT_POSITIONS_RAD if case_id == "default"
+        else initial_pose_from_environment(case_id)
+    )
 
     for _ in range(120):
         simulation_app.update()
@@ -721,13 +729,16 @@ def _initialize_robot_to_home(*, simulation_app: object, franka_driver: IsaacFra
             continue
         n = len(current)
         home = np.zeros(n)
-        home[:7] = DEFAULT_JOINT_POSITIONS_RAD
+        home[:7] = initial_positions
         if n > 7:
             home[7:] = 0.04  # finger open
         franka_driver.set_joint_positions_with_debug(home, context="home_init")
         for _ in range(10):
             simulation_app.update()
-        print(f"[Simulator] Robot initialized to home position: {list(home[:7])}", flush=True)
+        print(
+            f"[Simulator] Robot initialized from pose case '{case_id}': {list(home[:7])}",
+            flush=True,
+        )
         return
     print("[Simulator] WARNING: Could not initialize franka to home position.", flush=True)
 
