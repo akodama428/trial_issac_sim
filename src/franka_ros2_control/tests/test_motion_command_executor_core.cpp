@@ -112,6 +112,36 @@ TEST(TrackingErrorPeakTest, MismatchedLengthsAreIgnored)
   EXPECT_FALSE(peak.has_value);
 }
 
+// Issue #37: 固着調査のため、ピーク時点の律速jointの目標値・実位置も記録する。
+// 関節限界近傍での固着かどうかを実位置から直接判定できるようにする。
+TEST(TrackingErrorPeakTest, RecordsDesiredAndActualAtPeak)
+{
+  franka_ros2_control::TrackingErrorPeak peak;
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1", "panda_joint3"}, {0.02, -0.05},
+    {0.10, 0.00}, {0.08, 0.05});
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1", "panda_joint3"}, {0.03, -2.40},
+    {0.20, 0.00}, {0.17, 2.40});
+
+  ASSERT_TRUE(peak.has_value);
+  EXPECT_DOUBLE_EQ(peak.max_error_rad, 2.40);
+  EXPECT_EQ(peak.limiting_joint, "panda_joint3");
+  ASSERT_TRUE(peak.has_positions);
+  EXPECT_DOUBLE_EQ(peak.limiting_joint_desired_rad, 0.00);
+  EXPECT_DOUBLE_EQ(peak.limiting_joint_actual_rad, 2.40);
+}
+
+TEST(TrackingErrorPeakTest, MissingPositionsKeepErrorTrackingOnly)
+{
+  franka_ros2_control::TrackingErrorPeak peak;
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1"}, {0.15});
+
+  ASSERT_TRUE(peak.has_value);
+  EXPECT_FALSE(peak.has_positions);
+}
+
 TEST(AbortReasonTest, MapsJtcErrorCodesToStableNames)
 {
   EXPECT_EQ(franka_ros2_control::abort_reason_from_jtc(-4, ""), "path_tolerance_violated");
@@ -135,6 +165,19 @@ TEST(ExecutionStatusJsonTest, AbortPayloadCarriesDiagnostics)
   EXPECT_NE(payload.find("\"max_joint_error_rad\":0.184"), std::string::npos);
   EXPECT_NE(payload.find("\"limiting_joint\":\"panda_joint4\""), std::string::npos);
   EXPECT_NE(payload.find("\"abort_reason\":\"goal_tolerance_violated\""), std::string::npos);
+}
+
+TEST(ExecutionStatusJsonTest, AbortPayloadCarriesPeakPositionsWhenAvailable)
+{
+  franka_ros2_control::TrackingErrorPeak peak;
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint3"}, {-2.4}, {0.0}, {2.4});
+
+  const std::string payload = franka_ros2_control::execution_status_json(
+    "aborted", peak, "goal_tolerance_violated");
+
+  EXPECT_NE(payload.find("\"limiting_joint_desired_rad\":0"), std::string::npos);
+  EXPECT_NE(payload.find("\"limiting_joint_actual_rad\":2.4"), std::string::npos);
 }
 
 TEST(ExecutionStatusJsonTest, NonAbortPayloadHasOnlyStatus)

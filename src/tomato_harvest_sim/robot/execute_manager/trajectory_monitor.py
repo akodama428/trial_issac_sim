@@ -8,7 +8,14 @@ import json
 
 # executorのabort診断のうち、下流 (trajectory_planner_node) の契約へ通す field。
 # 最大追従誤差・律速joint・abort分類はabort原因の特定に使う (Issue #32)。
-_ABORT_DIAGNOSTIC_FIELDS = ("max_joint_error_rad", "limiting_joint", "abort_reason")
+# ピーク時の律速joint目標/実位置は関節限界近傍の固着判定に使う (Issue #37)。
+_ABORT_DIAGNOSTIC_FIELDS = (
+    "max_joint_error_rad",
+    "limiting_joint",
+    "limiting_joint_desired_rad",
+    "limiting_joint_actual_rad",
+    "abort_reason",
+)
 
 
 def trajectory_status_from_execution_status(execution_status: str) -> str:

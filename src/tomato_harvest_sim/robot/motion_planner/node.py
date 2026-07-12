@@ -139,6 +139,8 @@ def main() -> None:
                     phase=phase.value if phase is not None else "unknown",
                     max_joint_error_rad=status.get("max_joint_error_rad"),
                     limiting_joint=status.get("limiting_joint"),
+                    limiting_joint_desired_rad=status.get("limiting_joint_desired_rad"),
+                    limiting_joint_actual_rad=status.get("limiting_joint_actual_rad"),
                     abort_reason=status.get("abort_reason"),
                 ))
             self._evaluate_replan_trigger()
