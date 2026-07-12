@@ -89,7 +89,7 @@ xychart-beta
   bar [2, 0]
 ```
 
-Step 5では把持直前の全phase外乱検証で`GRASP_EVALUATION timeout`を2回観測したため、常設CIをplace限定へ縮退していた。Step 6では全3phase注入を復元し、CI run `29159991638`で失敗0回を確認した。
+Step 5では把持直前の全phase外乱検証で`GRASP_EVALUATION timeout`を2回観測したため、常設CIをplace限定へ縮退していた。Step 6では全3phase注入を復元し、最終コミットのpush CI `29170582498` とpull_request CI `29170584368`で連続して失敗0回・収穫完走を確認した。
 
 ```mermaid
 xychart-beta
@@ -127,9 +127,9 @@ Step 6のphase別started/abortはpregrasp `2/0`、grasp `4/0`、place `3/0`、pu
 - pure unit test: 現在JointStateの関節名順序をtrajectory順へ変換し、開始点へ反映する。
 - pure unit test: global終端関節角とexecutor契約フィールドを維持する。
 - arbitration test: grasp local制御中の同phase global suffixを棄却する。
-- regression: Python全体 `174 passed, 2 skipped`。
+- regression: Python全体 `180 passed, 2 skipped`。
 - syntax: Python compile、shell `bash -n`、`git diff --check`。
-- 実Isaac Sim E2E: CI run `29159991638`（成功、全3phase外乱、収穫完走）。
+- 実Isaac Sim E2E: push CI `29170582498`、pull_request CI `29170584368`（連続成功、全3phase外乱、収穫完走）。
 
 ## 次のステップとの関係
 
