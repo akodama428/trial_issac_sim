@@ -111,6 +111,10 @@ class SceneSnapshot:
     target_tool_pose: Pose3D | None
     grasp_result_reason: str | None
     active_phase_motion_plan: "PhaseMotionPlan | None" = None
+    left_finger_contact: bool = False
+    right_finger_contact: bool = False
+    left_finger_force_n: float | None = None
+    right_finger_force_n: float | None = None
 
 
 @dataclass(frozen=True)

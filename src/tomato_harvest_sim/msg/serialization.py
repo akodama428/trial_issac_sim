@@ -196,6 +196,10 @@ def scene_snapshot_to_dict(snapshot: SceneSnapshot) -> dict[str, object]:
         "target_tool_pose": pose_to_dict(snapshot.target_tool_pose),
         "grasp_result_reason": snapshot.grasp_result_reason,
         "active_phase_motion_plan": phase_motion_plan_to_dict(snapshot.active_phase_motion_plan),
+        "left_finger_contact": snapshot.left_finger_contact,
+        "right_finger_contact": snapshot.right_finger_contact,
+        "left_finger_force_n": snapshot.left_finger_force_n,
+        "right_finger_force_n": snapshot.right_finger_force_n,
     }
 
 
@@ -223,6 +227,10 @@ def scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
         active_phase_motion_plan=phase_motion_plan_from_dict(
             data.get("active_phase_motion_plan") if isinstance(data.get("active_phase_motion_plan"), dict) else None
         ),
+        left_finger_contact=bool(data.get("left_finger_contact", False)),
+        right_finger_contact=bool(data.get("right_finger_contact", False)),
+        left_finger_force_n=float(data["left_finger_force_n"]) if data.get("left_finger_force_n") is not None else None,
+        right_finger_force_n=float(data["right_finger_force_n"]) if data.get("right_finger_force_n") is not None else None,
     )
 
 

@@ -15,6 +15,28 @@ if str(SRC_ROOT) not in sys.path:
 from tomato_harvest_sim.simulator.initial_pose_cases import INITIAL_POSE_CASES
 
 
+def _grasp_diagnostics(log: str) -> dict[str, object]:
+    samples: list[dict[str, object]] = []
+    for line in log.splitlines():
+        marker = "MOVEIT_METRIC "
+        if marker not in line:
+            continue
+        try:
+            payload = json.loads(line.split(marker, 1)[1])
+        except (json.JSONDecodeError, IndexError):
+            continue
+        if payload.get("event") == "grasp_evaluation_diagnostic":
+            samples.append(payload)
+    if not samples:
+        return {"sample_count": 0}
+    terminal = next((sample for sample in reversed(samples) if sample.get("sample_kind") == "terminal"), samples[-1])
+    return {
+        "sample_count": len(samples),
+        "minimum_position_error_norm_m": min(float(sample["position_error_norm_m"]) for sample in samples),
+        "terminal": terminal,
+    }
+
+
 def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
     definitions = {case.case_id: case for case in INITIAL_POSE_CASES}
     results = []
@@ -35,6 +57,7 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
             "failure_reason": "" if success else (f"failed_phase:{failed[-1]}" if failed else "cycle_not_completed"),
             "planning_latency_ms": latencies,
             "e2e_duration_sec": float(duration[-1]) if duration else None,
+            "grasp_diagnostics": _grasp_diagnostics(robot_log),
         })
     success_count = sum(bool(item["success"]) for item in results)
     return {
@@ -48,9 +71,13 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
 def markdown(summary: dict[str, object]) -> str:
     lines = ["# Initial pose E2E result", "", f"Commit: `{summary['commit_sha']}`", "",
              f"Success: {summary['success_count']}/{summary['case_count']} ({float(summary['success_rate']):.0%})", "",
-             "| Case | Result | Failure reason | E2E sec |", "|---|---|---|---:|"]
+             "| Case | Result | Failure reason | Min grasp error [m] | Finger contact (L/R) | E2E sec |", "|---|---|---|---:|---|---:|"]
     for item in summary["cases"]:  # type: ignore[union-attr]
-        lines.append(f"| {item['case_id']} | {'PASS' if item['success'] else 'FAIL'} | {item['failure_reason'] or '-'} | {item['e2e_duration_sec'] or '-'} |")
+        diagnostic = item["grasp_diagnostics"]
+        terminal = diagnostic.get("terminal", {})
+        minimum = diagnostic.get("minimum_position_error_norm_m")
+        contacts = f"{terminal.get('left_finger_contact', '-')}/{terminal.get('right_finger_contact', '-')}"
+        lines.append(f"| {item['case_id']} | {'PASS' if item['success'] else 'FAIL'} | {item['failure_reason'] or '-'} | {minimum if minimum is not None else '-'} | {contacts} | {item['e2e_duration_sec'] or '-'} |")
     return "\n".join(lines) + "\n"
 
 

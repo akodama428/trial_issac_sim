@@ -25,6 +25,7 @@ from tomato_harvest_sim.msg.contracts import HarvestTaskPhase, TomatoStatus
 _POSITION_TOLERANCE_M = 0.05   # 5cm: 移動フェーズ完了判定距離
 _GRASP_SETTLE_STEPS = 30       # AT_GRASP → GRASP_EVALUATION までの待機ステップ数（物理安定化待ち）
 _GRASP_EVAL_TIMEOUT = 300      # GRASP_EVALUATION のタイムアウトステップ数（約 12 秒 @ 25 Hz）
+_GRASP_DIAGNOSTIC_INTERVAL_STEPS = 10
 
 
 def _pose_error_m(a: object, b: object) -> float:
@@ -92,6 +93,7 @@ def main() -> None:
         scene_snapshot_from_dict,
         target_estimate_from_json,
     )
+    from tomato_harvest_sim.robot.behavior_planner.grasp_diagnostics import metric_payload
 
     rclpy.init()
 
@@ -227,12 +229,17 @@ def main() -> None:
 
             if self._phase is HarvestTaskPhase.AT_GRASP:
                 self._grasp_settle_count += 1
+                if self._grasp_settle_count == 1:
+                    self._emit_grasp_diagnostic("entry")
                 if self._grasp_settle_count >= _GRASP_SETTLE_STEPS:
                     self._grasp_eval_count = 0
                     self._set_phase(HarvestTaskPhase.GRASP_EVALUATION)
 
             elif self._phase is HarvestTaskPhase.GRASP_EVALUATION:
                 self._grasp_eval_count += 1
+                terminal = snapshot.tomato_status in {TomatoStatus.HELD, TomatoStatus.FALLEN}
+                if self._grasp_eval_count == 1 or terminal or self._grasp_eval_count % _GRASP_DIAGNOSTIC_INTERVAL_STEPS == 0:
+                    self._emit_grasp_diagnostic("terminal" if terminal else "periodic")
                 if snapshot.tomato_status is TomatoStatus.HELD:
                     self._grasp_settle_count = 0
                     self._grasp_eval_count = 0
@@ -274,6 +281,16 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Helpers
         # ------------------------------------------------------------------
+
+        def _emit_grasp_diagnostic(self, sample_kind: str) -> None:
+            payload = metric_payload(
+                self._last_snapshot,
+                phase=self._phase.value,
+                sample_kind=sample_kind,
+                target_pose=self._last_plan.grasp_pose if self._last_plan is not None else None,
+            )
+            if payload is not None:
+                self.get_logger().info(f"MOVEIT_METRIC {json.dumps(payload, sort_keys=True)}")
 
         def _set_phase(self, phase: HarvestTaskPhase) -> None:
             if self._phase is not phase:
