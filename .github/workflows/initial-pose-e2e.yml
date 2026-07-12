@@ -1,0 +1,35 @@
+name: Initial Pose E2E Success Rate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 18 * * 0"
+  push:
+    branches: [main]
+
+jobs:
+  ten-initial-poses:
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 180
+    env:
+      CI_HEADLESS_STEPS: "3600"
+      CI_E2E_TIMEOUT_SEC: "2400"
+      CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/initial-pose-e2e
+      INITIAL_POSE_SUCCESS_THRESHOLD: "0.70"
+      ACCEPT_EULA: "Y"
+      PRIVACY_CONSENT: "Y"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare cached CI base image
+        run: bash scripts/ci/build_ci_image.sh
+      - name: Run all ten initial poses
+        run: bash scripts/ci/run_initial_pose_matrix.sh | tee initial-pose-job-summary.md
+      - name: Publish job summary
+        if: always()
+        run: test -f "${CI_ARTIFACT_ROOT}/initial-pose-summary.md" && cat "${CI_ARTIFACT_ROOT}/initial-pose-summary.md" >> "${GITHUB_STEP_SUMMARY}" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: initial-pose-history-${{ github.sha }}-${{ github.run_id }}
+          path: .artifacts/initial-pose-e2e
+          retention-days: 90
