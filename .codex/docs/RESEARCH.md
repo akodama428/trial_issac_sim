@@ -251,6 +251,23 @@ Custom Docker Container
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
 
+## 19. Step 6 local planner初期導入の境界
+
+- 調査日: 2026-07-12
+- 対象バージョン: MoveIt 2 Rolling documentation（2026-07-12閲覧）
+- 確認済みの事実:
+  - MoveIt Hybrid Planningは、global plannerが参照軌道を生成し、local plannerが現在状態と参照軌道から逐次コマンドを生成する役割分担を採る。
+  - MoveIt Servoはjoint velocity、end-effector velocity、end-effector poseを入力にでき、collision・singularity・joint limitを監視するclosed-loop補正向け機能である。
+  - 本リポジトリのexecutor境界は時間付き`JointTrajectory`であり、Servo commandを直接受ける契約ではない。
+- Issue #14への設計判断:
+  - 初回導入ではexecutor契約を変えず、現在JointStateからglobal planの既存終端関節構成へ接続する短いjoint-space correction trajectoryをlocal producerが生成する。
+  - `MOVING_TO_PREGRASP` / `MOVING_TO_GRASP` / `MOVING_TO_PLACE`を対象とし、接触支配の`DETACHING`は除外する。
+  - 把持直前はlocal correction採用後に同phaseのglobal suffixを再採用しない。global plannerが返す別IK解によるgrasp trajectory差し替えを防ぐためである。
+  - これはHybrid Planningの責務分離を既存契約上で先行導入する最小実装であり、Servoの速度commandや高頻度closed-loop制御そのものはStep 7候補として残す。
+- 一次情報:
+  - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+
 ## 18. plan producer複線化におけるadoption / arbitrationの責務分離
 
 - 調査日: 2026-07-11

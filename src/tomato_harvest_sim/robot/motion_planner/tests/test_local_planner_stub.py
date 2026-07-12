@@ -7,6 +7,7 @@ from dataclasses import replace
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     HarvestTaskPhase,
+    JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
     PlanProducerKind,
@@ -43,6 +44,9 @@ class LocalRefinementPlanTest(unittest.TestCase):
         candidate = build_local_refinement_plan(
             base_plan=_base_plan(),
             phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.4, 0.2)
+            ),
             now_sec=200.0,
             instance_id="local-instance-a",
             revision=1,
@@ -57,7 +61,7 @@ class LocalRefinementPlanTest(unittest.TestCase):
         self.assertEqual(
             candidate.planned_from_phase, HarvestTaskPhase.MOVING_TO_PLACE
         )
-        self.assertEqual(candidate.planner_name, "local_planner_stub")
+        self.assertEqual(candidate.planner_name, "joint_space_local_planner")
 
     def test_executor_contract_fields_are_preserved(self) -> None:
         """下流(motion_command / executor)が読むtrajectory契約を変えない。"""
@@ -65,6 +69,9 @@ class LocalRefinementPlanTest(unittest.TestCase):
         candidate = build_local_refinement_plan(
             base_plan=base,
             phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.4, 0.2)
+            ),
             now_sec=200.0,
             instance_id="local-instance-a",
             revision=1,
@@ -72,17 +79,61 @@ class LocalRefinementPlanTest(unittest.TestCase):
 
         assert candidate is not None
         self.assertEqual(
-            candidate.place_joint_trajectory, base.place_joint_trajectory
-        )
-        self.assertEqual(
             candidate.pregrasp_joint_trajectory, base.pregrasp_joint_trajectory
         )
         self.assertEqual(candidate.place_pose, base.place_pose)
+
+    def test_refinement_rebases_active_trajectory_without_changing_global_goal(self) -> None:
+        candidate = build_local_refinement_plan(
+            base_plan=_base_plan(),
+            phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint2", "joint1"), positions_rad=(0.2, 0.4)
+            ),
+            now_sec=200.0,
+            instance_id="local-instance-a",
+            revision=1,
+        )
+
+        assert candidate is not None
+        trajectory = candidate.place_joint_trajectory
+        assert trajectory is not None
+        self.assertEqual(trajectory.points[0].positions_rad, (0.0, 0.0))
+        self.assertEqual(trajectory.points[-1].positions_rad, (1.0, 1.0))
+        self.assertEqual(trajectory.points[-1].velocities_rad_s, (0.0, 0.0))
+        self.assertGreater(
+            trajectory.points[-1].time_from_start_sec,
+            trajectory.points[-2].time_from_start_sec,
+        )
+        self.assertEqual(candidate.planner_name, "joint_space_local_planner")
+
+    def test_refinement_keeps_global_waypoints(self) -> None:
+        base = _base_plan()
+        candidate = build_local_refinement_plan(
+            base_plan=base,
+            phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.1, 0.1)
+            ),
+            now_sec=200.0,
+            instance_id="local-instance-a",
+            revision=1,
+        )
+
+        assert candidate is not None
+        trajectory = candidate.place_joint_trajectory
+        assert trajectory is not None
+        self.assertEqual(trajectory.points[0].positions_rad, (0.0, 0.0))
+        self.assertEqual(trajectory.points[1].positions_rad, (1.0, 1.0))
+        self.assertEqual(trajectory.points[-1].positions_rad, (1.0, 1.0))
 
     def test_contact_dominant_phase_is_not_refined(self) -> None:
         candidate = build_local_refinement_plan(
             base_plan=_base_plan(),
             phase=HarvestTaskPhase.DETACHING,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.0, 0.0)
+            ),
             now_sec=200.0,
             instance_id="local-instance-a",
             revision=1,
@@ -94,6 +145,9 @@ class LocalRefinementPlanTest(unittest.TestCase):
         candidate = build_local_refinement_plan(
             base_plan=base,
             phase=HarvestTaskPhase.MOVING_TO_GRASP,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.0, 0.0)
+            ),
             now_sec=200.0,
             instance_id="local-instance-a",
             revision=1,

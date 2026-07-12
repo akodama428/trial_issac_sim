@@ -102,15 +102,20 @@ class MoveIt2ServiceBridgePlanner(MotionPlanner):
         plan_suffix_fn = getattr(self._bridge, "plan_suffix_trajectory", None)
         if plan_suffix_fn is None:
             return None
-        result = plan_suffix_fn(
-            phase=phase,
-            joint_state=joint_state,
-            tf_tree=tf_tree,
-            scene_snapshot=scene_snapshot,
-            plan=prior_plan,
-        )
-        trajectory = getattr(result, field)
-        if not result.success or trajectory is None:
+        result = None
+        trajectory = None
+        for _attempt in range(3):
+            result = plan_suffix_fn(
+                phase=phase,
+                joint_state=joint_state,
+                tf_tree=tf_tree,
+                scene_snapshot=scene_snapshot,
+                plan=prior_plan,
+            )
+            trajectory = getattr(result, field)
+            if result.success and trajectory is not None:
+                break
+        if result is None or not result.success or trajectory is None:
             return None
         return replace(prior_plan, planner_name=result.backend_name, **{field: trajectory})
 

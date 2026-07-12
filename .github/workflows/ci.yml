@@ -28,14 +28,10 @@ jobs:
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
-      # tracking error外乱をplace phaseへ注入し、suffix replanが実MoveItで
-      # 成功することをE2Eで検証する (Step 3/4)。pregrasp / graspへの注入は
-      # 把持直前のOMPL非決定性でgrasp失敗のflakyを誘発するため常設CIから外し、
-      # 必要時にオンデマンドで実行する（恒久対策はStep 6のlocal planner）。
-      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_place"
-      # producer 複線化の検証 (Step 5): dummy local plan を place phase で1回注入し、
-      # arbitration 経由の採用と収穫完走（非破綻）をE2Eで検証する。
-      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_place"
+      # Step 6: 全自由空間phaseへtracking error外乱を注入し、global suffix replanと
+      # joint-space local correctionが共存した状態で収穫を完走できることを検証する。
+      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place"
+      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place"
     steps:
       - name: Clean workspace residue
         run: |

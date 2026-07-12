@@ -27,6 +27,11 @@ _SUPPORTED_PRODUCER_KINDS = frozenset({
     PlanProducerKind.GLOBAL_PLANNER,
     PlanProducerKind.LOCAL_PLANNER,
 })
+_LOCAL_CONTROL_PHASES = frozenset({
+    HarvestTaskPhase.MOVING_TO_PREGRASP,
+    HarvestTaskPhase.MOVING_TO_GRASP,
+    HarvestTaskPhase.MOVING_TO_PLACE,
+})
 
 
 @dataclass(frozen=True)
@@ -63,6 +68,20 @@ def evaluate_plan_arbitration(
     """
     if candidate.producer_kind not in _SUPPORTED_PRODUCER_KINDS:
         return PlanArbitrationDecision(adopted=False, reason="rejected_unknown_producer")
+
+    if (
+        candidate.producer_kind is PlanProducerKind.GLOBAL_PLANNER
+        and current_plan is not None
+        and current_plan.producer_kind is PlanProducerKind.LOCAL_PLANNER
+        and current_phase in _LOCAL_CONTROL_PHASES
+        and current_plan.planned_from_phase is current_phase
+        and candidate.planned_from_phase is current_phase
+        and not candidate.planner_name.endswith(":abort")
+    ):
+        return PlanArbitrationDecision(
+            adopted=False,
+            reason="rejected_global_during_local_control",
+        )
 
     adoption = evaluate_plan_adoption(
         candidate=candidate,
