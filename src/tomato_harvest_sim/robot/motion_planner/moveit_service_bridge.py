@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from dataclasses import dataclass, replace
 
 from tomato_harvest_sim.msg.contracts import (
@@ -18,6 +19,13 @@ from tomato_harvest_sim.msg.contracts import (
 from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_TRAJECTORY_FIELD_BY_PHASE,
+    terminal_joint_state_of_phase,
+)
+from tomato_harvest_sim.robot.motion_planner.planning_diagnostics import (
+    PlanningFailureDiagnostic,
+    StateValidityReport,
+    diagnostics_directory,
+    save_planning_failure_diagnostic,
 )
 from tomato_harvest_sim.robot.motion_planner.pregrasp_planner import MoveItStylePreGraspPlanner
 from tomato_harvest_sim.robot.motion_planner.ros_python import ensure_ros_python_modules_available
@@ -33,6 +41,15 @@ class _TomatoPlanningSceneOps:
     remove_world_tomato: bool
     add_attached_tomato: bool
     remove_attached_tomato: bool
+
+
+@dataclass(frozen=True)
+class _MotionPlanOutcome:
+    """GetMotionPlan呼び出し1回の結果。失敗理由とerror_codeを診断へ引き継ぐ。"""
+
+    trajectory: JointTrajectory | None
+    error_code: int | None
+    failure_reason: str | None
 
 class MoveIt2ServiceBridgePlanner(MotionPlanner):
     """MoveIt2-aware planner that applies a planning scene and returns joint trajectories."""
@@ -129,6 +146,8 @@ class Ros2MoveIt2PlannerBridge:
     ATTACHED_TOMATO_RADIUS_M = 0.01
     ATTACHED_TOMATO_OFFSET_M = (0.0, 0.0, 0.1034)
     NOOP_TRAJECTORY_TOLERANCE_RAD = 1e-3
+    # 関節空間goal fallbackの許容誤差。採用済みplan終端と同一構成を要求する。
+    JOINT_GOAL_TOLERANCE_RAD = 0.01
 
     def __init__(
         self,
@@ -146,6 +165,10 @@ class Ros2MoveIt2PlannerBridge:
         self._scene_service_name = scene_service_name or os.environ.get(
             "TOMATO_HARVEST_MOVEIT_SCENE_SERVICE",
             "/apply_planning_scene",
+        )
+        self._state_validity_service_name = os.environ.get(
+            "TOMATO_HARVEST_MOVEIT_STATE_VALIDITY_SERVICE",
+            "/check_state_validity",
         )
         self._group_name = group_name or os.environ.get("TOMATO_HARVEST_MOVEIT_GROUP", "panda_arm")
         self._end_effector_link = end_effector_link or os.environ.get("TOMATO_HARVEST_MOVEIT_EE_LINK", "panda_hand")
@@ -169,6 +192,7 @@ class Ros2MoveIt2PlannerBridge:
         ).strip() not in {"", "0", "false", "False"}
         self._clients = None
         self._planning_scene_has_attached_tomato = False
+        self._diagnostic_dir = diagnostics_directory(os.environ)
 
     def plan_phase_trajectories(
         self,
@@ -211,6 +235,7 @@ class Ros2MoveIt2PlannerBridge:
             scene_snapshot=scene_snapshot,
             target_pose=plan.pregrasp_pose,
             attach_tomato=False,
+            phase_label="pregrasp",
         )
         if pregrasp_trajectory is None:
             return self._fallback_result("pregrasp_plan_failed")
@@ -223,6 +248,7 @@ class Ros2MoveIt2PlannerBridge:
             scene_snapshot=scene_snapshot,
             target_pose=plan.grasp_pose,
             attach_tomato=False,
+            phase_label="grasp",
         )
         if grasp_trajectory is None:
             return self._fallback_result("grasp_plan_failed")
@@ -235,6 +261,7 @@ class Ros2MoveIt2PlannerBridge:
             scene_snapshot=scene_snapshot,
             target_pose=plan.pull_pose,
             attach_tomato=True,
+            phase_label="pull",
         )
         if pull_trajectory is None:
             return self._fallback_result("pull_plan_failed")
@@ -249,6 +276,7 @@ class Ros2MoveIt2PlannerBridge:
                 scene_snapshot=scene_snapshot,
                 target_pose=pre_place_pose,
                 attach_tomato=True,
+                phase_label="pre_place",
             )
             if approach_trajectory is None:
                 return MoveIt2PlanningResult(
@@ -272,6 +300,7 @@ class Ros2MoveIt2PlannerBridge:
             scene_snapshot=scene_snapshot,
             target_pose=plan.place_pose,
             attach_tomato=True,
+            phase_label="place",
         )
         if place_trajectory is None:
             # place は失敗したが pregrasp/grasp/pull は成功済み → 部分結果を返す
@@ -338,6 +367,9 @@ class Ros2MoveIt2PlannerBridge:
 
         base_frame_id = tf_tree.robot_base_frame_id
         current_joint_state = _clamp_joint_state_to_bounds(joint_state)
+        # 採用済みtrajectoryの終端は検証済みの有効構成。pose goalのIKサンプリングが
+        # 全滅したときの関節空間goal fallbackとして使う (Issue #28 改善2)。
+        fallback_joint_goal = terminal_joint_state_of_phase(plan, phase)
 
         # 把持前phaseは単一区間の再計画で完結する。トマトはまだworld側にある。
         if phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
@@ -348,6 +380,8 @@ class Ros2MoveIt2PlannerBridge:
                 scene_snapshot=scene_snapshot,
                 target_pose=plan.pregrasp_pose,
                 attach_tomato=False,
+                phase_label=phase.value,
+                fallback_joint_goal=fallback_joint_goal,
             )
             if pregrasp_trajectory is None:
                 return self._fallback_result("pregrasp_replan_failed")
@@ -366,6 +400,8 @@ class Ros2MoveIt2PlannerBridge:
                 scene_snapshot=scene_snapshot,
                 target_pose=plan.grasp_pose,
                 attach_tomato=False,
+                phase_label=phase.value,
+                fallback_joint_goal=fallback_joint_goal,
             )
             if grasp_trajectory is None:
                 return self._fallback_result("grasp_replan_failed")
@@ -383,6 +419,7 @@ class Ros2MoveIt2PlannerBridge:
                 base_frame_id=base_frame_id,
                 scene_snapshot=scene_snapshot,
                 plan=plan,
+                fallback_joint_goal=fallback_joint_goal,
             )
 
         return self._fallback_result("unsupported_suffix_phase")
@@ -395,8 +432,14 @@ class Ros2MoveIt2PlannerBridge:
         base_frame_id: str,
         scene_snapshot: SceneSnapshot,
         plan: HarvestMotionPlan,
+        fallback_joint_goal: JointStateSnapshot | None = None,
     ) -> MoveIt2PlanningResult:
-        """approach waypoint経由でplaceまでの残区間を計画する。トマトは把持中。"""
+        """approach waypoint経由でplaceまでの残区間を計画する。トマトは把持中。
+
+        pose goalの連鎖 (pre_place → place) が失敗した場合は、現在状態から
+        採用済みplan終端構成へ直行する関節空間goalで復旧を試みる。goal構成が
+        既知のためOMPLのgoal sampling失敗 (error_code=99999) を回避できる。
+        """
         current_joint_state = joint_state
         pre_place_pose = plan.place_waypoints[0] if plan.place_waypoints else None
         if pre_place_pose is not None:
@@ -407,9 +450,16 @@ class Ros2MoveIt2PlannerBridge:
                 scene_snapshot=scene_snapshot,
                 target_pose=pre_place_pose,
                 attach_tomato=True,
+                phase_label="moving_to_place_pre_place",
             )
             if approach_trajectory is None:
-                return self._fallback_result("pre_place_replan_failed")
+                return self._place_joint_goal_fallback(
+                    clients=clients,
+                    joint_state=joint_state,
+                    base_frame_id=base_frame_id,
+                    fallback_joint_goal=fallback_joint_goal,
+                    failed_reason="pre_place_replan_failed",
+                )
             current_joint_state = _joint_state_from_trajectory(approach_trajectory)
         else:
             approach_trajectory = None
@@ -421,9 +471,16 @@ class Ros2MoveIt2PlannerBridge:
             scene_snapshot=scene_snapshot,
             target_pose=plan.place_pose,
             attach_tomato=True,
+            phase_label="moving_to_place",
         )
         if place_trajectory is None:
-            return self._fallback_result("place_replan_failed")
+            return self._place_joint_goal_fallback(
+                clients=clients,
+                joint_state=joint_state,
+                base_frame_id=base_frame_id,
+                fallback_joint_goal=fallback_joint_goal,
+                failed_reason="place_replan_failed",
+            )
 
         if approach_trajectory is not None:
             place_trajectory = _concatenate_trajectories(approach_trajectory, place_trajectory)
@@ -433,6 +490,39 @@ class Ros2MoveIt2PlannerBridge:
             backend_name="moveit2_service_bridge",
             reason="service_ok",
             place_joint_trajectory=place_trajectory,
+        )
+
+    def _place_joint_goal_fallback(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        fallback_joint_goal: JointStateSnapshot | None,
+        failed_reason: str,
+    ) -> MoveIt2PlanningResult:
+        """place連鎖の失敗を、実robot状態から終端構成への単一計画で復旧する。
+
+        approach waypoint経由は諦め、現在状態→採用済みplace終端の1区間だけを
+        関節空間goalで計画する。planning sceneは直前の失敗attemptで
+        attach_tomato=True適用済みであることを前提とする。
+        """
+        if fallback_joint_goal is None:
+            return self._fallback_result(failed_reason)
+        fallback_trajectory = self._plan_joint_goal(
+            clients=clients,
+            joint_state=joint_state,
+            base_frame_id=base_frame_id,
+            goal_joint_state=fallback_joint_goal,
+            phase_label="moving_to_place",
+        )
+        if fallback_trajectory is None:
+            return self._fallback_result(failed_reason)
+        return MoveIt2PlanningResult(
+            success=True,
+            backend_name="moveit2_service_bridge",
+            reason="joint_goal_fallback",
+            place_joint_trajectory=fallback_trajectory,
         )
 
     def _fallback_result(self, reason: str) -> MoveIt2PlanningResult:
@@ -451,7 +541,16 @@ class Ros2MoveIt2PlannerBridge:
         scene_snapshot: SceneSnapshot,
         target_pose: Pose3D,
         attach_tomato: bool,
+        phase_label: str = "",
+        fallback_joint_goal: JointStateSnapshot | None = None,
     ) -> JointTrajectory | None:
+        """1区間をpose goalで計画し、失敗時は診断保存と関節空間goal fallbackを行う。
+
+        Args:
+            phase_label: 診断・ログでこの計画区間を識別する名前。
+            fallback_joint_goal: pose goal失敗時に直行する既知の有効goal構成。
+                Noneならfallbackしない (フルチェーン初期計画など)。
+        """
         apply_request = _build_planning_scene_request(
             scene_snapshot=scene_snapshot,
             base_frame_id=base_frame_id,
@@ -475,14 +574,10 @@ class Ros2MoveIt2PlannerBridge:
             base_frame_id=base_frame_id,
             target_pose=target_pose,
         )
-        trajectory = clients.plan_to_pose(request, timeout_sec=self._planning_timeout_sec)
-        if trajectory is None:
-            self._debug_log(
-                f"[MoveItBridge] phase planning failed: ee_link={self._end_effector_link} "
-                f"target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f})"
-            )
-            return None
-        if _trajectory_is_noop(
+        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        trajectory = outcome.trajectory
+        failure_reason = outcome.failure_reason
+        if trajectory is not None and _trajectory_is_noop(
             trajectory,
             start_joint_state=joint_state,
             tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
@@ -494,7 +589,31 @@ class Ros2MoveIt2PlannerBridge:
                 f"start_q={joint_state.positions_rad} "
                 f"end_q={trajectory.points[-1].positions_rad}"
             )
-            return None
+            trajectory = None
+            failure_reason = "noop_trajectory"
+        if trajectory is None:
+            self._debug_log(
+                f"[MoveItBridge] phase planning failed: ee_link={self._end_effector_link} "
+                f"target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f})"
+            )
+            self._record_planning_failure(
+                clients=clients,
+                phase_label=phase_label,
+                goal_kind="pose",
+                joint_state=joint_state,
+                target_xyz_m=(target_pose.x, target_pose.y, target_pose.z),
+                error_code=outcome.error_code,
+                reason=failure_reason or "unknown",
+            )
+            if fallback_joint_goal is None:
+                return None
+            return self._plan_joint_goal(
+                clients=clients,
+                joint_state=joint_state,
+                base_frame_id=base_frame_id,
+                goal_joint_state=fallback_joint_goal,
+                phase_label=phase_label,
+            )
         self._debug_log(
             "[MoveItBridge] accepted trajectory "
             f"points={len(trajectory.points)} "
@@ -503,6 +622,109 @@ class Ros2MoveIt2PlannerBridge:
             f"end_q={trajectory.points[-1].positions_rad}"
         )
         return trajectory
+
+    def _plan_joint_goal(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        goal_joint_state: JointStateSnapshot,
+        phase_label: str,
+    ) -> JointTrajectory | None:
+        """既知の有効構成への関節空間goal計画 (Issue #28 改善2)。
+
+        goal構成が確定しているためOMPLのgoal state sampling (IK) を経由せず、
+        `Unable to sample any valid states for goal tree` 系の失敗を回避する。
+        planning sceneは呼び出し元 (直前のpose goal attempt) が適用済みであること。
+        """
+        request = self._build_joint_goal_motion_plan_request(
+            joint_state=joint_state,
+            base_frame_id=base_frame_id,
+            goal_joint_state=goal_joint_state,
+        )
+        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        trajectory = outcome.trajectory
+        failure_reason = outcome.failure_reason
+        if trajectory is not None and _trajectory_is_noop(
+            trajectory,
+            start_joint_state=joint_state,
+            tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
+        ):
+            trajectory = None
+            failure_reason = "noop_trajectory"
+        if trajectory is None:
+            print(
+                f"[MoveItBridge] joint_goal_fallback failed phase={phase_label} "
+                f"reason={failure_reason} error_code={outcome.error_code}",
+                flush=True,
+            )
+            self._record_planning_failure(
+                clients=clients,
+                phase_label=phase_label,
+                goal_kind="joint",
+                joint_state=joint_state,
+                target_xyz_m=None,
+                error_code=outcome.error_code,
+                reason=failure_reason or "unknown",
+            )
+            return None
+        print(
+            f"[MoveItBridge] joint_goal_fallback succeeded phase={phase_label} "
+            f"points={len(trajectory.points)} "
+            f"goal_q={goal_joint_state.positions_rad}",
+            flush=True,
+        )
+        return trajectory
+
+    def _record_planning_failure(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        phase_label: str,
+        goal_kind: str,
+        joint_state: JointStateSnapshot,
+        target_xyz_m: tuple[float, float, float] | None,
+        error_code: int | None,
+        reason: str,
+    ) -> None:
+        """planning失敗の証跡を残す (Issue #28 改善1)。
+
+        失敗ログは常に出す。start state有効性の問い合わせとJSON保存は、
+        診断ディレクトリが設定されているときだけ行い、planner本体の
+        レイテンシへ影響させない。
+        """
+        print(
+            f"[MoveItBridge] planning_failure phase={phase_label} goal_kind={goal_kind} "
+            f"reason={reason} error_code={error_code}",
+            flush=True,
+        )
+        if self._diagnostic_dir is None:
+            return
+        validity = clients.check_state_validity(
+            joint_state=joint_state,
+            group_name=self._group_name,
+            timeout_sec=self._planning_timeout_sec,
+        )
+        diagnostic = PlanningFailureDiagnostic(
+            captured_at_sec=time.time(),
+            phase=phase_label or "unknown",
+            goal_kind=goal_kind,
+            reason=reason,
+            error_code=error_code,
+            target_xyz_m=target_xyz_m,
+            start_joint_names=joint_state.joint_names,
+            start_positions_rad=joint_state.positions_rad,
+            start_state=validity,
+        )
+        path = save_planning_failure_diagnostic(diagnostic, self._diagnostic_dir)
+        print(
+            f"[MoveItBridge] planning_failure_diagnostic "
+            f"saved={path is not None} path={path} "
+            f"start_state_checked={validity.checked} start_state_valid={validity.valid} "
+            f"contacts={','.join(validity.contacts) or 'none'}",
+            flush=True,
+        )
 
     def _build_motion_plan_request(
         self,
@@ -515,14 +737,10 @@ class Ros2MoveIt2PlannerBridge:
         from moveit_msgs.msg import (
             BoundingVolume,
             Constraints,
-            MotionPlanRequest,
             OrientationConstraint,
             PositionConstraint,
-            RobotState,
-            WorkspaceParameters,
         )
         from moveit_msgs.srv import GetMotionPlan
-        from sensor_msgs.msg import JointState
         from shape_msgs.msg import SolidPrimitive
 
         primitive = SolidPrimitive()
@@ -563,6 +781,75 @@ class Ros2MoveIt2PlannerBridge:
             orientation_constraint.weight = 1.0
             goal_constraints.orientation_constraints = [orientation_constraint]
 
+        motion_plan_request = self._new_motion_plan_request(
+            joint_state=joint_state, base_frame_id=base_frame_id
+        )
+        motion_plan_request.goal_constraints = [goal_constraints]
+        self._debug_log(
+            "[MoveItBridge] request "
+            f"ee_link={self._end_effector_link} "
+            f"orientation_constraint={self._enforce_orientation_constraint} "
+            f"runtime_target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f}) "
+            f"moveit_target_xyz=({moveit_target_pose.x:.4f}, {moveit_target_pose.y:.4f}, {moveit_target_pose.z:.4f}) "
+            f"start_q={joint_state.positions_rad}"
+        )
+
+        request = GetMotionPlan.Request()
+        request.motion_plan_request = motion_plan_request
+        return request
+
+    def _build_joint_goal_motion_plan_request(
+        self,
+        *,
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        goal_joint_state: JointStateSnapshot,
+    ) -> object:
+        """既知の関節構成をgoalとするMotionPlanRequestを作る。
+
+        pose goalと違いgoal state samplingが不要なため、goal構成が有効である
+        限りOMPLは経路探索だけに専念できる。
+        """
+        from moveit_msgs.msg import Constraints, JointConstraint
+        from moveit_msgs.srv import GetMotionPlan
+
+        goal_constraints = Constraints()
+        for name, position in zip(
+            goal_joint_state.joint_names, goal_joint_state.positions_rad
+        ):
+            joint_constraint = JointConstraint()
+            joint_constraint.joint_name = name
+            joint_constraint.position = float(position)
+            joint_constraint.tolerance_above = self.JOINT_GOAL_TOLERANCE_RAD
+            joint_constraint.tolerance_below = self.JOINT_GOAL_TOLERANCE_RAD
+            joint_constraint.weight = 1.0
+            goal_constraints.joint_constraints.append(joint_constraint)
+
+        motion_plan_request = self._new_motion_plan_request(
+            joint_state=joint_state, base_frame_id=base_frame_id
+        )
+        motion_plan_request.goal_constraints = [goal_constraints]
+        self._debug_log(
+            "[MoveItBridge] joint goal request "
+            f"group={self._group_name} "
+            f"goal_q={goal_joint_state.positions_rad} "
+            f"start_q={joint_state.positions_rad}"
+        )
+
+        request = GetMotionPlan.Request()
+        request.motion_plan_request = motion_plan_request
+        return request
+
+    def _new_motion_plan_request(
+        self,
+        *,
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+    ) -> object:
+        """workspace・start state・planner設定を持つgoal未設定のrequest本体を作る。"""
+        from moveit_msgs.msg import MotionPlanRequest, RobotState, WorkspaceParameters
+        from sensor_msgs.msg import JointState
+
         workspace = WorkspaceParameters()
         workspace.header.frame_id = base_frame_id
         workspace.min_corner.x = -1.5
@@ -583,24 +870,12 @@ class Ros2MoveIt2PlannerBridge:
         motion_plan_request = MotionPlanRequest()
         motion_plan_request.workspace_parameters = workspace
         motion_plan_request.start_state = start_state
-        motion_plan_request.goal_constraints = [goal_constraints]
         motion_plan_request.group_name = self._group_name
         motion_plan_request.num_planning_attempts = 4
         motion_plan_request.allowed_planning_time = self._allowed_planning_time_sec
         motion_plan_request.max_velocity_scaling_factor = 0.2
         motion_plan_request.max_acceleration_scaling_factor = 0.2
-        self._debug_log(
-            "[MoveItBridge] request "
-            f"ee_link={self._end_effector_link} "
-            f"orientation_constraint={self._enforce_orientation_constraint} "
-            f"runtime_target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f}) "
-            f"moveit_target_xyz=({moveit_target_pose.x:.4f}, {moveit_target_pose.y:.4f}, {moveit_target_pose.z:.4f}) "
-            f"start_q={joint_state.positions_rad}"
-        )
-
-        request = GetMotionPlan.Request()
-        request.motion_plan_request = motion_plan_request
-        return request
+        return motion_plan_request
 
     def _require_clients(self) -> "_Ros2MoveIt2Clients | None":
         if self._clients is not None:
@@ -609,6 +884,7 @@ class Ros2MoveIt2PlannerBridge:
             self._clients = _Ros2MoveIt2Clients(
                 motion_plan_service_name=self._service_name,
                 planning_scene_service_name=self._scene_service_name,
+                state_validity_service_name=self._state_validity_service_name,
             )
         except Exception:
             self._clients = None
@@ -625,9 +901,10 @@ class _Ros2MoveIt2Clients:
         *,
         motion_plan_service_name: str,
         planning_scene_service_name: str,
+        state_validity_service_name: str = "/check_state_validity",
     ) -> None:
         import rclpy
-        from moveit_msgs.srv import ApplyPlanningScene, GetMotionPlan
+        from moveit_msgs.srv import ApplyPlanningScene, GetMotionPlan, GetStateValidity
         from rclpy.executors import SingleThreadedExecutor
 
         self._rclpy = rclpy
@@ -636,6 +913,9 @@ class _Ros2MoveIt2Clients:
         self._node = self._rclpy.create_node("tomato_harvest_moveit_bridge")
         self._motion_plan_client = self._node.create_client(GetMotionPlan, motion_plan_service_name)
         self._planning_scene_client = self._node.create_client(ApplyPlanningScene, planning_scene_service_name)
+        self._state_validity_client = self._node.create_client(
+            GetStateValidity, state_validity_service_name
+        )
         # robot_node の executor とは独立した専用 executor で spin する。
         # rclpy.spin_until_future_complete() はデフォルト executor を使うため、
         # robot_node の rclpy.spin() 内から呼ぶと "Executor is already spinning" になる。
@@ -661,23 +941,30 @@ class _Ros2MoveIt2Clients:
             return False
         return bool(getattr(response, "success", False))
 
-    def plan_to_pose(self, request: object, *, timeout_sec: float) -> JointTrajectory | None:
+    def plan_motion(self, request: object, *, timeout_sec: float) -> _MotionPlanOutcome:
+        """GetMotionPlanを1回呼び、trajectoryと失敗証跡を返す。
+
+        Returns:
+            成功時はtrajectory入りのoutcome。失敗時はtrajectory=Noneで、
+            error_codeと失敗分類 (service_timeout / empty_response /
+            motion_plan_error / empty_trajectory) を保持する。
+        """
         future = self._motion_plan_client.call_async(request)
         self._spin_until_done(future, timeout_sec=timeout_sec)
         if not future.done():
-            return None
+            return _MotionPlanOutcome(None, None, "service_timeout")
         response = future.result()
         if response is None:
-            return None
+            return _MotionPlanOutcome(None, None, "empty_response")
         error_code = int(response.motion_plan_response.error_code.val)
         if error_code != 1:
             print(f"[MoveItBridge] motion plan service returned error_code={error_code}.", flush=True)
-            return None
+            return _MotionPlanOutcome(None, error_code, "motion_plan_error")
         robot_trajectory = response.motion_plan_response.trajectory
         joint_trajectory = getattr(robot_trajectory, "joint_trajectory", None)
         if joint_trajectory is None:
             print("[MoveItBridge] motion plan response had no joint_trajectory.", flush=True)
-            return None
+            return _MotionPlanOutcome(None, error_code, "empty_trajectory")
         planned_trajectory = _joint_trajectory_from_msg(joint_trajectory)
         if planned_trajectory is not None:
             has_velocities = any(p.velocities_rad_s is not None for p in planned_trajectory.points)
@@ -692,9 +979,50 @@ class _Ros2MoveIt2Clients:
                 f"joint_names={planned_trajectory.joint_names}",
                 flush=True,
             )
-            return planned_trajectory
+            return _MotionPlanOutcome(planned_trajectory, error_code, None)
         print("[MoveItBridge] motion plan response had an empty joint trajectory.", flush=True)
-        return None
+        return _MotionPlanOutcome(None, error_code, "empty_trajectory")
+
+    def check_state_validity(
+        self,
+        *,
+        joint_state: JointStateSnapshot,
+        group_name: str,
+        timeout_sec: float,
+    ) -> StateValidityReport:
+        """planning失敗診断用に、与えた関節状態の有効性と衝突ペアを問い合わせる。
+
+        move_groupの`/check_state_validity`が使えない環境でも診断全体を
+        壊さないよう、失敗はchecked=Falseとして返す。
+        """
+        from moveit_msgs.srv import GetStateValidity
+        from sensor_msgs.msg import JointState
+
+        if not self._state_validity_client.wait_for_service(timeout_sec=timeout_sec):
+            return StateValidityReport(checked=False)
+        request = GetStateValidity.Request()
+        request.group_name = group_name
+        request.robot_state.joint_state = JointState()
+        request.robot_state.joint_state.name = list(joint_state.joint_names)
+        request.robot_state.joint_state.position = [
+            float(position) for position in joint_state.positions_rad
+        ]
+        future = self._state_validity_client.call_async(request)
+        self._spin_until_done(future, timeout_sec=timeout_sec)
+        if not future.done():
+            return StateValidityReport(checked=False)
+        response = future.result()
+        if response is None:
+            return StateValidityReport(checked=False)
+        contacts = tuple(
+            f"{contact.contact_body_1}|{contact.contact_body_2}"
+            for contact in getattr(response, "contacts", ())
+        )
+        return StateValidityReport(
+            checked=True,
+            valid=bool(response.valid),
+            contacts=contacts,
+        )
 
 
 def _joint_trajectory_from_msg(joint_trajectory_msg: object) -> JointTrajectory | None:

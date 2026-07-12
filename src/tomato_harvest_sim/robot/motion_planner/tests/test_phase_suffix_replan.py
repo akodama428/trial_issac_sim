@@ -17,6 +17,7 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SuffixReplanGate,
     evaluate_suffix_update,
     suffix_trajectory,
+    terminal_joint_state_of_phase,
 )
 
 _SUFFIX_FIELD_BY_PHASE = {
@@ -115,6 +116,37 @@ class SuffixUpdateTest(unittest.TestCase):
         )
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_unsupported_phase")
+
+
+class TerminalJointStateTest(unittest.TestCase):
+    """abort後の関節空間goal fallbackが使う既知の有効goal構成の抽出 (Issue #28 改善2)。"""
+
+    def test_terminal_configuration_of_adopted_trajectory_is_extracted(self) -> None:
+        for phase in SUFFIX_REPLAN_PHASES:
+            with self.subTest(phase=phase):
+                plan = _plan(phase=phase, endpoint=1.0)
+
+                terminal = terminal_joint_state_of_phase(plan, phase)
+
+                self.assertIsNotNone(terminal)
+                assert terminal is not None
+                self.assertEqual(terminal.joint_names, ("joint1", "joint2"))
+                self.assertEqual(terminal.positions_rad, (1.0, 1.0))
+
+    def test_unsupported_phase_has_no_terminal_configuration(self) -> None:
+        plan = _plan(phase=HarvestTaskPhase.MOVING_TO_PLACE, endpoint=1.0)
+        self.assertIsNone(
+            terminal_joint_state_of_phase(plan, HarvestTaskPhase.DETACHING)
+        )
+
+    def test_missing_phase_trajectory_has_no_terminal_configuration(self) -> None:
+        plan = replace(
+            _plan(phase=HarvestTaskPhase.MOVING_TO_GRASP, endpoint=1.0),
+            grasp_joint_trajectory=None,
+        )
+        self.assertIsNone(
+            terminal_joint_state_of_phase(plan, HarvestTaskPhase.MOVING_TO_GRASP)
+        )
 
 
 class SuffixReplanGateTest(unittest.TestCase):

@@ -11,6 +11,7 @@ from threading import Lock
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
     HarvestTaskPhase,
+    JointStateSnapshot,
     JointTrajectory,
 )
 
@@ -48,6 +49,31 @@ def suffix_trajectory(
         return None
     trajectory = getattr(plan, field)
     return trajectory if isinstance(trajectory, JointTrajectory) else None
+
+
+def terminal_joint_state_of_phase(
+    plan: HarvestMotionPlan, phase: HarvestTaskPhase
+) -> JointStateSnapshot | None:
+    """採用済みplanのphase終端関節構成を、既知の有効goalとして取り出す (Issue #28 改善2)。
+
+    採用済みtrajectoryの終端は一度planning・衝突チェックを通過した構成であり、
+    abort後のsuffix replanでpose goalのIKサンプリングが全滅したときの
+    関節空間goal fallbackに使える。
+
+    Args:
+        plan: 現在採用中のplan。
+        phase: 終端構成を取り出すphase。
+
+    Returns:
+        phase残区間trajectoryの終端関節構成。対象外phaseやtrajectory欠落時はNone。
+    """
+    trajectory = suffix_trajectory(plan, phase)
+    if trajectory is None or not trajectory.points:
+        return None
+    return JointStateSnapshot(
+        joint_names=trajectory.joint_names,
+        positions_rad=trajectory.points[-1].positions_rad,
+    )
 
 
 @dataclass(frozen=True)
