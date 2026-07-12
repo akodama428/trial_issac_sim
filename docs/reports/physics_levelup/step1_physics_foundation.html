@@ -74,7 +74,7 @@ pre { background: var(--code-bg); padding: 10px 14px; border-radius: 6px; overfl
 <h2>2. ATTACHED 静置検証（before/after 各 800 ステップ）</h2>
 <p>スタンドアロン viewer をヘッドレスで 800 ステップ静置し、トマトの茎アンカーからの偏差・速度・テレポート復元回数を計測した。before は <code>TOMATO_HARVEST_PHYSICS_TUNING=0</code>（適用なし）、after は適用あり（<code>[PhysicsTuning] enabled=True applied_items=12</code> をログで確認）。</p>
 <figure>
-<img src="img/step1_idle_comparison.png" alt="idle comparison">
+<img src="../img/step1_idle_comparison.png" alt="idle comparison">
 <figcaption>図 2-1: 静置中の偏差（上）と速度（下）。<b>before/after とも偏差 0.0 mm・速度 0.0 m/s で完全静止</b>、テレポート復元 0 回。</figcaption>
 </figure>
 <table>
@@ -105,9 +105,9 @@ path=/World/FrankaPanda/panda_leftfinger/geometry/panda_leftfinger   type=Mesh c
 
 <h2>4. E2E 回帰（チューニング適用・success モード 3 回)</h2>
 <figure>
-<img src="img/step1_e2e_success.png" alt="step1 e2e success">
+<img src="../img/step1_e2e_success.png" alt="step1 e2e success">
 <figcaption>図 4-1: チューニング適用後の E2E 成否 — 3/3 COMPLETE。ベースライン（Step 0、5/5）から劣化なし。</figcaption>
-<img src="img/step1_e2e_phase_durations.png" alt="step1 e2e phase durations">
+<img src="../img/step1_e2e_phase_durations.png" alt="step1 e2e phase durations">
 <figcaption>図 4-2: フェーズ所要時間（run7〜9）。detecting 27〜32 秒・搬送系 2〜9 秒で、ベースライン run2〜5（26〜53 秒・2〜10 秒）と同水準。</figcaption>
 </figure>
 <table>

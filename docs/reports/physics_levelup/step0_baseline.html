@@ -72,9 +72,9 @@ figcaption { color: var(--fg-muted); font-size: 12.5px; margin-bottom: 16px; }
 <h2>2. ベースライン E2E（5 回・success モード）</h2>
 <p>実行コマンド（コンテナ内）: <code>TOMATO_HARVEST_DEBUG_PHYSICS_GRASP=1 ./scripts/run_ros2_components.sh --isaac --moveit --headless --headless-steps N --auto-start</code>（run1: N=12000、run2〜5: N=6000）。</p>
 <figure>
-<img src="img/baseline_success.png" alt="baseline success">
+<img src="../img/baseline_success.png" alt="baseline success">
 <figcaption>図 2-1: ベースライン E2E の成否。5/5 が COMPLETE 到達（成功率 100%）。</figcaption>
-<img src="img/baseline_phase_durations.png" alt="baseline phase durations">
+<img src="../img/baseline_phase_durations.png" alt="baseline phase durations">
 <figcaption>図 2-2: run 別フェーズ所要時間。run1 の detecting 422 秒は Isaac Sim 初回ブート（アセットダウンロード込み）を含むため外れ値。キャッシュが温まった run2 以降は detecting 26〜53 秒で安定。</figcaption>
 </figure>
 <table>
@@ -94,11 +94,11 @@ figcaption { color: var(--fg-muted); font-size: 12.5px; margin-bottom: 16px; }
 
 <h3>2.1 代表 run の観測グラフ（run1）</h3>
 <figure>
-<img src="img/run1_tomato_motion.png" alt="run1 tomato motion">
+<img src="../img/run1_tomato_motion.png" alt="run1 tomato motion">
 <figcaption>図 2-3: run1 のトマト速度と茎張力推定。約 31〜34 秒に把持→引抜→設置の運動バーストが見える。張力推定は静止時に自重 0.294 N（=0.03 kg × 9.81）へ正確に一致しており、推定器の妥当性を実データで確認。ピークは 2.63 N。</figcaption>
-<img src="img/run1_distances.png" alt="run1 distances">
+<img src="../img/run1_distances.png" alt="run1 distances">
 <figcaption>図 2-4: run1 の hand-トマト距離 / 茎アンカー-トマト距離。引抜（stem_d 増加）と搬送が確認できる。</figcaption>
-<img src="img/run1_contact_impulse.png" alt="run1 contact impulse (all zero)">
+<img src="../img/run1_contact_impulse.png" alt="run1 contact impulse (all zero)">
 <figcaption>図 2-5: run1 の finger 接触力積 — <b>全区間ゼロ</b>。これがベースラインの最重要知見（3章）。</figcaption>
 </figure>
 <p class="meta">run2〜5 の同種グラフは <code>docs/reports/img/run{2..5}_*.png</code> を参照。</p>
@@ -122,7 +122,7 @@ figcaption { color: var(--fg-muted); font-size: 12.5px; margin-bottom: 16px; }
 </tbody>
 </table>
 <figure>
-<img src="img/run6_contact_impulse.png" alt="run6 contact impulse">
+<img src="../img/run6_contact_impulse.png" alt="run6 contact impulse">
 <figcaption>図 4-1: run6（修正後）の finger 接触力積。把持〜引抜の間（約 18.5〜21.5 秒）に左 finger の接触が観測され、瞬間ピーク 0.36 N·s（≒21 N）、保持中は ≈0.20 N·s/step（≒12 N）で持続。<b>右 finger は依然ゼロ</b> = 実際の把持は左 finger 片側の押し付けと幾何フォールバックで成立している。</figcaption>
 </figure>
 <div class="finding">

@@ -68,7 +68,7 @@ scene:
   hand_camera_clipping_range_m: [0.01, 1000.0]
 
 # Step 1（物理モデル土台）: 摩擦・コリジョン・ソルバのチューニング。
-# 値の根拠と検証結果は docs/reports/step1_physics_foundation.html を参照。
+# 値の根拠と検証結果は docs/reports/physics_levelup/step1_physics_foundation.html を参照。
 # TOMATO_HARVEST_PHYSICS_TUNING=0 で一時的に無効化できる（A/B 比較用）。
 physics:
   enabled: true

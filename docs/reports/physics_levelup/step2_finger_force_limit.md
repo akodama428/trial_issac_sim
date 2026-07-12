@@ -81,7 +81,7 @@ sequenceDiagram
 
 ## Before/After時系列グラフ
 
-![把持windowのfinger gapと左指接触力](img/step2_grasp_window.png)
+![把持windowのfinger gapと左指接触力](../img/step2_grasp_window.png)
 
 上段はfinger gapで、黒点線がトマト径`20 mm`である。after run12は`18.8 mm`近傍へ静定し、before run10の`14.8 mm`までのめり込みより改善した。下段は左finger接触力で、赤点線が`maxForce=5 N`である。run14は約`3 N`で平坦だが、run12は人工FixedJointの拘束反力が混入して上限を超える。
 
