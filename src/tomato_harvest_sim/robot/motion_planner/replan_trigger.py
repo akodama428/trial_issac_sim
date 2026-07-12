@@ -104,6 +104,27 @@ def trigger_starts_planner(
     return trigger is ReplanTrigger.ABORT
 
 
+def should_plan_on_snapshot_arrival(
+    *, phase: HarvestTaskPhase | None, has_plan: bool
+) -> bool:
+    """scene snapshot到着時に、保留中の初期計画を起動するか判定する (Issue #37)。
+
+    snapshot未着のまま計画すると、tray・枝・茎が原点にある合成sceneで
+    計画してしまい、place姿勢のゴミ化 (goal sampling失敗 99999) と
+    実障害物を回避しない軌道 (実行中の物理固着) を生む。初期計画は
+    snapshotを持ってから行い、target_foundで未計画のままsnapshotが
+    届いた時点で起動する。
+
+    Args:
+        phase: 現在のharvest phase。
+        has_plan: この producer が既にplanをpublish済みか。
+
+    Returns:
+        target_found かつ未計画の場合のみ True。
+    """
+    return phase is HarvestTaskPhase.TARGET_FOUND and not has_plan
+
+
 def parse_suffix_injection_phases(raw: str) -> frozenset[HarvestTaskPhase]:
     """E2E外乱注入の対象phaseを環境変数値から読み取る。
 

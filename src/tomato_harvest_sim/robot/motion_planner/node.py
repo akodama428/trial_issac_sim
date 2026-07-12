@@ -13,6 +13,7 @@ from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     memory_after_trigger,
     parse_suffix_injection_phases,
     should_inject_suffix_replan,
+    should_plan_on_snapshot_arrival,
     trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
@@ -116,7 +117,15 @@ def main() -> None:
                     scene_snapshot_from_dict(json.loads(msg.data))
                 )
             except Exception:
-                pass
+                return
+            # snapshot未着でtarget_found計画を保留した場合、到着時点で起動する
+            # (Issue #37)。合成ゼロsceneでの計画はplace姿勢のゴミ化と
+            # 実障害物未回避の軌道を生むため廃止した。
+            if should_plan_on_snapshot_arrival(
+                phase=self._state.snapshot().phase,
+                has_plan=self._latest_plan is not None,
+            ):
+                self._try_plan(trigger="scene_snapshot_ready")
 
         def _on_trajectory_status(self, msg: String) -> None:
             try:
@@ -303,27 +312,21 @@ def main() -> None:
             state = self._state.snapshot()
             if state.target_estimate is None or state.joint_state is None:
                 return
+            # snapshot未着なら計画しない (Issue #37)。合成ゼロsceneでの計画は
+            # tray依存のplace姿勢をゴミ化し (goal sampling失敗 99999)、実際の
+            # 枝・茎を回避しない軌道で物理固着を誘発していた。到着時に
+            # _on_snapshot が scene_snapshot_ready trigger で再起動する。
+            if state.scene_snapshot is None:
+                self.get_logger().info(metric_line(
+                    "planner_deferred",
+                    trigger=trigger,
+                    reason="scene_snapshot_not_ready",
+                ))
+                return
 
-            from tomato_harvest_sim.msg.contracts import Pose3D, ScenePhase, SceneSnapshot, TomatoStatus
+            from tomato_harvest_sim.msg.contracts import Pose3D
             _p = Pose3D(0, 0, 0, 0, 0, 0)
-
-            # 実際の SceneSnapshot があればそれを使い、collision objects の配置を正確にする
-            if state.scene_snapshot is not None:
-                scene_snapshot = state.scene_snapshot
-            else:
-                scene_snapshot = SceneSnapshot(
-                    phase=ScenePhase.RUNNING,
-                    active_camera="fixed_camera",
-                    tomato_attached=False,
-                    tomato_status=TomatoStatus.ATTACHED,
-                    gripper_closed=False,
-                    robot_home=False,
-                    cycle_id=0,
-                    robot_model="panda",
-                    robot_base_pose=_p, fixed_camera_pose=_p, hand_camera_pose=_p,
-                    branch_pose=_p, stem_pose=_p, tomato_pose=_p, tray_pose=_p,
-                    robot_tool_pose=_p, target_tool_pose=None, grasp_result_reason=None,
-                )
+            scene_snapshot = state.scene_snapshot
 
             tf_tree_snapshot = type("T", (), {
                 "robot_base_frame_id": "panda_link0",
