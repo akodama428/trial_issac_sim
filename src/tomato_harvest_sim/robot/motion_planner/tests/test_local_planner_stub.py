@@ -151,6 +151,61 @@ class LocalRefinementPlanTest(unittest.TestCase):
         self.assertEqual(trajectory.points[-1].positions_rad, (1.0, 1.0))
         self.assertGreaterEqual(trajectory.points[-2].time_from_start_sec, 0.5)
 
+    def test_returning_home_with_planned_home_trajectory_connects_to_its_terminal(self) -> None:
+        """home区間trajectoryを持つplanでは、その終端構成へ接続する (Issue #32)。"""
+        home = JointTrajectory(
+            joint_names=("joint1", "joint2"),
+            points=(JointTrajectoryPoint((0.6, 0.6), 0.0),
+                    JointTrajectoryPoint((0.0, -0.4), 2.0)),
+        )
+        base = replace(_base_plan(), home_joint_trajectory=home)
+
+        candidate = build_local_refinement_plan(
+            base_plan=base,
+            phase=HarvestTaskPhase.RETURNING_HOME,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.3, 0.1)
+            ),
+            now_sec=200.0,
+            instance_id="local-instance-a",
+            revision=1,
+        )
+
+        assert candidate is not None
+        trajectory = candidate.home_joint_trajectory
+        assert trajectory is not None
+        self.assertEqual(trajectory.points[0].positions_rad, (0.3, 0.1))
+        self.assertEqual(trajectory.points[-1].positions_rad, (0.0, -0.4))
+
+    def test_returning_home_without_planned_trajectory_targets_home_configuration(self) -> None:
+        """home区間trajectoryが無くても、既知のhome関節構成へ接続する (Issue #32)。"""
+        current = JointStateSnapshot(
+            joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+            positions_rad=(0.3, -0.2, 0.1, -1.8, 0.2, 1.5, 0.6),
+        )
+
+        candidate = build_local_refinement_plan(
+            base_plan=_base_plan(),
+            phase=HarvestTaskPhase.RETURNING_HOME,
+            current_joint_state=current,
+            now_sec=200.0,
+            instance_id="local-instance-a",
+            revision=1,
+        )
+
+        assert candidate is not None
+        trajectory = candidate.home_joint_trajectory
+        assert trajectory is not None
+        self.assertEqual(trajectory.points[0].positions_rad, current.positions_rad)
+        # home定数 (DEFAULT_JOINT_POSITIONS_RAD) が終端になる
+        self.assertEqual(
+            trajectory.points[-1].positions_rad,
+            (0.0, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8),
+        )
+
     def test_contact_dominant_phase_is_not_refined(self) -> None:
         candidate = build_local_refinement_plan(
             base_plan=_base_plan(),

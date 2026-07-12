@@ -84,4 +84,76 @@ TEST(MotionCommandExecutorCoreTest, InvalidPayloadThrows)
     std::runtime_error);
 }
 
+// ---------------------------------------------------------------------------
+// Issue #32 abort診断: 追従誤差のピーク追跡・abort分類・status JSON
+// ---------------------------------------------------------------------------
+
+TEST(TrackingErrorPeakTest, KeepsMaximumErrorAndLimitingJoint)
+{
+  franka_ros2_control::TrackingErrorPeak peak;
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1", "panda_joint2"}, {0.02, -0.05});
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1", "panda_joint2"}, {-0.11, 0.04});
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1", "panda_joint2"}, {0.03, 0.01});
+
+  ASSERT_TRUE(peak.has_value);
+  EXPECT_DOUBLE_EQ(peak.max_error_rad, 0.11);
+  EXPECT_EQ(peak.limiting_joint, "panda_joint1");
+}
+
+TEST(TrackingErrorPeakTest, MismatchedLengthsAreIgnored)
+{
+  franka_ros2_control::TrackingErrorPeak peak;
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint1", "panda_joint2"}, {0.02});
+
+  EXPECT_FALSE(peak.has_value);
+}
+
+TEST(AbortReasonTest, MapsJtcErrorCodesToStableNames)
+{
+  EXPECT_EQ(franka_ros2_control::abort_reason_from_jtc(-4, ""), "path_tolerance_violated");
+  EXPECT_EQ(franka_ros2_control::abort_reason_from_jtc(-5, ""), "goal_tolerance_violated");
+  EXPECT_EQ(franka_ros2_control::abort_reason_from_jtc(-1, ""), "invalid_goal");
+  EXPECT_EQ(
+    franka_ros2_control::abort_reason_from_jtc(-99, "custom failure"),
+    "jtc_error_-99");
+}
+
+TEST(ExecutionStatusJsonTest, AbortPayloadCarriesDiagnostics)
+{
+  franka_ros2_control::TrackingErrorPeak peak;
+  peak = franka_ros2_control::update_tracking_error_peak(
+    peak, {"panda_joint4"}, {0.184});
+
+  const std::string payload = franka_ros2_control::execution_status_json(
+    "aborted", peak, "goal_tolerance_violated");
+
+  EXPECT_NE(payload.find("\"status\":\"aborted\""), std::string::npos);
+  EXPECT_NE(payload.find("\"max_joint_error_rad\":0.184"), std::string::npos);
+  EXPECT_NE(payload.find("\"limiting_joint\":\"panda_joint4\""), std::string::npos);
+  EXPECT_NE(payload.find("\"abort_reason\":\"goal_tolerance_violated\""), std::string::npos);
+}
+
+TEST(ExecutionStatusJsonTest, NonAbortPayloadHasOnlyStatus)
+{
+  const std::string payload = franka_ros2_control::execution_status_json(
+    "running", franka_ros2_control::TrackingErrorPeak{}, std::nullopt);
+
+  EXPECT_EQ(payload, "{\"status\":\"running\"}");
+}
+
+TEST(ExecutionStatusJsonTest, AbortWithoutFeedbackOmitsErrorFields)
+{
+  const std::string payload = franka_ros2_control::execution_status_json(
+    "aborted", franka_ros2_control::TrackingErrorPeak{}, "missing_trajectory");
+
+  EXPECT_NE(payload.find("\"status\":\"aborted\""), std::string::npos);
+  EXPECT_NE(payload.find("\"abort_reason\":\"missing_trajectory\""), std::string::npos);
+  EXPECT_EQ(payload.find("max_joint_error_rad"), std::string::npos);
+  EXPECT_EQ(payload.find("limiting_joint"), std::string::npos);
+}
+
 }  // namespace

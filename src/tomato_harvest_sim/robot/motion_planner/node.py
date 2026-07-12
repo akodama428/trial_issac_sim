@@ -126,9 +126,14 @@ def main() -> None:
             if str(status.get("status", "")).strip() == "aborted":
                 self._state.observe_abort()
                 phase = self._state.snapshot().phase
+                # executor由来のabort診断 (Issue #32)。最大追従誤差・律速joint・
+                # abort分類を同じイベントに載せ、abort原因を後追い可能にする。
                 self.get_logger().info(metric_line(
                     "phase_abort_observed",
                     phase=phase.value if phase is not None else "unknown",
+                    max_joint_error_rad=status.get("max_joint_error_rad"),
+                    limiting_joint=status.get("limiting_joint"),
+                    abort_reason=status.get("abort_reason"),
                 ))
             self._evaluate_replan_trigger()
 

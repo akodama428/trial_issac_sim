@@ -4,6 +4,12 @@
 """
 from __future__ import annotations
 
+import json
+
+# executorのabort診断のうち、下流 (trajectory_planner_node) の契約へ通す field。
+# 最大追従誤差・律速joint・abort分類はabort原因の特定に使う (Issue #32)。
+_ABORT_DIAGNOSTIC_FIELDS = ("max_joint_error_rad", "limiting_joint", "abort_reason")
+
 
 def trajectory_status_from_execution_status(execution_status: str) -> str:
     """execution_status 文字列を trajectory_status 文字列へ変換する。
@@ -19,8 +25,40 @@ def trajectory_status_from_execution_status(execution_status: str) -> str:
     return "ok"
 
 
+def trajectory_status_payload(execution_status_raw: str) -> str:
+    """execution_status のraw値を、abort診断付きのtrajectory status JSONへ変換する。
+
+    executorはabort時に status とともに最大joint追従誤差・律速joint・
+    abort reasonをJSONで報告する (Issue #32)。plain文字列 ("running"等) の
+    旧形式も受け付け、常にJSON文字列を返す。
+
+    Args:
+        execution_status_raw: executorが publish した生のstatus文字列。
+
+    Returns:
+        {"status": "ok"|"aborted", ...診断fields} のJSON文字列。
+    """
+    status_value = execution_status_raw.strip()
+    diagnostics: dict[str, object] = {}
+    try:
+        data = json.loads(execution_status_raw)
+    except (json.JSONDecodeError, TypeError):
+        data = None
+    if isinstance(data, dict):
+        status_value = str(data.get("status", "")).strip()
+        diagnostics = {
+            field: data[field]
+            for field in _ABORT_DIAGNOSTIC_FIELDS
+            if data.get(field) is not None
+        }
+    payload: dict[str, object] = {
+        "status": trajectory_status_from_execution_status(status_value),
+    }
+    payload.update(diagnostics)
+    return json.dumps(payload, sort_keys=True)
+
+
 def main() -> None:
-    import json
     import rclpy
     from std_msgs.msg import String
     from rclpy.node import Node
@@ -35,13 +73,8 @@ def main() -> None:
             self.create_subscription(String, EXECUTION_STATUS_TOPIC, self._on_status, 10)
 
         def _on_status(self, msg: String) -> None:
-            try:
-                data = json.loads(msg.data)
-                raw = str(data.get("status", "running"))
-            except (json.JSONDecodeError, AttributeError):
-                raw = msg.data.strip()
             out = String()
-            out.data = trajectory_status_from_execution_status(raw)
+            out.data = trajectory_status_payload(msg.data)
             self._pub.publish(out)
 
     node = TrajectoryMonitorNode()

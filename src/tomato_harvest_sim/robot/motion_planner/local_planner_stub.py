@@ -20,7 +20,9 @@ from tomato_harvest_sim.msg.contracts import (
     JointTrajectoryPoint,
     PlanProducerKind,
 )
+from tomato_harvest_sim.msg.topics import home_joint_state
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
+    SUFFIX_TRAJECTORY_FIELD_BY_PHASE,
     suffix_trajectory,
 )
 
@@ -107,31 +109,32 @@ def build_local_refinement_plan(
         revision: この producer 内で単調増加する版数 (1以上)。
 
     Returns:
-        local producer として刻印した plan。phase が補正対象外、土台 plan に
-        該当 phase の trajectory がない、または現在状態に必要な関節が
+        local producer として刻印した plan。phase が補正対象外、補正の
+        目標構成を決められない、または現在状態に必要な関節が
         欠けている場合は None。
     """
-    trajectory = suffix_trajectory(base_plan, phase)
-    if trajectory is None or not trajectory.points:
+    target = _correction_target(base_plan, phase)
+    if target is None:
         return None
+    target_names, target_positions = target
     current_by_name = dict(zip(
         current_joint_state.joint_names, current_joint_state.positions_rad
     ))
-    if any(name not in current_by_name for name in trajectory.joint_names):
+    if any(name not in current_by_name for name in target_names):
         return None
     start_positions = tuple(
-        current_by_name[name] for name in trajectory.joint_names
+        current_by_name[name] for name in target_names
     )
     connection = build_connection_trajectory(
-        joint_names=trajectory.joint_names,
+        joint_names=target_names,
         start_positions_rad=start_positions,
-        target_positions_rad=trajectory.points[-1].positions_rad,
+        target_positions_rad=target_positions,
     )
     final_point = connection.points[-1]
     settling_point = replace(
         final_point,
         time_from_start_sec=final_point.time_from_start_sec + 1.0,
-        velocities_rad_s=tuple(0.0 for _ in trajectory.joint_names),
+        velocities_rad_s=tuple(0.0 for _ in target_names),
     )
     correction = JointTrajectory(
         joint_names=connection.joint_names,
@@ -140,11 +143,7 @@ def build_local_refinement_plan(
             settling_point,
         ),
     )
-    trajectory_field = {
-        HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
-        HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
-        HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
-    }[phase]
+    trajectory_field = SUFFIX_TRAJECTORY_FIELD_BY_PHASE[phase]
     return replace(
         base_plan,
         **{trajectory_field: correction},
@@ -155,6 +154,24 @@ def build_local_refinement_plan(
         producer_kind=PlanProducerKind.LOCAL_PLANNER,
         producer_instance_id=instance_id,
     )
+
+
+def _correction_target(
+    base_plan: HarvestMotionPlan, phase: HarvestTaskPhase
+) -> tuple[tuple[str, ...], tuple[float, ...]] | None:
+    """補正接続軌道の目標構成 (関節名と関節角) を決める。
+
+    基本は採用済みplanの当該phase残区間trajectoryの終端。RETURNING_HOMEだけは
+    初期planにhome区間trajectoryが無いことが通常のため、既知のhome関節構成を
+    目標にできる (Issue #32)。
+    """
+    trajectory = suffix_trajectory(base_plan, phase)
+    if trajectory is not None and trajectory.points:
+        return trajectory.joint_names, trajectory.points[-1].positions_rad
+    if phase is HarvestTaskPhase.RETURNING_HOME:
+        home = home_joint_state()
+        return home.joint_names, home.positions_rad
+    return None
 
 
 def main() -> None:

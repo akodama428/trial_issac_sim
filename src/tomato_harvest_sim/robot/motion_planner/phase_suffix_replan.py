@@ -18,10 +18,13 @@ from tomato_harvest_sim.msg.contracts import (
 # suffix replanの対象phase。DETACHING は茎からの引き剥がしという接触支配区間で、
 # global plannerの経路再計画より局所的な力・微修正が支配的なため、周期replan対象に
 # しない (Issue #12 設計判断)。Step 6 の local planner 候補として残す。
+# RETURNING_HOME も自由空間移動であり、abort反復がstep予算切れを招くため
+# suffix replan / local補正の対象に含める (Issue #32)。
 SUFFIX_REPLAN_PHASES: frozenset[HarvestTaskPhase] = frozenset({
     HarvestTaskPhase.MOVING_TO_PREGRASP,
     HarvestTaskPhase.MOVING_TO_GRASP,
     HarvestTaskPhase.MOVING_TO_PLACE,
+    HarvestTaskPhase.RETURNING_HOME,
 })
 
 # phaseごとの残区間trajectoryを保持するHarvestMotionPlanのfield名。
@@ -29,6 +32,7 @@ SUFFIX_TRAJECTORY_FIELD_BY_PHASE: dict[HarvestTaskPhase, str] = {
     HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
+    HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
 }
 
 

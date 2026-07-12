@@ -118,6 +118,35 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.assertEqual(len(traj.joint_names), 7)
         self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7))
 
+    def test_returning_home_prefers_planned_home_trajectory(self) -> None:
+        """採用済みplanにhome区間trajectoryがあれば、直行軌道より優先する (Issue #32)。"""
+        from dataclasses import replace
+        planned_home = JointTrajectory(
+            joint_names=("panda_joint1",),
+            points=(
+                JointTrajectoryPoint(positions_rad=(0.5,), time_from_start_sec=0.0),
+                JointTrajectoryPoint(positions_rad=(0.25,), time_from_start_sec=1.0),
+                JointTrajectoryPoint(positions_rad=(0.0,), time_from_start_sec=2.0),
+            ),
+        )
+        plan = replace(_make_plan(), home_joint_trajectory=planned_home)
+
+        cmd = self.build(HarvestTaskPhase.RETURNING_HOME, plan, _make_joint_state())
+
+        self.assertEqual(cmd.phase_motion_plan.joint_trajectory, planned_home)
+        self.assertEqual(cmd.planner_name, plan.planner_name)
+        self.assertFalse(cmd.gripper_closed)
+        self.assertEqual(cmd.phase_motion_plan.phase_id.value, "returning_home")
+
+    def test_returning_home_without_planned_trajectory_uses_direct_home_motion(self) -> None:
+        """home区間trajectoryが無い場合は従来どおり現在位置→home定数の直行軌道を使う。"""
+        cmd = self.build(HarvestTaskPhase.RETURNING_HOME, _make_plan(), _make_joint_state())
+
+        traj = cmd.phase_motion_plan.joint_trajectory
+        self.assertEqual(cmd.planner_name, "direct")
+        self.assertEqual(traj.points[0].positions_rad, (0.5,))
+        self.assertEqual(traj.points[-1].positions_rad, (0.0,))
+
     def test_all_motion_phases_have_non_null_trajectory(self) -> None:
         motion_phases = [
             HarvestTaskPhase.MOVING_TO_PREGRASP,

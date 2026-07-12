@@ -24,6 +24,7 @@ _SUFFIX_FIELD_BY_PHASE = {
     HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
+    HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
 }
 
 
@@ -51,7 +52,12 @@ class SuffixReplanPhaseSetTest(unittest.TestCase):
             HarvestTaskPhase.MOVING_TO_PREGRASP,
             HarvestTaskPhase.MOVING_TO_GRASP,
             HarvestTaskPhase.MOVING_TO_PLACE,
+            HarvestTaskPhase.RETURNING_HOME,
         }))
+
+    def test_returning_home_is_a_suffix_replan_target(self) -> None:
+        """home復帰も自由空間移動であり、abort復旧をfull replanに依存しない (Issue #32)。"""
+        self.assertIn(HarvestTaskPhase.RETURNING_HOME, SUFFIX_REPLAN_PHASES)
 
     def test_contact_dominant_detaching_is_excluded_from_suffix_replan(self) -> None:
         self.assertNotIn(HarvestTaskPhase.DETACHING, SUFFIX_REPLAN_PHASES)

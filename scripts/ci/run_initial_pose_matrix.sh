@@ -16,7 +16,7 @@ for case_id in "${CASE_IDS[@]}"; do
   TOMATO_HARVEST_INITIAL_POSE_ID="${case_id}" \
   TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES="" \
   TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES="" \
-  TOMATO_HARVEST_LOCAL_PLANNER_PHASES="${INITIAL_POSE_LOCAL_PLANNER_PHASES-moving_to_pregrasp,moving_to_grasp,moving_to_place}" \
+  TOMATO_HARVEST_LOCAL_PLANNER_PHASES="${INITIAL_POSE_LOCAL_PLANNER_PHASES-moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home}" \
     bash "${REPO_ROOT}/scripts/ci/run_e2e.sh"
   status=$?
   ended="$(date +%s)"

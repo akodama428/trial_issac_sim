@@ -81,7 +81,7 @@ private:
     if (!command.joint_trajectory.has_value()) {
       if (franka_ros2_control::should_abort_on_missing_trajectory(command.command_name)) {
         log_metric("trajectory_aborted", command.phase_id.value_or("unknown"));
-        publish_status("aborted");
+        publish_aborted(franka_ros2_control::TrackingErrorPeak{}, "missing_trajectory");
       }
       return;
     }
@@ -117,9 +117,11 @@ private:
     if (!action_client_->wait_for_action_server(std::chrono::seconds(1))) {
       RCLCPP_WARN(get_logger(), "JTC action server not available");
       log_metric("trajectory_aborted", phase);
-      publish_status("aborted");
+      publish_aborted(franka_ros2_control::TrackingErrorPeak{}, "action_server_unavailable");
       return;
     }
+    // goalごとに追従誤差ピークを取り直す (Issue #32 abort診断)。
+    tracking_error_peak_ = franka_ros2_control::TrackingErrorPeak{};
 
     FollowJointTrajectory::Goal goal;
     goal.trajectory.joint_names = trajectory.joint_names;
@@ -139,10 +141,16 @@ private:
         if (!goal_handle) {
           RCLCPP_WARN(get_logger(), "JTC goal rejected");
           log_metric("trajectory_aborted", phase);
-          publish_status("aborted");
+          publish_aborted(franka_ros2_control::TrackingErrorPeak{}, "goal_rejected");
           return;
         }
         goal_handle_ = std::move(goal_handle);
+      };
+    options.feedback_callback =
+      [this](GoalHandleFollowJointTrajectory::SharedPtr,
+        const std::shared_ptr<const FollowJointTrajectory::Feedback> feedback) {
+        tracking_error_peak_ = franka_ros2_control::update_tracking_error_peak(
+          tracking_error_peak_, feedback->joint_names, feedback->error.positions);
       };
     options.result_callback =
       [this, phase](const GoalHandleFollowJointTrajectory::WrappedResult & result) {
@@ -153,11 +161,19 @@ private:
             return;
           case rclcpp_action::ResultCode::CANCELED:
             return;
-          default:
-            RCLCPP_WARN(get_logger(), "JTC goal ended with code=%d", static_cast<int>(result.code));
+          default: {
+            const std::string reason =
+              result.result
+              ? franka_ros2_control::abort_reason_from_jtc(
+                  result.result->error_code, result.result->error_string)
+              : "jtc_result_unavailable";
+            RCLCPP_WARN(
+              get_logger(), "JTC goal ended with code=%d reason=%s",
+              static_cast<int>(result.code), reason.c_str());
             log_metric("trajectory_aborted", phase);
-            publish_status("aborted");
+            publish_aborted(tracking_error_peak_, reason);
             return;
+          }
         }
       };
 
@@ -167,7 +183,20 @@ private:
   void publish_status(const std::string & status)
   {
     std_msgs::msg::String message;
-    message.data = status;
+    message.data = franka_ros2_control::execution_status_json(
+      status, franka_ros2_control::TrackingErrorPeak{}, std::nullopt);
+    status_pub_->publish(message);
+  }
+
+  // abort診断 (Issue #32): 最大追従誤差・律速joint・abort分類をstatusへ載せて
+  // trajectory_monitor経由でplannerのabort観測イベントまで届ける。
+  void publish_aborted(
+    const franka_ros2_control::TrackingErrorPeak & peak,
+    const std::string & abort_reason)
+  {
+    std_msgs::msg::String message;
+    message.data = franka_ros2_control::execution_status_json("aborted", peak, abort_reason);
+    RCLCPP_INFO(get_logger(), "execution_status %s", message.data.c_str());
     status_pub_->publish(message);
   }
 
@@ -183,6 +212,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr motion_command_sub_;
   rclcpp_action::Client<FollowJointTrajectory>::SharedPtr action_client_;
   std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle_;
+  franka_ros2_control::TrackingErrorPeak tracking_error_peak_;
   std::optional<bool> gripper_closed_;
   std::size_t cancel_count_{0};
   std::size_t trajectory_replacement_count_{0};

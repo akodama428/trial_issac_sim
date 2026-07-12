@@ -216,6 +216,10 @@ class HarvestMotionPlan:
     grasp_joint_trajectory: JointTrajectory | None = None
     pull_joint_trajectory: JointTrajectory | None = None
     place_joint_trajectory: JointTrajectory | None = None
+    # home区間trajectory (Issue #32)。初期planではNoneで、returning_home中の
+    # abort復旧 (suffix replan) やlocal補正が現在状態→home構成の軌道を刻む。
+    # Noneの場合、motion_commandは従来どおり現在位置→home定数の直行軌道を使う。
+    home_joint_trajectory: JointTrajectory | None = None
     planning_scene_object_ids: tuple[str, ...] = ()
     # Step 1 plan 契約メタデータ (Issue #9)。
     # plan_revision: producer 単調増加の版数 (1以上)。既定値 0 は「未刻印」を表し、

@@ -16,6 +16,7 @@ from tomato_harvest_sim.msg.contracts import (
     TargetEstimate,
     TfTreeSnapshot,
 )
+from tomato_harvest_sim.msg.topics import home_joint_state
 from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_TRAJECTORY_FIELD_BY_PHASE,
@@ -422,6 +423,33 @@ class Ros2MoveIt2PlannerBridge:
                 fallback_joint_goal=fallback_joint_goal,
             )
 
+        # home復帰はトマトをtrayへ置いた後の自由空間移動。goalは固定のhome関節構成
+        # なので、IKサンプリングを伴うpose goalを経由せず関節空間goalを一次手段に
+        # 使う (Issue #32)。
+        if phase is HarvestTaskPhase.RETURNING_HOME:
+            if not self._apply_phase_planning_scene(
+                clients=clients,
+                scene_snapshot=scene_snapshot,
+                base_frame_id=base_frame_id,
+                attach_tomato=False,
+            ):
+                return self._fallback_result("planning_scene_unavailable")
+            home_trajectory = self._plan_joint_goal(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                goal_joint_state=home_joint_state(),
+                phase_label=phase.value,
+            )
+            if home_trajectory is None:
+                return self._fallback_result("home_replan_failed")
+            return MoveIt2PlanningResult(
+                success=True,
+                backend_name="moveit2_service_bridge",
+                reason="service_ok",
+                home_joint_trajectory=home_trajectory,
+            )
+
         return self._fallback_result("unsupported_suffix_phase")
 
     def _plan_place_suffix(
@@ -551,24 +579,13 @@ class Ros2MoveIt2PlannerBridge:
             fallback_joint_goal: pose goal失敗時に直行する既知の有効goal構成。
                 Noneならfallbackしない (フルチェーン初期計画など)。
         """
-        apply_request = _build_planning_scene_request(
+        if not self._apply_phase_planning_scene(
+            clients=clients,
             scene_snapshot=scene_snapshot,
             base_frame_id=base_frame_id,
-            end_effector_link=self._end_effector_link,
-            tomato_ops=_tomato_planning_scene_ops(
-                attach_tomato=attach_tomato,
-                planning_scene_has_attached_tomato=self._planning_scene_has_attached_tomato,
-            ),
-            tray_inner_size_m=self.TRAY_INNER_SIZE_M,
-            tray_wall_thickness_m=self.TRAY_WALL_THICKNESS_M,
-            branch_size_m=self.BRANCH_SIZE_M,
-            stem_size_m=self.STEM_SIZE_M,
-            attached_tomato_radius_m=self.ATTACHED_TOMATO_RADIUS_M,
-            attached_tomato_offset_m=self.ATTACHED_TOMATO_OFFSET_M,
-        )
-        if not clients.apply_planning_scene(apply_request, timeout_sec=self._planning_timeout_sec):
+            attach_tomato=attach_tomato,
+        ):
             return None
-        self._planning_scene_has_attached_tomato = attach_tomato
         request = self._build_motion_plan_request(
             joint_state=joint_state,
             base_frame_id=base_frame_id,
@@ -622,6 +639,35 @@ class Ros2MoveIt2PlannerBridge:
             f"end_q={trajectory.points[-1].positions_rad}"
         )
         return trajectory
+
+    def _apply_phase_planning_scene(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        scene_snapshot: SceneSnapshot,
+        base_frame_id: str,
+        attach_tomato: bool,
+    ) -> bool:
+        """phase計画の前提となるplanning scene (トマトのworld/attached切替) を適用する。"""
+        apply_request = _build_planning_scene_request(
+            scene_snapshot=scene_snapshot,
+            base_frame_id=base_frame_id,
+            end_effector_link=self._end_effector_link,
+            tomato_ops=_tomato_planning_scene_ops(
+                attach_tomato=attach_tomato,
+                planning_scene_has_attached_tomato=self._planning_scene_has_attached_tomato,
+            ),
+            tray_inner_size_m=self.TRAY_INNER_SIZE_M,
+            tray_wall_thickness_m=self.TRAY_WALL_THICKNESS_M,
+            branch_size_m=self.BRANCH_SIZE_M,
+            stem_size_m=self.STEM_SIZE_M,
+            attached_tomato_radius_m=self.ATTACHED_TOMATO_RADIUS_M,
+            attached_tomato_offset_m=self.ATTACHED_TOMATO_OFFSET_M,
+        )
+        if not clients.apply_planning_scene(apply_request, timeout_sec=self._planning_timeout_sec):
+            return False
+        self._planning_scene_has_attached_tomato = attach_tomato
+        return True
 
     def _plan_joint_goal(
         self,

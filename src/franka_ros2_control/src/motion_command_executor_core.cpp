@@ -1,5 +1,7 @@
 #include "franka_ros2_control/motion_command_executor_core.hpp"
 
+#include <cmath>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -114,6 +116,78 @@ ParsedMotionCommand parse_motion_command_json(const std::string & json)
 bool should_abort_on_missing_trajectory(const std::string & command_name)
 {
   return command_name.rfind("hold_", 0) != 0;
+}
+
+TrackingErrorPeak update_tracking_error_peak(
+  TrackingErrorPeak peak,
+  const std::vector<std::string> & joint_names,
+  const std::vector<double> & error_positions_rad)
+{
+  if (joint_names.size() != error_positions_rad.size()) {
+    return peak;
+  }
+  for (std::size_t i = 0; i < joint_names.size(); ++i) {
+    const double error = std::abs(error_positions_rad[i]);
+    if (!peak.has_value || error > peak.max_error_rad) {
+      peak.max_error_rad = error;
+      peak.limiting_joint = joint_names[i];
+      peak.has_value = true;
+    }
+  }
+  return peak;
+}
+
+std::string abort_reason_from_jtc(int error_code, const std::string & error_string)
+{
+  // control_msgs/FollowJointTrajectory Result のerror_code (0=SUCCESSFUL)。
+  switch (error_code) {
+    case -1: return "invalid_goal";
+    case -2: return "invalid_joints";
+    case -3: return "old_header_timestamp";
+    case -4: return "path_tolerance_violated";
+    case -5: return "goal_tolerance_violated";
+    default:
+      (void)error_string;
+      return "jtc_error_" + std::to_string(error_code);
+  }
+}
+
+namespace
+{
+
+std::string json_escape(const std::string & value)
+{
+  std::string escaped;
+  escaped.reserve(value.size());
+  for (const char character : value) {
+    if (character == '"' || character == '\\') {
+      escaped.push_back('\\');
+    }
+    if (static_cast<unsigned char>(character) >= 0x20) {
+      escaped.push_back(character);
+    }
+  }
+  return escaped;
+}
+
+}  // namespace
+
+std::string execution_status_json(
+  const std::string & status,
+  const TrackingErrorPeak & peak,
+  const std::optional<std::string> & abort_reason)
+{
+  std::ostringstream stream;
+  stream << "{\"status\":\"" << json_escape(status) << "\"";
+  if (peak.has_value) {
+    stream << ",\"max_joint_error_rad\":" << peak.max_error_rad
+           << ",\"limiting_joint\":\"" << json_escape(peak.limiting_joint) << "\"";
+  }
+  if (abort_reason.has_value()) {
+    stream << ",\"abort_reason\":\"" << json_escape(*abort_reason) << "\"";
+  }
+  stream << "}";
+  return stream.str();
 }
 
 }  // namespace franka_ros2_control

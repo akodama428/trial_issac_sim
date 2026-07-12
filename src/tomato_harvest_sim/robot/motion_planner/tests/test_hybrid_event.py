@@ -15,6 +15,16 @@ class HybridEventTest(unittest.TestCase):
         self.assertEqual(route_event(ReplanTrigger.TRACKING_ERROR, phase), PlannerRoute.LOCAL)
         self.assertEqual(route_event(ReplanTrigger.ABORT, phase), PlannerRoute.GLOBAL)
 
+    def test_returning_home_tracking_error_is_routed_to_local_planner(self) -> None:
+        """home復帰中の追従誤差もlocal補正の対象にする (Issue #32)。"""
+        phase = HarvestTaskPhase.RETURNING_HOME
+        self.assertEqual(route_event(ReplanTrigger.TRACKING_ERROR, phase), PlannerRoute.LOCAL)
+        self.assertEqual(route_event(ReplanTrigger.ABORT, phase), PlannerRoute.GLOBAL)
+        self.assertTrue(admit_local_event(
+            event_id="h", event_at_sec=9.9, now_sec=10.0,
+            phase=phase, memory=LocalEventMemory(),
+        ).accepted)
+
     def test_timer_scene_and_contact_tracking_are_observe_only(self) -> None:
         self.assertEqual(route_event(ReplanTrigger.TIMER, HarvestTaskPhase.MOVING_TO_PLACE), PlannerRoute.OBSERVE)
         self.assertEqual(route_event(ReplanTrigger.SCENE_CHANGE, HarvestTaskPhase.MOVING_TO_PLACE), PlannerRoute.OBSERVE)

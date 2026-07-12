@@ -26,3 +26,21 @@ DEFAULT_JOINT_NAMES = (
     "panda_joint7",
 )
 DEFAULT_JOINT_POSITIONS_RAD = (0.0, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8)
+
+
+def home_joint_state():
+    """home復帰の目標となる既知の関節構成を返す (Issue #32)。
+
+    motion_commandの直行home軌道と、returning_homeのsuffix replan /
+    local補正が同じ終端構成を共有するための単一の定義点。
+
+    Returns:
+        DEFAULT_JOINT_NAMES / DEFAULT_JOINT_POSITIONS_RAD からなる
+        JointStateSnapshot。
+    """
+    from tomato_harvest_sim.msg.contracts import JointStateSnapshot
+
+    return JointStateSnapshot(
+        joint_names=DEFAULT_JOINT_NAMES,
+        positions_rad=DEFAULT_JOINT_POSITIONS_RAD,
+    )
