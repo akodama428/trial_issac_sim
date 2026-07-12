@@ -55,6 +55,28 @@ def suffix_trajectory(
     return trajectory if isinstance(trajectory, JointTrajectory) else None
 
 
+def should_plan_home_on_entry(
+    previous_phase: HarvestTaskPhase | None, phase: HarvestTaskPhase | None
+) -> bool:
+    """RETURNING_HOME進入時に能動的なhome計画を起動するか判定する (Issue #32)。
+
+    直行home軌道は衝突を考慮しないため、place後のトレイ近傍から出発すると
+    腕を障害物へ引っ掛け、計画では復旧できない物理固着を誘発し得る。
+    進入時に一度だけ衝突考慮済みのhome区間計画へ置き換える。
+
+    Args:
+        previous_phase: 直前に観測していたphase。未観測ならNone。
+        phase: 新しく観測したphase。
+
+    Returns:
+        RETURNING_HOMEへの遷移を新規に観測した場合のみTrue。
+    """
+    return (
+        phase is HarvestTaskPhase.RETURNING_HOME
+        and previous_phase is not HarvestTaskPhase.RETURNING_HOME
+    )
+
+
 def terminal_joint_state_of_phase(
     plan: HarvestMotionPlan, phase: HarvestTaskPhase
 ) -> JointStateSnapshot | None:

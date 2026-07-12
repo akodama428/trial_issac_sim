@@ -16,6 +16,7 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_REPLAN_PHASES,
     SuffixReplanGate,
     evaluate_suffix_update,
+    should_plan_home_on_entry,
     suffix_trajectory,
     terminal_joint_state_of_phase,
 )
@@ -122,6 +123,33 @@ class SuffixUpdateTest(unittest.TestCase):
         )
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_unsupported_phase")
+
+
+class HomeEntryPlanningTest(unittest.TestCase):
+    """returning_home進入時の能動的home計画判定 (Issue #32)。
+
+    直行home軌道は衝突を考慮しないため、トレイ近傍から出発すると腕を
+    引っ掛けて追従不能なabortを誘発する。進入時に衝突考慮済みの計画へ
+    置き換えることで、abort後の受動的復旧では救えない固着を予防する。
+    """
+
+    def test_entering_returning_home_triggers_home_planning(self) -> None:
+        self.assertTrue(should_plan_home_on_entry(
+            HarvestTaskPhase.PLACED, HarvestTaskPhase.RETURNING_HOME
+        ))
+        self.assertTrue(should_plan_home_on_entry(
+            None, HarvestTaskPhase.RETURNING_HOME
+        ))
+
+    def test_staying_in_returning_home_does_not_replan(self) -> None:
+        self.assertFalse(should_plan_home_on_entry(
+            HarvestTaskPhase.RETURNING_HOME, HarvestTaskPhase.RETURNING_HOME
+        ))
+
+    def test_other_phases_do_not_trigger_home_planning(self) -> None:
+        self.assertFalse(should_plan_home_on_entry(
+            HarvestTaskPhase.PLACED, HarvestTaskPhase.MOVING_TO_PLACE
+        ))
 
 
 class TerminalJointStateTest(unittest.TestCase):

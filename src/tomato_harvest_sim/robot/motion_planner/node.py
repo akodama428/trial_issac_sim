@@ -22,6 +22,7 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_REPLAN_PHASES,
     SuffixReplanGate,
     evaluate_suffix_update,
+    should_plan_home_on_entry,
 )
 
 
@@ -89,9 +90,14 @@ def main() -> None:
                 phase = HarvestTaskPhase(msg.data)
             except ValueError:
                 return
+            previous_phase = self._state.snapshot().phase
             self._state.update_phase(phase)
             if phase is HarvestTaskPhase.TARGET_FOUND:
                 self._try_plan(trigger="target_found")
+            # 直行home軌道は衝突を考慮しないため、進入時に衝突考慮済みの
+            # home区間計画へ能動的に置き換える (Issue #32)。
+            if should_plan_home_on_entry(previous_phase, phase):
+                self._try_suffix_plan(trigger="home_entry")
             if phase in SUFFIX_REPLAN_PHASES:
                 self._inject_suffix_replan_if_requested()
 
