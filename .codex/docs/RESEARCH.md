@@ -433,6 +433,23 @@ Custom Docker Container
   - https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job
   - https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
 
+## 23. Step 7 は event-driven manager により global / local planner を排他的に配送する
+- 調査日: 2026-07-12
+- 対象: MoveIt Rolling `Hybrid Planning`、`Realtime Servo`
+- 確認できた事実:
+  - Hybrid Planning は、計算時間を限定しない比較的低速な global planner と、実行中に反復してセンサ入力へ応答する高速・決定的な local planner を組み合わせる。
+  - Hybrid Planning Manager の planning logic は event-driven であり、planner の開始・停止・制約切替へ event を対応付ける。
+  - Local Planner は global reference trajectory、現在状態、world を入力に逐次コマンドを生成し、局所解で回復できない場合に global replan を要求できる。
+  - MoveIt Servo は joint jog / twist / pose command を扱い、collision、singularity、joint bound に対する減速・停止状態を備える。
+- Step 7 への適用:
+  - tracking error は local planner だけへ、abort は global planner だけへ配送し、同じ event から両 planner を起動しない。
+  - 周期 timer による global replan は廃止し、global planner を初期計画と重大 event に限定する。
+  - local event には重複排除、0.25秒の rate limit、2秒の stale timeout、phase 整合を設ける。
+  - 現実装の joint-space local planner は ROS 2 message 境界と裁定を検証する段階であり、本番採用には Servo または同等 solver、collision / singularity safety の接続が必要である。
+- ソース:
+  - https://moveit.picknik.ai/main/doc/concepts/hybrid_planning/hybrid_planning.html
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+
 # ソース
 - NVIDIA Isaac Sim Container Installation
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html

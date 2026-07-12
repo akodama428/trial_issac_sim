@@ -49,6 +49,7 @@ def main() -> None:
         SCENE_SNAPSHOT_TOPIC,
         TARGET_ESTIMATE_TOPIC,
         TRAJECTORY_STATUS_TOPIC,
+        HYBRID_PLANNING_EVENT_TOPIC,
     )
     from tomato_harvest_sim.msg.serialization import (
         harvest_motion_plan_to_json,
@@ -65,6 +66,7 @@ def main() -> None:
             planner, info = build_planner()
             self._planner = planner
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
+            self._event_pub = self.create_publisher(String, HYBRID_PLANNING_EVENT_TOPIC, 10)
             self._state = PlannerStateAggregator()
             self._trigger_memory = TriggerMemory()
             self._suffix_replan_gate = SuffixReplanGate()
@@ -81,7 +83,6 @@ def main() -> None:
             self.create_subscription(JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10)
             self.create_subscription(String, TRAJECTORY_STATUS_TOPIC, self._on_trajectory_status, 10)
             self.create_subscription(String, SCENE_SNAPSHOT_TOPIC, self._on_snapshot, 10)
-            self.create_timer(1.0, self._on_replan_timer)
 
         def _on_phase(self, msg: String) -> None:
             try:
@@ -181,6 +182,27 @@ def main() -> None:
             self._trigger_memory = memory_after_trigger(
                 state=state, memory=self._trigger_memory, now_sec=now_sec
             )
+            from tomato_harvest_sim.robot.motion_planner.hybrid_event import (
+                PlannerRoute, route_event,
+            )
+            route = route_event(decision.trigger, state.phase)
+            event = String()
+            event.data = json.dumps({
+                "event_id": uuid.uuid4().hex,
+                "event_at_sec": time.time(),
+                "trigger": decision.trigger.value,
+                "phase": phase,
+                "route": route.value,
+                "tracking_error_rad": state.tracking_error_rad,
+            }, sort_keys=True)
+            self._event_pub.publish(event)
+            self.get_logger().info(metric_line(
+                "hybrid_event_routed", phase=phase,
+                trigger=decision.trigger.value, route=route.value,
+            ))
+            if route is PlannerRoute.LOCAL:
+                self._state.update_tracking_error(None)
+                return
             if not trigger_starts_planner(decision.trigger, state.phase):
                 self.get_logger().info(metric_line(
                     "replan_trigger_observed",

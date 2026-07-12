@@ -74,8 +74,12 @@ if [[ -n "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES:-}" ]]; then
       echo "Suffix E2E disturbance was not injected in phase ${phase}." >&2
       exit 1
     fi
-    if ! grep -Eq "\"event\": \"suffix_replan_completed\".*\"phase\": \"${phase}\".*\"success\": true" "${ROBOT_LOG}"; then
-      echo "Successful real MoveIt suffix replan metric was not found for phase ${phase}." >&2
+    if ! grep -Eq "\"event\": \"hybrid_event_routed\".*\"phase\": \"${phase}\".*\"route\": \"local\".*\"trigger\": \"tracking_error\"" "${ROBOT_LOG}"; then
+      echo "Tracking-error event was not routed exclusively to the local planner in phase ${phase}." >&2
+      exit 1
+    fi
+    if grep -Eq "\"event\": \"suffix_replan_completed\".*\"phase\": \"${phase}\".*\"trigger\": \"tracking_error\"" "${ROBOT_LOG}"; then
+      echo "Tracking error incorrectly started the global suffix planner in phase ${phase}." >&2
       exit 1
     fi
   done
