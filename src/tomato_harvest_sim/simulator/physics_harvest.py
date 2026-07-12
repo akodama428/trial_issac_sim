@@ -127,6 +127,12 @@ class IsaacPhysicsHarvestBridge:
     def finalize_physics_step(self, controller: object) -> None:
         snapshot = controller.current_scene_snapshot()
         self._promote_pending_contacts(gripper_closed=snapshot.gripper_closed)
+        controller.sync_grasp_diagnostics(
+            left_contact="left" in self._active_finger_contacts,
+            right_contact="right" in self._active_finger_contacts,
+            left_force_n=self._pending_contact_impulses.left_ns / self.OBSERVATION_PHYSICS_DT_SEC,
+            right_force_n=self._pending_contact_impulses.right_ns / self.OBSERVATION_PHYSICS_DT_SEC,
+        )
         self._debug_log(
             "[PhysicsHarvest] finalize "
             f"phase={snapshot.phase.value} "

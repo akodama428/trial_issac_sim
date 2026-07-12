@@ -33,6 +33,10 @@ class SceneRuntimeState:
     robot_tool_pose: Pose3D
     grasp_result_reason: str | None
     active_phase_motion_plan: PhaseMotionPlan | None
+    left_finger_contact: bool
+    right_finger_contact: bool
+    left_finger_force_n: float | None
+    right_finger_force_n: float | None
 
 
 class IsaacSceneRuntime:
@@ -121,6 +125,14 @@ class IsaacSceneRuntime:
         self.state.robot_home = (dx * dx + dy * dy + dz * dz) <= (
             self.GRASP_POSITION_TOLERANCE_M * self.GRASP_POSITION_TOLERANCE_M
         )
+        return self.snapshot()
+
+    def sync_grasp_diagnostics(self, *, left_contact: bool, right_contact: bool,
+                               left_force_n: float | None, right_force_n: float | None) -> SceneSnapshot:
+        self.state.left_finger_contact = left_contact
+        self.state.right_finger_contact = right_contact
+        self.state.left_finger_force_n = left_force_n
+        self.state.right_finger_force_n = right_force_n
         return self.snapshot()
 
     def close_gripper(self) -> SceneSnapshot:
@@ -254,9 +266,18 @@ class IsaacSceneRuntime:
             tomato_pose=self.state.tomato_pose,
             tray_pose=self.state.tray_pose,
             robot_tool_pose=self.state.robot_tool_pose,
-            target_tool_pose=None,
+            target_tool_pose=Pose3D(
+                self.state.tomato_pose.x, self.state.tomato_pose.y,
+                self.state.tomato_pose.z + self.GRASP_TOMATO_OFFSET_Z_M,
+                self.state.robot_tool_pose.roll, self.state.robot_tool_pose.pitch,
+                self.state.robot_tool_pose.yaw,
+            ),
             grasp_result_reason=self.state.grasp_result_reason,
             active_phase_motion_plan=None,
+            left_finger_contact=self.state.left_finger_contact,
+            right_finger_contact=self.state.right_finger_contact,
+            left_finger_force_n=self.state.left_finger_force_n,
+            right_finger_force_n=self.state.right_finger_force_n,
         )
 
     def _is_stable_grasp_pose(self) -> bool:
@@ -317,4 +338,8 @@ class IsaacSceneRuntime:
             robot_tool_pose=layout.home_tool_pose,
             grasp_result_reason=None,
             active_phase_motion_plan=None,
+            left_finger_contact=False,
+            right_finger_contact=False,
+            left_finger_force_n=None,
+            right_finger_force_n=None,
         )

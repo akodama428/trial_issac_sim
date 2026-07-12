@@ -570,6 +570,9 @@ def _run_simulator_node_main_loop(
         def sync_tomato_physics(self, pose, *, attached=None, status=None, reason=None):
             scene_runtime.sync_tomato_physics(pose, attached=attached, status=status, reason=reason)
 
+        def sync_grasp_diagnostics(self, **values):
+            scene_runtime.sync_grasp_diagnostics(**values)
+
     physics_controller = _PhysicsController() if artifacts.physics_bridge is not None else None
 
     # ControlPanelWindow 向けの最小アダプタ。
