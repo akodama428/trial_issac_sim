@@ -23,7 +23,9 @@ jobs:
       - name: Prepare cached CI base image
         run: bash scripts/ci/build_ci_image.sh
       - name: Run all ten initial poses
-        run: bash scripts/ci/run_initial_pose_matrix.sh | tee initial-pose-job-summary.md
+        run: |
+          set -o pipefail
+          bash scripts/ci/run_initial_pose_matrix.sh | tee initial-pose-job-summary.md
       - name: Publish job summary
         if: always()
         run: test -f "${CI_ARTIFACT_ROOT}/initial-pose-summary.md" && cat "${CI_ARTIFACT_ROOT}/initial-pose-summary.md" >> "${GITHUB_STEP_SUMMARY}" || true
