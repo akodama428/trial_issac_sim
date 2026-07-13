@@ -147,6 +147,17 @@ TrackingErrorPeak update_tracking_error_peak(
   return peak;
 }
 
+bool should_publish_tracking_error(
+  const TrackingErrorPeak & recent_peak,
+  const double last_publish_at_sec,
+  const double now_sec,
+  const double publish_interval_sec)
+{
+  return recent_peak.has_value && publish_interval_sec > 0.0 &&
+         now_sec >= last_publish_at_sec &&
+         now_sec - last_publish_at_sec >= publish_interval_sec;
+}
+
 std::string abort_reason_from_jtc(int error_code, const std::string & error_string)
 {
   // control_msgs/FollowJointTrajectory Result のerror_code (0=SUCCESSFUL)。
@@ -190,6 +201,9 @@ std::string execution_status_json(
   std::ostringstream stream;
   stream << "{\"status\":\"" << json_escape(status) << "\"";
   if (peak.has_value) {
+    if (status == "running") {
+      stream << ",\"tracking_error_rad\":" << peak.max_error_rad;
+    }
     stream << ",\"max_joint_error_rad\":" << peak.max_error_rad
            << ",\"limiting_joint\":\"" << json_escape(peak.limiting_joint) << "\"";
     if (peak.has_positions) {

@@ -28,10 +28,10 @@ jobs:
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
-      # Step 6: 全自由空間phaseへtracking error外乱を注入し、global suffix replanと
+      # Step 6/7: 全自由空間phaseへtracking error外乱を注入し、global suffix replanと
       # joint-space local correctionが共存した状態で収穫を完走できることを検証する。
-      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place"
-      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place"
+      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
+      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
     steps:
       - name: Clean workspace residue
         run: |

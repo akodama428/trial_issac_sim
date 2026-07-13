@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import json
 
-# executorのabort診断のうち、下流 (trajectory_planner_node) の契約へ通す field。
+# executorの実行中・abort診断のうち、下流 (trajectory_planner_node) の契約へ通す field。
 # 最大追従誤差・律速joint・abort分類はabort原因の特定に使う (Issue #32)。
 # ピーク時の律速joint目標/実位置は関節限界近傍の固着判定に使う (Issue #37)。
-_ABORT_DIAGNOSTIC_FIELDS = (
+_EXECUTION_DIAGNOSTIC_FIELDS = (
+    "tracking_error_rad",
     "max_joint_error_rad",
     "limiting_joint",
     "limiting_joint_desired_rad",
@@ -55,7 +56,7 @@ def trajectory_status_payload(execution_status_raw: str) -> str:
         status_value = str(data.get("status", "")).strip()
         diagnostics = {
             field: data[field]
-            for field in _ABORT_DIAGNOSTIC_FIELDS
+            for field in _EXECUTION_DIAGNOSTIC_FIELDS
             if data.get(field) is not None
         }
     payload: dict[str, object] = {
