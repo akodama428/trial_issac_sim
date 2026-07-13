@@ -54,7 +54,13 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
             "initial_positions_rad": list(definition.positions_rad),
             "is_singularity_case": definition.is_singularity_case,
             "success": success,
-            "failure_reason": "" if success else (f"failed_phase:{failed[-1]}" if failed else "cycle_not_completed"),
+            "failure_reason": (
+                "" if success
+                # 起動flake (Issue #40)。計画・実行系の失敗と区別して集計する。
+                else "stack_startup_failed" if "STACK_STARTUP_FAILED" in console
+                else f"failed_phase:{failed[-1]}" if failed
+                else "cycle_not_completed"
+            ),
             "planning_latency_ms": latencies,
             "e2e_duration_sec": float(duration[-1]) if duration else None,
             "grasp_diagnostics": _grasp_diagnostics(robot_log),
