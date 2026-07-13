@@ -73,6 +73,29 @@ def arm_joint_goal_from_ik_solution(
     )
 
 
+def ik_goal_is_near_seed(
+    *,
+    seed: JointStateSnapshot,
+    goal: JointStateSnapshot,
+    max_joint_delta_rad: float,
+) -> bool:
+    """IK解がseedの最近傍枝かを距離で判定する (Issue #37)。
+
+    avoid_collisions付きIKはseed解が衝突するとランダムリスタートで遠い枝を
+    返すことがあり、関節限界張り付きの異常構成をgoalにする実害があった。
+    seedと共通する全関節の差が閾値内の解だけを最近傍枝として受理する。
+    """
+    seed_by_name = dict(zip(seed.joint_names, seed.positions_rad))
+    common = [name for name in goal.joint_names if name in seed_by_name]
+    if not common:
+        return False
+    goal_by_name = dict(zip(goal.joint_names, goal.positions_rad))
+    return all(
+        abs(goal_by_name[name] - seed_by_name[name]) <= max_joint_delta_rad
+        for name in common
+    )
+
+
 def goal_joint_window(
     joint_state: JointStateSnapshot, *, window_rad: float
 ) -> tuple[str, float, float] | None:
@@ -764,6 +787,19 @@ class Ros2MoveIt2PlannerBridge:
         )
         if goal_joint_state is None:
             return None
+        # seedから遠い解 (別のIK枝) はここで棄却し、窓付きpose goalへ委ねる。
+        if not ik_goal_is_near_seed(
+            seed=joint_state,
+            goal=goal_joint_state,
+            max_joint_delta_rad=self._goal_joint1_window_rad,
+        ):
+            print(
+                f"[MoveItBridge] seeded_ik solution rejected as far branch "
+                f"phase={phase_label} goal_q={goal_joint_state.positions_rad} "
+                "— falling back to pose goal",
+                flush=True,
+            )
+            return None
         request = self._build_joint_goal_motion_plan_request(
             joint_state=joint_state,
             base_frame_id=base_frame_id,
@@ -1254,7 +1290,10 @@ class _Ros2MoveIt2Clients:
             return None
         request = GetPositionIK.Request()
         request.ik_request.group_name = group_name
-        request.ik_request.avoid_collisions = True
+        # avoid_collisions=True はseed解が衝突するとランダムリスタートで遠い枝を
+        # 返す (関節限界張り付きの異常構成を実測)。ここでは純粋なseed収束解を
+        # 取り、衝突チェックは後段のjoint goal計画に委ねる (Issue #37)。
+        request.ik_request.avoid_collisions = False
         request.ik_request.robot_state.joint_state = JointState()
         request.ik_request.robot_state.joint_state.name = list(seed_joint_state.joint_names)
         request.ik_request.robot_state.joint_state.position = [

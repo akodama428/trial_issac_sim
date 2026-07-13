@@ -22,6 +22,7 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     _tomato_planning_scene_ops,
     arm_joint_goal_from_ik_solution,
     goal_joint_window,
+    ik_goal_is_near_seed,
 )
 
 
@@ -347,6 +348,34 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         assert goal is not None
         self.assertEqual(goal.joint_names[0], "panda_joint1")
         self.assertEqual(goal.positions_rad, (0.1, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8))
+
+    def test_far_ik_solution_is_rejected_by_nearness_guard(self) -> None:
+        """seedから遠いIK解 (別枝) は棄却する (Issue #37)。
+
+        avoid_collisions付きIKはseed解が衝突するとランダムリスタートで
+        任意の遠い解を返し、関節限界張り付きの異常構成 (joint3=2.897等) を
+        goalにしてしまう実害が観測された。距離ガードで最近傍枝だけを許す。
+        """
+        seed = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3"),
+            positions_rad=(0.35, -0.55, -0.25),
+        )
+        near = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3"),
+            positions_rad=(0.10, -0.30, 0.20),
+        )
+        far = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3"),
+            positions_rad=(-0.39, 1.51, 2.897),
+        )
+
+        self.assertTrue(ik_goal_is_near_seed(seed=seed, goal=near, max_joint_delta_rad=1.5))
+        self.assertFalse(ik_goal_is_near_seed(seed=seed, goal=far, max_joint_delta_rad=1.5))
+
+    def test_nearness_guard_requires_matching_joints(self) -> None:
+        seed = JointStateSnapshot(joint_names=("panda_joint1",), positions_rad=(0.0,))
+        goal = JointStateSnapshot(joint_names=("panda_joint2",), positions_rad=(0.0,))
+        self.assertFalse(ik_goal_is_near_seed(seed=seed, goal=goal, max_joint_delta_rad=1.5))
 
     def test_ik_solution_missing_arm_joint_is_rejected(self) -> None:
         goal = arm_joint_goal_from_ik_solution(
