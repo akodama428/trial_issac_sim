@@ -485,12 +485,12 @@ Custom Docker Container
 - 確認済み事項:
   - JTCはpath/goal tolerance違反時、action feedbackへ`actual`、`desired`、`error`を設定してからabortし、現在位置のhold trajectoryへ切り替える。
   - tolerance違反と新goalの競合時は`rt_has_pending_goal_`を確認し、新goalがpendingなら古いholdで上書きしない実装である。
-  - `interpolate_from_desired_state=false`では新trajectoryをstate interfaceの実測値から補間する。古い`open_loop_control`はJazzyでdeprecatedであり、desired state補間の明示parameterへ移行している。
+  - `interpolate_from_desired_state=false`では新trajectoryをstate interfaceの実測値から補間する。古い`open_loop_control`はJazzyでdeprecatedであり、互換値を残さず設定から削除する。
   - `constraints.goal_time=0`は無効化ではなく無限待ち、joint goal toleranceの`0`は未指定値を意味する。現在の5.0秒、停止速度0.05 rad/sは維持し、位置goalをplannerのtracking error閾値と同じ0.10 radにする。
   - `JointTrajectoryControllerState`はaction goal外でもreference（desired）とfeedback（actual）を提供するため、action feedbackが欠けたabort診断の補完元にできる。
 - 設計判断:
   - JTCは実測state起点へ変更し、abort後の古いcommandを新goal補間seedにしない。
-  - executorはgoal generationで非同期callbackを識別し、旧goalのresultが新goal handleを消さないようにする。
+  - executorはgoal generationで非同期callbackを識別し、置換済みgoalの遅延resultが現行goal handleを消さないようにする。このcallbackは非同期action APIが実際に呼ぶ現役経路であり、dead codeではない。
   - abort診断はaction feedbackを正本とし、不足時だけcontroller stateでdesired/actualを補完する。
   - controller restartは新goal反映が確認できない場合の最終手段とし、JTC標準のpending-goal保護で成立する限り導入しない。
 - ソース:

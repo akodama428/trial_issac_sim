@@ -19,7 +19,7 @@ def test_jtc_recovery_starts_new_trajectory_from_measured_state() -> None:
         "ros__parameters"
     ]
 
-    assert parameters["open_loop_control"] is False
+    assert "open_loop_control" not in parameters
     assert parameters["interpolate_from_desired_state"] is False
     assert parameters["set_last_command_interface_value_as_state_on_activation"] is False
 

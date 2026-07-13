@@ -35,9 +35,8 @@ joint_trajectory_controller:
     interpolation_method: splines
 
     # abort後の新trajectoryは、hold前の古いcommandではなくIsaac Simの実測位置から
-    # 補間を開始する。Jazzyではinterpolate_from_desired_state=falseが正本で、
-    # open_loop_control=falseも後方互換parameterとして明示する。
-    open_loop_control: false
+    # 補間を開始する。deprecatedなopen_loop_controlは設定せず、Jazzyの正本parameter
+    # だけを明示する。
     interpolate_from_desired_state: false
     # controller再activate時も、残存commandではなくstate interfaceをseedにする。
     set_last_command_interface_value_as_state_on_activation: false
