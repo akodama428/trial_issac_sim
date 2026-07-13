@@ -23,6 +23,7 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     arm_joint_goal_from_ik_solution,
     goal_joint_window,
     ik_goal_is_near_seed,
+    should_start_via_home,
 )
 
 
@@ -351,6 +352,38 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         assert goal is not None
         self.assertEqual(goal.joint_names[0], "panda_joint1")
         self.assertEqual(goal.positions_rad, (0.1, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8))
+
+    def test_near_singularity_start_goes_via_home(self) -> None:
+        """home構成との差が大きい初期姿勢はhome経由で開始する (Issue #39)。
+
+        伸展特異姿勢近傍 (joint4差2.0 rad) ではseed収束IKも窓付きsamplerも
+        不安定なため、関節空間goalで確実に計画できるhomeを経由してから
+        通常ケースと同じ挙動に乗せる。
+        """
+        near_singularity = JointStateSnapshot(
+            joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+            positions_rad=(0.0, -0.05, 0.0, -0.10, 0.0, 0.15, 0.0),
+        )
+        self.assertTrue(should_start_via_home(near_singularity, threshold_rad=1.2))
+
+    def test_near_home_start_uses_direct_pregrasp(self) -> None:
+        elbow_left = JointStateSnapshot(
+            joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+            positions_rad=(0.35, -0.55, -0.25, -2.0, 0.20, 1.55, 0.55),
+        )
+        self.assertFalse(should_start_via_home(elbow_left, threshold_rad=1.2))
+
+    def test_via_home_is_disabled_by_zero_threshold(self) -> None:
+        far = JointStateSnapshot(
+            joint_names=("panda_joint4",), positions_rad=(-0.10,),
+        )
+        self.assertFalse(should_start_via_home(far, threshold_rad=0.0))
 
     def test_far_ik_solution_is_rejected_by_nearness_guard(self) -> None:
         """seedから遠いIK解 (別枝) は棄却する (Issue #37)。

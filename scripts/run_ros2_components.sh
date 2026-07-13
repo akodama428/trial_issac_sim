@@ -257,19 +257,40 @@ start_bg "ros2_control_node" \
   --ros-args --params-file "${CONTROLLERS_YAML}" \
   >> "${CONTROLLER_LOG}" 2>&1
 
-# controller_manager の起動待機
+# controller_manager の起動待機 (Issue #40)。
+# 15秒待機では起動flakeがE2E失敗として計上されるため、45秒へ延長し、
+# タイムアウト時は ros2_control_node を1回だけ再起動して再待機する。
+wait_controller_manager() {
+  local timeout_steps=90  # 0.5秒 × 90 = 45秒
+  for i in $(seq 1 "${timeout_steps}"); do
+    if ros2 service list 2>/dev/null | grep -q "/controller_manager/list_controllers"; then
+      return 0
+    fi
+    sleep 0.5
+  done
+  return 1
+}
+
 log "  controller_manager 起動待機中..."
-for i in $(seq 1 30); do
-  if ros2 service list 2>/dev/null | grep -q "/controller_manager/list_controllers"; then
-    log "  controller_manager 起動確認"
-    break
-  fi
-  sleep 0.5
-  if [[ "${i}" -eq 30 ]]; then
-    log "ERROR: controller_manager 起動タイムアウト（15秒）。ログ: ${CONTROLLER_LOG}"
+if wait_controller_manager; then
+  log "  controller_manager 起動確認"
+else
+  log "WARN: controller_manager 起動タイムアウト（45秒）。ros2_control_node を再起動します。"
+  pkill -f "controller_manager ros2_control_node" 2>/dev/null || true
+  sleep 2
+  start_bg "ros2_control_node (retry)" \
+    ros2 run controller_manager ros2_control_node \
+    --ros-args --params-file "${CONTROLLERS_YAML}" \
+    >> "${CONTROLLER_LOG}" 2>&1
+  if wait_controller_manager; then
+    log "  controller_manager 起動確認（リトライ後）"
+  else
+    # 集計スクリプトが起動flakeを実行失敗と区別するためのマーカー (Issue #40)。
+    log "STACK_STARTUP_FAILED: controller_manager"
+    log "ERROR: controller_manager 起動タイムアウト（リトライ後も失敗）。ログ: ${CONTROLLER_LOG}"
     exit 1
   fi
-done
+fi
 
 # コントローラースポウン
 ros2 run controller_manager spawner joint_state_broadcaster \
