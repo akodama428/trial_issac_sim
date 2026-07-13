@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "control_msgs/action/follow_joint_trajectory.hpp"
+#include "control_msgs/msg/joint_trajectory_controller_state.hpp"
 #include "franka_ros2_control/motion_command_executor_core.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
@@ -23,6 +24,8 @@ using GoalHandleFollowJointTrajectory =
 constexpr char kMotionCommandTopic[] = "/tomato_harvest/motion_command";
 constexpr char kExecutionStatusTopic[] = "/tomato_harvest/execution_status";
 constexpr char kGripperClosedTopic[] = "/tomato_harvest/gripper_closed";
+constexpr char kDefaultControllerStateTopic[] =
+  "/joint_trajectory_controller/controller_state";
 // JTC の action 名は controller 名に依存するため parameter で受け取る。
 // 既定値は franka_controllers.yaml の joint_trajectory_controller に対応する。
 constexpr char kDefaultJointTrajectoryAction[] =
@@ -51,6 +54,8 @@ public:
     gripper_pub_ = create_publisher<std_msgs::msg::String>(kGripperClosedTopic, 10);
     const std::string joint_trajectory_action = declare_parameter<std::string>(
       "follow_joint_trajectory_action", kDefaultJointTrajectoryAction);
+    const std::string controller_state_topic = declare_parameter<std::string>(
+      "controller_state_topic", kDefaultControllerStateTopic);
     action_client_ =
       rclcpp_action::create_client<FollowJointTrajectory>(this, joint_trajectory_action);
 
@@ -58,6 +63,14 @@ public:
       kMotionCommandTopic,
       10,
       std::bind(&MotionCommandExecutorNode::on_motion_command, this, std::placeholders::_1));
+    controller_state_sub_ = create_subscription<
+      control_msgs::msg::JointTrajectoryControllerState>(
+      controller_state_topic, 10,
+      [this](const control_msgs::msg::JointTrajectoryControllerState::SharedPtr state) {
+        controller_state_joint_names_ = state->joint_names;
+        controller_state_desired_positions_ = state->reference.positions;
+        controller_state_actual_positions_ = state->feedback.positions;
+      });
 
     publish_status("idle");
   }
@@ -104,6 +117,7 @@ private:
   void send_trajectory(
     const franka_ros2_control::ParsedTrajectory & trajectory, const std::string & phase)
   {
+    const std::size_t generation = ++goal_generation_;
     if (goal_handle_) {
       ++cancel_count_;
       log_metric("trajectory_cancel_requested", phase, cancel_count_);
@@ -137,7 +151,13 @@ private:
 
     rclcpp_action::Client<FollowJointTrajectory>::SendGoalOptions options;
     options.goal_response_callback =
-      [this, phase](std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle) {
+      [this, phase, generation](std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle) {
+        if (generation != goal_generation_) {
+          if (goal_handle) {
+            action_client_->async_cancel_goal(goal_handle);
+          }
+          return;
+        }
         if (!goal_handle) {
           RCLCPP_WARN(get_logger(), "JTC goal rejected");
           log_metric("trajectory_aborted", phase);
@@ -147,11 +167,15 @@ private:
         goal_handle_ = std::move(goal_handle);
       };
     options.feedback_callback =
-      [this, phase](GoalHandleFollowJointTrajectory::SharedPtr,
+      [this, phase, generation](GoalHandleFollowJointTrajectory::SharedPtr,
         const std::shared_ptr<const FollowJointTrajectory::Feedback> feedback) {
+        if (generation != goal_generation_) {
+          return;
+        }
         tracking_error_peak_ = franka_ros2_control::update_tracking_error_peak(
           tracking_error_peak_, feedback->joint_names, feedback->error.positions,
           feedback->desired.positions, feedback->actual.positions);
+        tracking_error_peak_ = complete_abort_diagnostics(tracking_error_peak_);
         const auto sample = franka_ros2_control::tracking_error_sample(
           feedback->joint_names, feedback->error.positions,
           feedback->desired.positions, feedback->actual.positions);
@@ -159,9 +183,16 @@ private:
           publish_running_tracking_error(sample);
           log_metric("instantaneous_tracking_error_published", phase);
         }
+        if (feedback_seen_generation_ != generation) {
+          feedback_seen_generation_ = generation;
+          log_metric("trajectory_command_reflected", phase);
+        }
       };
     options.result_callback =
-      [this, phase](const GoalHandleFollowJointTrajectory::WrappedResult & result) {
+      [this, phase, generation](const GoalHandleFollowJointTrajectory::WrappedResult & result) {
+        if (generation != goal_generation_) {
+          return;
+        }
         goal_handle_.reset();
         switch (result.code) {
           case rclcpp_action::ResultCode::SUCCEEDED:
@@ -213,9 +244,18 @@ private:
     const std::string & abort_reason)
   {
     std_msgs::msg::String message;
-    message.data = franka_ros2_control::execution_status_json("aborted", peak, abort_reason);
+    message.data = franka_ros2_control::execution_status_json(
+      "aborted", complete_abort_diagnostics(peak), abort_reason);
     RCLCPP_INFO(get_logger(), "execution_status %s", message.data.c_str());
     status_pub_->publish(message);
+  }
+
+  franka_ros2_control::TrackingErrorPeak complete_abort_diagnostics(
+    franka_ros2_control::TrackingErrorPeak peak) const
+  {
+    return franka_ros2_control::complete_tracking_error_diagnostics(
+      std::move(peak), controller_state_joint_names_,
+      controller_state_desired_positions_, controller_state_actual_positions_);
   }
 
   void log_metric(
@@ -228,12 +268,19 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr status_pub_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr gripper_pub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr motion_command_sub_;
+  rclcpp::Subscription<control_msgs::msg::JointTrajectoryControllerState>::SharedPtr
+    controller_state_sub_;
   rclcpp_action::Client<FollowJointTrajectory>::SharedPtr action_client_;
   std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle_;
   franka_ros2_control::TrackingErrorPeak tracking_error_peak_;
+  std::vector<std::string> controller_state_joint_names_;
+  std::vector<double> controller_state_desired_positions_;
+  std::vector<double> controller_state_actual_positions_;
   std::optional<bool> gripper_closed_;
   std::size_t cancel_count_{0};
   std::size_t trajectory_replacement_count_{0};
+  std::size_t goal_generation_{0};
+  std::size_t feedback_seen_generation_{0};
 };
 
 }  // namespace
