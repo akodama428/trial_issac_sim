@@ -64,6 +64,14 @@ TrackingErrorPeak tracking_error_sample(
   const std::vector<double> & desired_positions_rad = {},
   const std::vector<double> & actual_positions_rad = {});
 
+// action feedbackで位置が欠けたabort診断を、JTC controller_stateの
+// reference/feedbackで補完する。peak自体が無い場合はcontroller stateから生成する。
+TrackingErrorPeak complete_tracking_error_diagnostics(
+  TrackingErrorPeak peak,
+  const std::vector<std::string> & joint_names,
+  const std::vector<double> & desired_positions_rad,
+  const std::vector<double> & actual_positions_rad);
+
 // FollowJointTrajectory result の error_code を安定した分類名へ変換する。
 std::string abort_reason_from_jtc(int error_code, const std::string & error_string);
 

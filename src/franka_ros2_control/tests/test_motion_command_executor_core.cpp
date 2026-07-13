@@ -142,6 +142,37 @@ TEST(TrackingErrorPeakTest, MissingPositionsKeepErrorTrackingOnly)
   EXPECT_FALSE(peak.has_positions);
 }
 
+TEST(TrackingErrorPeakTest, CompletesMissingAbortPositionsFromControllerState)
+{
+  auto peak = franka_ros2_control::update_tracking_error_peak(
+    {}, {"panda_joint1", "panda_joint3"}, {0.02, -0.40});
+
+  peak = franka_ros2_control::complete_tracking_error_diagnostics(
+    peak,
+    {"panda_joint1", "panda_joint3"},
+    {0.10, 2.40},
+    {0.08, 2.80});
+
+  ASSERT_TRUE(peak.has_positions);
+  EXPECT_EQ(peak.limiting_joint, "panda_joint3");
+  EXPECT_DOUBLE_EQ(peak.limiting_joint_desired_rad, 2.40);
+  EXPECT_DOUBLE_EQ(peak.limiting_joint_actual_rad, 2.80);
+}
+
+TEST(TrackingErrorPeakTest, BuildsAbortPeakFromControllerStateWithoutActionFeedback)
+{
+  const auto peak = franka_ros2_control::complete_tracking_error_diagnostics(
+    {},
+    {"panda_joint1", "panda_joint3"},
+    {0.10, 2.40},
+    {0.08, 2.80});
+
+  ASSERT_TRUE(peak.has_value);
+  ASSERT_TRUE(peak.has_positions);
+  EXPECT_DOUBLE_EQ(peak.max_error_rad, 0.40);
+  EXPECT_EQ(peak.limiting_joint, "panda_joint3");
+}
+
 TEST(AbortReasonTest, MapsJtcErrorCodesToStableNames)
 {
   EXPECT_EQ(franka_ros2_control::abort_reason_from_jtc(-4, ""), "path_tolerance_violated");

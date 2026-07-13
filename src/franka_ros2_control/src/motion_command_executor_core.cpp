@@ -158,6 +158,43 @@ TrackingErrorPeak tracking_error_sample(
     desired_positions_rad, actual_positions_rad);
 }
 
+TrackingErrorPeak complete_tracking_error_diagnostics(
+  TrackingErrorPeak peak,
+  const std::vector<std::string> & joint_names,
+  const std::vector<double> & desired_positions_rad,
+  const std::vector<double> & actual_positions_rad)
+{
+  if (
+    joint_names.size() != desired_positions_rad.size() ||
+    joint_names.size() != actual_positions_rad.size())
+  {
+    return peak;
+  }
+
+  if (!peak.has_value) {
+    std::vector<double> errors;
+    errors.reserve(joint_names.size());
+    for (std::size_t i = 0; i < joint_names.size(); ++i) {
+      errors.push_back(desired_positions_rad[i] - actual_positions_rad[i]);
+    }
+    return update_tracking_error_peak(
+      peak, joint_names, errors, desired_positions_rad, actual_positions_rad);
+  }
+
+  if (peak.has_positions) {
+    return peak;
+  }
+  for (std::size_t i = 0; i < joint_names.size(); ++i) {
+    if (joint_names[i] == peak.limiting_joint) {
+      peak.limiting_joint_desired_rad = desired_positions_rad[i];
+      peak.limiting_joint_actual_rad = actual_positions_rad[i];
+      peak.has_positions = true;
+      break;
+    }
+  }
+  return peak;
+}
+
 std::string abort_reason_from_jtc(int error_code, const std::string & error_string)
 {
   // control_msgs/FollowJointTrajectory Result のerror_code (0=SUCCESSFUL)。

@@ -34,13 +34,12 @@ joint_trajectory_controller:
     # Smooth interpolation between waypoints.
     interpolation_method: splines
 
-    # open_loop_control: true を使う理由:
-    # closed-loop (false) では JTC が「ゼロでホールド」へ速度命令を送り続けるため、
-    # Isaac Sim の物理エンジンが panda_joint4 を 0 まで動かしてしまう（可動域外）。
-    # open_loop_control: true ではポジション命令のみ送るため、Isaac Sim の USD
-    # 関節限界クランプが働き、起動時の意図しない動きが最小になる。
-    # write() 側でも URDF 境界クランプを追加してあるため多重の安全策がある。
-    open_loop_control: true
+    # abort後の新trajectoryは、hold前の古いcommandではなくIsaac Simの実測位置から
+    # 補間を開始する。deprecatedなopen_loop_controlは設定せず、Jazzyの正本parameter
+    # だけを明示する。
+    interpolate_from_desired_state: false
+    # controller再activate時も、残存commandではなくstate interfaceをseedにする。
+    set_last_command_interface_value_as_state_on_activation: false
     allow_partial_joints_goal: false
     allow_integration_in_goal_trajectories: true
 
@@ -52,14 +51,12 @@ joint_trajectory_controller:
       # 成果ベース遷移（tomato_status / 到達距離判定）で救済する。
       stopped_velocity_tolerance: 0.05
       goal_time: 5.0
-      # goal: 0.0 disables the final position tolerance check.
-      # In standalone mode (no Isaac Sim), the hardware interface does not
-      # simulate physics, so the robot never reaches the commanded position.
-      # Setting goal to 0.0 lets the JTC declare success at trajectory end.
-      panda_joint1: {goal: 0.0}
-      panda_joint2: {goal: 0.0}
-      panda_joint3: {goal: 0.0}
-      panda_joint4: {goal: 0.0}
-      panda_joint5: {goal: 0.0}
-      panda_joint6: {goal: 0.0}
-      panda_joint7: {goal: 0.0}
+      # plannerのtracking-error閾値と同じ0.10 rad以内、かつ停止速度0.05 rad/s
+      # 以内を5秒の猶予内に満たした場合だけsuccessとする。
+      panda_joint1: {goal: 0.10}
+      panda_joint2: {goal: 0.10}
+      panda_joint3: {goal: 0.10}
+      panda_joint4: {goal: 0.10}
+      panda_joint5: {goal: 0.10}
+      panda_joint6: {goal: 0.10}
+      panda_joint7: {goal: 0.10}
