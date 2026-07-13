@@ -121,17 +121,27 @@ bool should_abort_on_missing_trajectory(const std::string & command_name)
 TrackingErrorPeak update_tracking_error_peak(
   TrackingErrorPeak peak,
   const std::vector<std::string> & joint_names,
-  const std::vector<double> & error_positions_rad)
+  const std::vector<double> & error_positions_rad,
+  const std::vector<double> & desired_positions_rad,
+  const std::vector<double> & actual_positions_rad)
 {
   if (joint_names.size() != error_positions_rad.size()) {
     return peak;
   }
+  const bool positions_available =
+    desired_positions_rad.size() == joint_names.size() &&
+    actual_positions_rad.size() == joint_names.size();
   for (std::size_t i = 0; i < joint_names.size(); ++i) {
     const double error = std::abs(error_positions_rad[i]);
     if (!peak.has_value || error > peak.max_error_rad) {
       peak.max_error_rad = error;
       peak.limiting_joint = joint_names[i];
       peak.has_value = true;
+      peak.has_positions = positions_available;
+      if (positions_available) {
+        peak.limiting_joint_desired_rad = desired_positions_rad[i];
+        peak.limiting_joint_actual_rad = actual_positions_rad[i];
+      }
     }
   }
   return peak;
@@ -182,6 +192,10 @@ std::string execution_status_json(
   if (peak.has_value) {
     stream << ",\"max_joint_error_rad\":" << peak.max_error_rad
            << ",\"limiting_joint\":\"" << json_escape(peak.limiting_joint) << "\"";
+    if (peak.has_positions) {
+      stream << ",\"limiting_joint_desired_rad\":" << peak.limiting_joint_desired_rad
+             << ",\"limiting_joint_actual_rad\":" << peak.limiting_joint_actual_rad;
+    }
   }
   if (abort_reason.has_value()) {
     stream << ",\"abort_reason\":\"" << json_escape(*abort_reason) << "\"";

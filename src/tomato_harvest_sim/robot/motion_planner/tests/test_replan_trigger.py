@@ -8,6 +8,7 @@ from tomato_harvest_sim.msg.contracts import (
 from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     ReplanTrigger, TriggerMemory, evaluate_replan_trigger,
     parse_suffix_injection_phases, should_inject_suffix_replan,
+    should_plan_on_snapshot_arrival,
     trigger_starts_planner,
 )
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import PlannerState
@@ -65,6 +66,33 @@ class ReplanTriggerPolicyTest(unittest.TestCase):
             parse_suffix_injection_phases("returning_home"),
             frozenset({HarvestTaskPhase.RETURNING_HOME}),
         )
+
+
+class PlanOnSnapshotArrivalTest(unittest.TestCase):
+    """scene snapshot到着時の初期計画再トリガ判定 (Issue #37)。
+
+    snapshot未着のままtarget_foundで計画すると、tray・枝・茎が全て
+    原点にある合成sceneで計画してしまい、place姿勢のゴミ化と実障害物
+    未回避の軌道 (物理固着の原因) を生む。計画はsnapshotを持ってから行い、
+    未計画のままsnapshotが届いたら再トリガする。
+    """
+
+    def test_snapshot_arrival_triggers_pending_initial_plan(self) -> None:
+        self.assertTrue(should_plan_on_snapshot_arrival(
+            phase=HarvestTaskPhase.TARGET_FOUND, has_plan=False,
+        ))
+
+    def test_snapshot_arrival_does_not_replan_when_plan_exists(self) -> None:
+        self.assertFalse(should_plan_on_snapshot_arrival(
+            phase=HarvestTaskPhase.TARGET_FOUND, has_plan=True,
+        ))
+
+    def test_other_phases_do_not_trigger_initial_plan(self) -> None:
+        for phase in (HarvestTaskPhase.DETECTING, HarvestTaskPhase.MOVING_TO_PREGRASP, None):
+            with self.subTest(phase=phase):
+                self.assertFalse(should_plan_on_snapshot_arrival(
+                    phase=phase, has_plan=False,
+                ))
 
     def test_abort_starts_full_chain_planner_in_any_phase(self) -> None:
         self.assertTrue(trigger_starts_planner(

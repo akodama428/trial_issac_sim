@@ -20,6 +20,9 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     _moveit_link_target_pose_from_runtime_tool_pose,
     _trajectory_is_noop,
     _tomato_planning_scene_ops,
+    arm_joint_goal_from_ik_solution,
+    goal_joint_window,
+    ik_goal_is_near_seed,
 )
 
 
@@ -299,6 +302,91 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         clamped = _clamp_joint_state_to_bounds(home_state)
 
         self.assertEqual(clamped.positions_rad, home_state.positions_rad)
+
+    def test_goal_joint_window_covers_all_arm_joints(self) -> None:
+        """pose goalへ併置する窓は全arm関節を現在値中心で拘束する (Issue #37)。
+
+        joint1のみの窓では、goal samplingがjoint2/3で関節限界張り付きの
+        遠いIK枝を選ぶ経路が残っていた (place固着 joint2=0.82 radを実測)。
+        """
+        windows = goal_joint_window(_joint_state(), window_rad=1.5)
+
+        self.assertIsNotNone(windows)
+        assert windows is not None
+        self.assertEqual(len(windows), 7)
+        names = [name for name, _, _ in windows]
+        self.assertIn("panda_joint1", names)
+        self.assertIn("panda_joint3", names)
+        joint3 = next(w for w in windows if w[0] == "panda_joint3")
+        self.assertAlmostEqual(joint3[1], 0.0)   # 現在値中心
+        self.assertAlmostEqual(joint3[2], 1.5)   # 半幅
+
+    def test_goal_joint_window_disabled_by_zero_width(self) -> None:
+        self.assertIsNone(goal_joint_window(_joint_state(), window_rad=0.0))
+
+    def test_goal_joint_window_requires_arm_joints(self) -> None:
+        state = JointStateSnapshot(joint_names=("panda_finger_joint1",), positions_rad=(0.02,))
+        self.assertIsNone(goal_joint_window(state, window_rad=1.5))
+
+    def test_ik_solution_is_projected_to_arm_joints_in_order(self) -> None:
+        """seed付きIK解 (最近傍IK枝) からarm関節goalを組み立てる (Issue #37)。
+
+        /compute_ik の解はfinger等を含む全関節で返るため、arm関節だけを
+        指定順に取り出してjoint-space goalにする。
+        """
+        goal = arm_joint_goal_from_ik_solution(
+            solution_joint_names=(
+                "panda_finger_joint1", "panda_joint1", "panda_joint2",
+                "panda_joint3", "panda_joint4", "panda_joint5",
+                "panda_joint6", "panda_joint7", "panda_finger_joint2",
+            ),
+            solution_positions_rad=(0.02, 0.1, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8, 0.02),
+            arm_joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+        )
+
+        self.assertIsNotNone(goal)
+        assert goal is not None
+        self.assertEqual(goal.joint_names[0], "panda_joint1")
+        self.assertEqual(goal.positions_rad, (0.1, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8))
+
+    def test_far_ik_solution_is_rejected_by_nearness_guard(self) -> None:
+        """seedから遠いIK解 (別枝) は棄却する (Issue #37)。
+
+        avoid_collisions付きIKはseed解が衝突するとランダムリスタートで
+        任意の遠い解を返し、関節限界張り付きの異常構成 (joint3=2.897等) を
+        goalにしてしまう実害が観測された。距離ガードで最近傍枝だけを許す。
+        """
+        seed = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3"),
+            positions_rad=(0.35, -0.55, -0.25),
+        )
+        near = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3"),
+            positions_rad=(0.10, -0.30, 0.20),
+        )
+        far = JointStateSnapshot(
+            joint_names=("panda_joint1", "panda_joint2", "panda_joint3"),
+            positions_rad=(-0.39, 1.51, 2.897),
+        )
+
+        self.assertTrue(ik_goal_is_near_seed(seed=seed, goal=near, max_joint_delta_rad=1.5))
+        self.assertFalse(ik_goal_is_near_seed(seed=seed, goal=far, max_joint_delta_rad=1.5))
+
+    def test_nearness_guard_requires_matching_joints(self) -> None:
+        seed = JointStateSnapshot(joint_names=("panda_joint1",), positions_rad=(0.0,))
+        goal = JointStateSnapshot(joint_names=("panda_joint2",), positions_rad=(0.0,))
+        self.assertFalse(ik_goal_is_near_seed(seed=seed, goal=goal, max_joint_delta_rad=1.5))
+
+    def test_ik_solution_missing_arm_joint_is_rejected(self) -> None:
+        goal = arm_joint_goal_from_ik_solution(
+            solution_joint_names=("panda_joint1",),
+            solution_positions_rad=(0.1,),
+            arm_joint_names=("panda_joint1", "panda_joint2"),
+        )
+        self.assertIsNone(goal)
 
     def test_noop_trajectory_is_detected(self) -> None:
         self.assertTrue(

@@ -38,6 +38,7 @@ docker run --rm \
   -e TOMATO_HARVEST_PLANNING_DIAGNOSTIC_DIR=/tmp/tomato-harvest-ci-artifacts/planning-diagnostics \
   -e TOMATO_HARVEST_INITIAL_POSE_ID="${TOMATO_HARVEST_INITIAL_POSE_ID:-default}" \
   -e TOMATO_HARVEST_DEBUG_PHYSICS_GRASP="${TOMATO_HARVEST_DEBUG_PHYSICS_GRASP:-}" \
+  -e TOMATO_HARVEST_DEBUG_TRAJECTORY="${TOMATO_HARVEST_DEBUG_TRAJECTORY:-}" \
   -e PYTHONDONTWRITEBYTECODE=1 \
   -e HOME=/tmp/tomato-harvest-ci-home \
   -e XDG_CACHE_HOME=/tmp/tomato-harvest-ci-home/.cache \

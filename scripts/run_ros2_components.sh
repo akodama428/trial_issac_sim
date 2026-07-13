@@ -355,8 +355,8 @@ start_bg "motion_command_node" \
 # INJECT_* は外乱注入E2E用、LOCAL_PLANNER_PHASES は通常運転での有効化。
 if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" || -n "${TOMATO_HARVEST_LOCAL_PLANNER_PHASES:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  start_bg "local_planner_stub_node" \
-    python3 -m tomato_harvest_sim.robot.motion_planner.local_planner_stub \
+  start_bg "local_planner_node" \
+    python3 -m tomato_harvest_sim.robot.motion_planner.local_planner \
     >> "${ROBOT_LOG}" 2>&1
 fi
 

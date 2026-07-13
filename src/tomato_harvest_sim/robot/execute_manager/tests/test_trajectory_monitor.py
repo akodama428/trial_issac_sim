@@ -49,6 +49,22 @@ class TestTrajectoryStatusPayload(unittest.TestCase):
         self.assertEqual(payload["limiting_joint"], "panda_joint4")
         self.assertEqual(payload["abort_reason"], "goal_tolerance_violated")
 
+    def test_peak_position_fields_are_forwarded(self) -> None:
+        """固着調査用の律速joint目標/実位置 (Issue #37) を下流へ通す。"""
+        raw = json.dumps({
+            "status": "aborted",
+            "max_joint_error_rad": 2.4,
+            "limiting_joint": "panda_joint3",
+            "limiting_joint_desired_rad": 0.0,
+            "limiting_joint_actual_rad": 2.4,
+            "abort_reason": "goal_tolerance_violated",
+        })
+
+        payload = json.loads(trajectory_status_payload(raw))
+
+        self.assertAlmostEqual(payload["limiting_joint_desired_rad"], 0.0)
+        self.assertAlmostEqual(payload["limiting_joint_actual_rad"], 2.4)
+
     def test_json_succeeded_maps_to_ok_without_diagnostics(self) -> None:
         raw = json.dumps({"status": "succeeded"})
         payload = json.loads(trajectory_status_payload(raw))

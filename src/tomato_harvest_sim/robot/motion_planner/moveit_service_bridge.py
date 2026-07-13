@@ -16,7 +16,7 @@ from tomato_harvest_sim.msg.contracts import (
     TargetEstimate,
     TfTreeSnapshot,
 )
-from tomato_harvest_sim.msg.topics import home_joint_state
+from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, home_joint_state
 from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_TRAJECTORY_FIELD_BY_PHASE,
@@ -51,6 +51,78 @@ class _MotionPlanOutcome:
     trajectory: JointTrajectory | None
     error_code: int | None
     failure_reason: str | None
+
+
+def arm_joint_goal_from_ik_solution(
+    *,
+    solution_joint_names: tuple[str, ...],
+    solution_positions_rad: tuple[float, ...],
+    arm_joint_names: tuple[str, ...],
+) -> JointStateSnapshot | None:
+    """seed付きIK解からarm関節のjoint-space goalを組み立てる (Issue #37)。
+
+    /compute_ik はfinger等を含む全関節stateで解を返すため、計画groupの
+    arm関節だけを指定順に射影する。欠落があればNone (pose goalへfallback)。
+    """
+    by_name = dict(zip(solution_joint_names, solution_positions_rad))
+    if any(name not in by_name for name in arm_joint_names):
+        return None
+    return JointStateSnapshot(
+        joint_names=arm_joint_names,
+        positions_rad=tuple(float(by_name[name]) for name in arm_joint_names),
+    )
+
+
+def ik_goal_is_near_seed(
+    *,
+    seed: JointStateSnapshot,
+    goal: JointStateSnapshot,
+    max_joint_delta_rad: float,
+) -> bool:
+    """IK解がseedの最近傍枝かを距離で判定する (Issue #37)。
+
+    avoid_collisions付きIKはseed解が衝突するとランダムリスタートで遠い枝を
+    返すことがあり、関節限界張り付きの異常構成をgoalにする実害があった。
+    seedと共通する全関節の差が閾値内の解だけを最近傍枝として受理する。
+    """
+    seed_by_name = dict(zip(seed.joint_names, seed.positions_rad))
+    common = [name for name in goal.joint_names if name in seed_by_name]
+    if not common:
+        return False
+    goal_by_name = dict(zip(goal.joint_names, goal.positions_rad))
+    return all(
+        abs(goal_by_name[name] - seed_by_name[name]) <= max_joint_delta_rad
+        for name in common
+    )
+
+
+def goal_joint_window(
+    joint_state: JointStateSnapshot, *, window_rad: float
+) -> tuple[tuple[str, float, float], ...] | None:
+    """pose goalへ併置する、全arm関節の許容窓を返す (Issue #37)。
+
+    OMPLのgoal IKサンプリングは同じ手先poseに対して遠いIK枝を選ぶことがあり、
+    JTCが追従・保持できない関節限界近傍の軌道 (goal_tolerance_violated) を生む。
+    goal制約へ「各arm関節は現在値±窓」を併置して近いIK枝だけを許す。
+    base関節 (joint1) のみの窓では、joint2/3側で関節限界へ張り付く遠い枝を
+    許してしまう経路が残るため、全arm関節を対象にする。
+    窓内に解が無い場合に備え、呼び出し側は窓なしの再試行を持つこと。
+
+    Args:
+        joint_state: 現在の関節状態。
+        window_rad: 関節あたりの許容半幅 [rad]。0以下で無効。
+
+    Returns:
+        (関節名, 中心値, 許容半幅) のtuple列。無効時やarm関節が無い場合はNone。
+    """
+    if window_rad <= 0.0:
+        return None
+    windows = tuple(
+        (name, float(position), float(window_rad))
+        for name, position in zip(joint_state.joint_names, joint_state.positions_rad)
+        if name in DEFAULT_JOINT_NAMES
+    )
+    return windows or None
 
 class MoveIt2ServiceBridgePlanner(MotionPlanner):
     """MoveIt2-aware planner that applies a planning scene and returns joint trajectories."""
@@ -182,6 +254,20 @@ class Ros2MoveIt2PlannerBridge:
         self._position_tolerance_m = float(os.environ.get("TOMATO_HARVEST_MOVEIT_POSITION_TOLERANCE_M", position_tolerance_m))
         self._orientation_tolerance_rad = float(
             os.environ.get("TOMATO_HARVEST_MOVEIT_ORIENTATION_TOLERANCE_RAD", orientation_tolerance_rad)
+        )
+        # pose goalのIK枝を現在構成の近傍へ制限する窓 (Issue #37)。0で無効。
+        # 実測した限界フリップ枝の関節差は約3.1 radで、2.2はそれを排除しつつ
+        # 正当な遷移 (~2 rad) とgoal samplerの探索余地を確保する。
+        self._goal_joint1_window_rad = float(os.environ.get(
+            "TOMATO_HARVEST_MOVEIT_GOAL_JOINT1_WINDOW_RAD", "2.2"
+        ))
+        # seed付きIKで最近傍IK枝を先に確定し、joint-space goalで計画する
+        # (Issue #37)。goal samplingの枝選択非決定性を排除する。
+        self._seeded_ik_goal_enabled = os.environ.get(
+            "TOMATO_HARVEST_MOVEIT_SEEDED_IK_GOAL", "1"
+        ).strip() not in {"0", "false", "False"}
+        self._ik_service_name = os.environ.get(
+            "TOMATO_HARVEST_MOVEIT_IK_SERVICE", "/compute_ik"
         )
         self._enforce_orientation_constraint = os.environ.get(
             "TOMATO_HARVEST_MOVEIT_ENFORCE_ORIENTATION",
@@ -586,28 +672,47 @@ class Ros2MoveIt2PlannerBridge:
             attach_tomato=attach_tomato,
         ):
             return None
-        request = self._build_motion_plan_request(
+        # 最近傍IK枝の決定的選択 (Issue #37): 現在姿勢をseedにIKを解き、
+        # その関節構成へのjoint-space goalで計画する。goal samplingの
+        # 枝選択非決定性 (JTCが追従できないbase大旋回) を排除する。
+        if self._seeded_ik_goal_enabled:
+            trajectory = self._plan_seeded_ik_goal(
+                clients=clients,
+                joint_state=joint_state,
+                base_frame_id=base_frame_id,
+                target_pose=target_pose,
+                phase_label=phase_label,
+            )
+            if trajectory is not None:
+                return trajectory
+
+        # IKが解けない・joint計画が失敗した場合は、近いIK枝を優先する窓付き
+        # pose goalで試行し、解が無ければ窓なしで再試行する。
+        joint_window = goal_joint_window(
+            joint_state, window_rad=self._goal_joint1_window_rad
+        )
+        outcome = self._plan_pose_goal(
+            clients=clients,
             joint_state=joint_state,
             base_frame_id=base_frame_id,
             target_pose=target_pose,
+            joint_window=joint_window,
         )
-        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        if outcome.trajectory is None and joint_window is not None:
+            print(
+                f"[MoveItBridge] goal_joint_window exhausted phase={phase_label} "
+                f"window_rad={joint_window[0][2]} — retrying without window",
+                flush=True,
+            )
+            outcome = self._plan_pose_goal(
+                clients=clients,
+                joint_state=joint_state,
+                base_frame_id=base_frame_id,
+                target_pose=target_pose,
+                joint_window=None,
+            )
         trajectory = outcome.trajectory
         failure_reason = outcome.failure_reason
-        if trajectory is not None and _trajectory_is_noop(
-            trajectory,
-            start_joint_state=joint_state,
-            tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
-        ):
-            self._debug_log(
-                "[MoveItBridge] rejecting no-op trajectory and falling back to geometric execution. "
-                f"ee_link={self._end_effector_link} "
-                f"target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f}) "
-                f"start_q={joint_state.positions_rad} "
-                f"end_q={trajectory.points[-1].positions_rad}"
-            )
-            trajectory = None
-            failure_reason = "noop_trajectory"
         if trajectory is None:
             self._debug_log(
                 f"[MoveItBridge] phase planning failed: ee_link={self._end_effector_link} "
@@ -639,6 +744,134 @@ class Ros2MoveIt2PlannerBridge:
             f"end_q={trajectory.points[-1].positions_rad}"
         )
         return trajectory
+
+    def _plan_seeded_ik_goal(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        target_pose: Pose3D,
+        phase_label: str,
+    ) -> JointTrajectory | None:
+        """seed付きIKで最近傍IK枝を確定し、joint-space goalで計画する (Issue #37)。
+
+        失敗時はNoneを返し、呼び出し側が窓付きpose goalへfallbackする。
+        planning sceneは適用済みであること (avoid_collisions=Trueで参照される)。
+        """
+        moveit_target_pose = _moveit_link_target_pose_from_runtime_tool_pose(
+            target_pose,
+            link_to_tool_offset_m=self.MOVEIT_LINK_TO_RUNTIME_TOOL_OFFSET_M,
+        )
+        quaternion = _quaternion_from_pose(moveit_target_pose)
+        target_xyz = (
+            float(moveit_target_pose.x),
+            float(moveit_target_pose.y),
+            float(moveit_target_pose.z),
+        )
+        target_xyzw = (
+            float(quaternion.x), float(quaternion.y),
+            float(quaternion.z), float(quaternion.w),
+        )
+        # KDLはseedによっては遠い枝へ収束するため、複数seed (現在構成×2、
+        # home構成) で試行し、現在構成の近傍に収まる解だけを採用する。
+        goal_joint_state: JointStateSnapshot | None = None
+        for seed in (joint_state, joint_state, home_joint_state()):
+            ik_solution = clients.compute_nearest_ik(
+                seed_joint_state=seed,
+                base_frame_id=base_frame_id,
+                target_pose_xyz=target_xyz,
+                target_orientation_xyzw=target_xyzw,
+                group_name=self._group_name,
+                timeout_sec=self._planning_timeout_sec,
+            )
+            if ik_solution is None:
+                continue
+            candidate = arm_joint_goal_from_ik_solution(
+                solution_joint_names=ik_solution.joint_names,
+                solution_positions_rad=ik_solution.positions_rad,
+                arm_joint_names=DEFAULT_JOINT_NAMES,
+            )
+            if candidate is None:
+                continue
+            if ik_goal_is_near_seed(
+                seed=joint_state,
+                goal=candidate,
+                max_joint_delta_rad=self._goal_joint1_window_rad,
+            ):
+                goal_joint_state = candidate
+                break
+            print(
+                f"[MoveItBridge] seeded_ik solution rejected as far branch "
+                f"phase={phase_label} goal_q={candidate.positions_rad}",
+                flush=True,
+            )
+        if goal_joint_state is None:
+            print(
+                f"[MoveItBridge] seeded_ik unsolved or far phase={phase_label} "
+                "— falling back to pose goal",
+                flush=True,
+            )
+            return None
+        request = self._build_joint_goal_motion_plan_request(
+            joint_state=joint_state,
+            base_frame_id=base_frame_id,
+            goal_joint_state=goal_joint_state,
+        )
+        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        trajectory = outcome.trajectory
+        if trajectory is not None and _trajectory_is_noop(
+            trajectory,
+            start_joint_state=joint_state,
+            tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
+        ):
+            trajectory = None
+        if trajectory is None:
+            print(
+                f"[MoveItBridge] seeded_ik goal plan failed phase={phase_label} "
+                f"reason={outcome.failure_reason} error_code={outcome.error_code} "
+                "— falling back to pose goal",
+                flush=True,
+            )
+            return None
+        print(
+            f"[MoveItBridge] seeded_ik goal plan succeeded phase={phase_label} "
+            f"points={len(trajectory.points)} goal_q={goal_joint_state.positions_rad}",
+            flush=True,
+        )
+        return trajectory
+
+    def _plan_pose_goal(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        target_pose: Pose3D,
+        joint_window: tuple[tuple[str, float, float], ...] | None,
+    ) -> _MotionPlanOutcome:
+        """pose goal計画1回分 (request構築→service→no-op検査) を実行する。"""
+        request = self._build_motion_plan_request(
+            joint_state=joint_state,
+            base_frame_id=base_frame_id,
+            target_pose=target_pose,
+            joint_window=joint_window,
+        )
+        outcome = clients.plan_motion(request, timeout_sec=self._planning_timeout_sec)
+        if outcome.trajectory is not None and _trajectory_is_noop(
+            outcome.trajectory,
+            start_joint_state=joint_state,
+            tolerance_rad=self.NOOP_TRAJECTORY_TOLERANCE_RAD,
+        ):
+            self._debug_log(
+                "[MoveItBridge] rejecting no-op trajectory and falling back to geometric execution. "
+                f"ee_link={self._end_effector_link} "
+                f"target_xyz=({target_pose.x:.4f}, {target_pose.y:.4f}, {target_pose.z:.4f}) "
+                f"start_q={joint_state.positions_rad} "
+                f"end_q={outcome.trajectory.points[-1].positions_rad}"
+            )
+            return _MotionPlanOutcome(None, outcome.error_code, "noop_trajectory")
+        return outcome
 
     def _apply_phase_planning_scene(
         self,
@@ -778,11 +1011,13 @@ class Ros2MoveIt2PlannerBridge:
         joint_state: JointStateSnapshot,
         base_frame_id: str,
         target_pose: Pose3D,
+        joint_window: tuple[tuple[str, float, float], ...] | None = None,
     ) -> object:
         from geometry_msgs.msg import Pose
         from moveit_msgs.msg import (
             BoundingVolume,
             Constraints,
+            JointConstraint,
             OrientationConstraint,
             PositionConstraint,
         )
@@ -826,6 +1061,19 @@ class Ros2MoveIt2PlannerBridge:
             orientation_constraint.absolute_z_axis_tolerance = self._orientation_tolerance_rad
             orientation_constraint.weight = 1.0
             goal_constraints.orientation_constraints = [orientation_constraint]
+
+        # 近いIK枝だけを許す全arm関節窓 (Issue #37)。pose拘束とANDで効く。
+        if joint_window is not None:
+            constraints = []
+            for window_name, window_center, window_half_rad in joint_window:
+                window_constraint = JointConstraint()
+                window_constraint.joint_name = window_name
+                window_constraint.position = window_center
+                window_constraint.tolerance_above = window_half_rad
+                window_constraint.tolerance_below = window_half_rad
+                window_constraint.weight = 1.0
+                constraints.append(window_constraint)
+            goal_constraints.joint_constraints = constraints
 
         motion_plan_request = self._new_motion_plan_request(
             joint_state=joint_state, base_frame_id=base_frame_id
@@ -931,6 +1179,7 @@ class Ros2MoveIt2PlannerBridge:
                 motion_plan_service_name=self._service_name,
                 planning_scene_service_name=self._scene_service_name,
                 state_validity_service_name=self._state_validity_service_name,
+                ik_service_name=self._ik_service_name,
             )
         except Exception:
             self._clients = None
@@ -948,9 +1197,12 @@ class _Ros2MoveIt2Clients:
         motion_plan_service_name: str,
         planning_scene_service_name: str,
         state_validity_service_name: str = "/check_state_validity",
+        ik_service_name: str = "/compute_ik",
     ) -> None:
         import rclpy
-        from moveit_msgs.srv import ApplyPlanningScene, GetMotionPlan, GetStateValidity
+        from moveit_msgs.srv import (
+            ApplyPlanningScene, GetMotionPlan, GetPositionIK, GetStateValidity,
+        )
         from rclpy.executors import SingleThreadedExecutor
 
         self._rclpy = rclpy
@@ -962,6 +1214,7 @@ class _Ros2MoveIt2Clients:
         self._state_validity_client = self._node.create_client(
             GetStateValidity, state_validity_service_name
         )
+        self._ik_client = self._node.create_client(GetPositionIK, ik_service_name)
         # robot_node の executor とは独立した専用 executor で spin する。
         # rclpy.spin_until_future_complete() はデフォルト executor を使うため、
         # robot_node の rclpy.spin() 内から呼ぶと "Executor is already spinning" になる。
@@ -1028,6 +1281,59 @@ class _Ros2MoveIt2Clients:
             return _MotionPlanOutcome(planned_trajectory, error_code, None)
         print("[MoveItBridge] motion plan response had an empty joint trajectory.", flush=True)
         return _MotionPlanOutcome(None, error_code, "empty_trajectory")
+
+    def compute_nearest_ik(
+        self,
+        *,
+        seed_joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        target_pose_xyz: tuple[float, float, float],
+        target_orientation_xyzw: tuple[float, float, float, float],
+        group_name: str,
+        timeout_sec: float,
+    ) -> JointStateSnapshot | None:
+        """現在姿勢をseedに、目標poseの最近傍IK解を求める (Issue #37)。
+
+        反復IK (KDL) はseedから最も近い解へ収束するため、goal samplingの
+        枝選択非決定性を排さずに「最小コストのIK枝」を決定的に得られる。
+        avoid_collisions=Trueでplanning scene上の衝突解は棄却される。
+        """
+        from moveit_msgs.srv import GetPositionIK
+        from sensor_msgs.msg import JointState
+
+        if not self._ik_client.wait_for_service(timeout_sec=timeout_sec):
+            return None
+        request = GetPositionIK.Request()
+        request.ik_request.group_name = group_name
+        # avoid_collisions=True はseed解が衝突するとランダムリスタートで遠い枝を
+        # 返す (関節限界張り付きの異常構成を実測)。ここでは純粋なseed収束解を
+        # 取り、衝突チェックは後段のjoint goal計画に委ねる (Issue #37)。
+        request.ik_request.avoid_collisions = False
+        request.ik_request.robot_state.joint_state = JointState()
+        request.ik_request.robot_state.joint_state.name = list(seed_joint_state.joint_names)
+        request.ik_request.robot_state.joint_state.position = [
+            float(v) for v in seed_joint_state.positions_rad
+        ]
+        request.ik_request.pose_stamped.header.frame_id = base_frame_id
+        request.ik_request.pose_stamped.pose.position.x = target_pose_xyz[0]
+        request.ik_request.pose_stamped.pose.position.y = target_pose_xyz[1]
+        request.ik_request.pose_stamped.pose.position.z = target_pose_xyz[2]
+        request.ik_request.pose_stamped.pose.orientation.x = target_orientation_xyzw[0]
+        request.ik_request.pose_stamped.pose.orientation.y = target_orientation_xyzw[1]
+        request.ik_request.pose_stamped.pose.orientation.z = target_orientation_xyzw[2]
+        request.ik_request.pose_stamped.pose.orientation.w = target_orientation_xyzw[3]
+        future = self._ik_client.call_async(request)
+        self._spin_until_done(future, timeout_sec=timeout_sec)
+        if not future.done():
+            return None
+        response = future.result()
+        if response is None or int(response.error_code.val) != 1:
+            return None
+        solution = response.solution.joint_state
+        return JointStateSnapshot(
+            joint_names=tuple(str(name) for name in solution.name),
+            positions_rad=tuple(float(v) for v in solution.position),
+        )
 
     def check_state_validity(
         self,

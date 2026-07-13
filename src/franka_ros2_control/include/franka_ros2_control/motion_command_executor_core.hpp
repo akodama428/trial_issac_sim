@@ -41,13 +41,21 @@ struct TrackingErrorPeak
   double max_error_rad{0.0};
   std::string limiting_joint;
   bool has_value{false};
+  // Issue #37: ピーク時点の律速jointの目標値・実位置。関節限界近傍での
+  // 固着かどうかを実位置から直接判定するために記録する。
+  double limiting_joint_desired_rad{0.0};
+  double limiting_joint_actual_rad{0.0};
+  bool has_positions{false};
 };
 
 // JTC feedback 1回分の関節誤差でピークを更新する。配列長不一致のsampleは無視する。
+// desired/actual は省略可能で、誤差配列と同じ長さのときだけピークへ記録される。
 TrackingErrorPeak update_tracking_error_peak(
   TrackingErrorPeak peak,
   const std::vector<std::string> & joint_names,
-  const std::vector<double> & error_positions_rad);
+  const std::vector<double> & error_positions_rad,
+  const std::vector<double> & desired_positions_rad = {},
+  const std::vector<double> & actual_positions_rad = {});
 
 // FollowJointTrajectory result の error_code を安定した分類名へ変換する。
 std::string abort_reason_from_jtc(int error_code, const std::string & error_string);

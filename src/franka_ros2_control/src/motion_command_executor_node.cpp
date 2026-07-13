@@ -150,7 +150,8 @@ private:
       [this](GoalHandleFollowJointTrajectory::SharedPtr,
         const std::shared_ptr<const FollowJointTrajectory::Feedback> feedback) {
         tracking_error_peak_ = franka_ros2_control::update_tracking_error_peak(
-          tracking_error_peak_, feedback->joint_names, feedback->error.positions);
+          tracking_error_peak_, feedback->joint_names, feedback->error.positions,
+          feedback->desired.positions, feedback->actual.positions);
       };
     options.result_callback =
       [this, phase](const GoalHandleFollowJointTrajectory::WrappedResult & result) {
