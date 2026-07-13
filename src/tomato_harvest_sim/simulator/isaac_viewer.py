@@ -187,7 +187,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         _start_timeline_playback()
         _pump_updates(simulation_app.update, frame_count=4)
         _wait_for_first_frame(simulation_app=simulation_app, max_frames=240)
-        franka_driver = IsaacFrankaDriver(robot_prim_path=plan.robot_prim_path)
+        import os as _os
+        franka_driver = IsaacFrankaDriver(
+            robot_prim_path=plan.robot_prim_path,
+            # 関節指令と実位置の対応を毎tick記録する (Issue #37 固着調査)。
+            trajectory_debug_enabled=_os.environ.get(
+                "TOMATO_HARVEST_DEBUG_TRAJECTORY", ""
+            ).strip() not in {"", "0", "false", "False"},
+        )
         _initialize_robot_to_home(simulation_app=simulation_app, franka_driver=franka_driver)
         from tomato_harvest_sim.simulator.isaac_joint_ros2_bridge import IsaacJointRos2Bridge
         isaac_joint_bridge = IsaacJointRos2Bridge(driver=franka_driver)
