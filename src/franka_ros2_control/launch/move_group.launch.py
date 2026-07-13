@@ -15,6 +15,7 @@ move_group が提供するサービス:
 from __future__ import annotations
 
 import os
+import xml.etree.ElementTree as ET
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
@@ -30,6 +31,27 @@ def _load_text(path: str) -> str:
 def _load_yaml(path: str) -> dict:
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def _safety_observation_urdf(kinematic_urdf: str) -> str:
+    """安全観測node専用の保守的なprimitive collision modelを付与する。"""
+    root = ET.fromstring(kinematic_urdf)
+    sphere_radii = {
+        "panda_link0": 0.09, "panda_link1": 0.075, "panda_link2": 0.075,
+        "panda_link3": 0.07, "panda_link4": 0.07, "panda_link5": 0.065,
+        "panda_link6": 0.06, "panda_link7": 0.055, "panda_hand": 0.07,
+    }
+    for link in root.findall("link"):
+        radius = sphere_radii.get(link.attrib.get("name", ""))
+        if radius is not None:
+            geometry = ET.SubElement(ET.SubElement(link, "collision"), "geometry")
+            ET.SubElement(geometry, "sphere", {"radius": str(radius)})
+        elif link.attrib.get("name") in {"panda_leftfinger", "panda_rightfinger"}:
+            collision = ET.SubElement(link, "collision")
+            ET.SubElement(collision, "origin", {"xyz": "0 0 0.025"})
+            geometry = ET.SubElement(collision, "geometry")
+            ET.SubElement(geometry, "box", {"size": "0.018 0.018 0.05"})
+    return ET.tostring(root, encoding="unicode")
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -69,4 +91,20 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    return LaunchDescription([move_group_node])
+    safety_observation_node = Node(
+        package="franka_ros2_control",
+        executable="local_safety_observation_node",
+        name="local_safety_observation_node",
+        output="screen",
+        parameters=[
+            {"robot_description": _safety_observation_urdf(urdf_content)},
+            {"robot_description_semantic": srdf_content},
+            {"robot_description_kinematics": kinematics},
+            {"move_group_name": "panda_arm"},
+            {"tip_link_name": "panda_hand"},
+            {"publish_rate_hz": 20.0},
+            {"use_sim_time": False},
+        ],
+    )
+
+    return LaunchDescription([move_group_node, safety_observation_node])

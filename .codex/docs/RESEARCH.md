@@ -271,6 +271,24 @@ Custom Docker Container
   - https://moveit.picknik.ai/main/doc/examples/time_parameterization/time_parameterization_tutorial.html
   - https://moveit.picknik.ai/main/doc/concepts/trajectory_processing.html
 
+## 23. Issue #46-2 PlanningScene / Jacobian safety observation adapter
+
+- 調査日: 2026-07-14
+- 対象バージョン: MoveIt 2 Jazzy実行環境、MoveIt 2 main公式API（2026-07-14閲覧）
+- 確認済みの事実:
+  - `PlanningScene::distanceToCollision(robot_state)`は、Allowed Collision Matrixを考慮したrobotとworldの最近接距離を返す。公式APIはこの関数がself-collisionを含まないことも明記している。
+  - `PlanningScene::isStateColliding()`はenvironment collisionとself-collisionの双方を判定する。
+  - `RobotState::getJacobian()`は指定JointModelGroupとtip linkについてJacobianを計算できる。
+  - PlanningSceneMonitorはscene monitorとcurrent state monitorを開始し、monitored planning sceneとjoint statesから最新snapshotを維持できる。
+- 設計への反映:
+  - adapter nodeは`distanceToCollision()`をworld proximity、`isStateColliding()`を衝突時の0 m化、translational Jacobianのcondition numberをsingularity指標に用いる。
+  - condition number 17を減速開始、30をhard stopとするMoveIt Servo既定値の区間を0〜1へ正規化する。
+  - global MoveIt planningは従来のgeometryなしURDFを維持し、adapterだけに保守的primitive collision modelを渡す。把持の意図的接触をglobal plannerが拒否する回帰を避けるためである。
+- 一次情報:
+  - https://github.com/moveit/moveit2/blob/main/moveit_core/planning_scene/include/moveit/planning_scene/planning_scene.hpp
+  - https://moveit.picknik.ai/main/doc/examples/visualizing_collisions/visualizing_collisions_tutorial.html
+  - https://github.com/frankarobotics/franka_description
+
 ## 19. Step 6 local planner初期導入の境界
 
 - 調査日: 2026-07-12

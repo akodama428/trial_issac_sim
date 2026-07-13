@@ -236,6 +236,7 @@ def main() -> None:
                 "TOMATO_HARVEST_LOCAL_SOLVER", "safe_online"
             ).strip().lower()
             self._safety_observation = SafetyObservation()
+            self._safety_status_received = False
             from tomato_harvest_sim.robot.motion_planner.hybrid_event import LocalEventMemory
             self._event_memory = LocalEventMemory()
             self._latest_plan: HarvestMotionPlan | None = None
@@ -271,6 +272,13 @@ def main() -> None:
                     singularity_measure=(None if payload.get("singularity_measure") is None
                                          else float(payload["singularity_measure"])),
                 )
+                if not self._safety_status_received:
+                    self._safety_status_received = True
+                    self.get_logger().info(metric_line(
+                        "local_safety_status_received",
+                        collision_clearance_m=self._safety_observation.collision_clearance_m,
+                        singularity_measure=self._safety_observation.singularity_measure,
+                    ))
             except (TypeError, ValueError, json.JSONDecodeError):
                 self.get_logger().info(metric_line(
                     "local_safety_status_rejected", reason="invalid_payload"
