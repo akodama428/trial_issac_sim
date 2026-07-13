@@ -73,6 +73,34 @@ def arm_joint_goal_from_ik_solution(
     )
 
 
+def should_start_via_home(
+    joint_state: JointStateSnapshot, *, threshold_rad: float
+) -> bool:
+    """home構成との差が大きい初期姿勢からはhome経由で開始するか判定する (Issue #39)。
+
+    伸展特異姿勢近傍などhomeから遠い構成では、seed収束IKも窓付きgoal samplerも
+    安定しない。home構成への移動は関節空間goal (IK不要) で確実に計画できるため、
+    最大関節差が閾値を超える場合はhomeを経由してから通常の接近に乗せる。
+
+    Args:
+        joint_state: 現在の関節状態。
+        threshold_rad: home構成との最大関節差の閾値。0以下で無効。
+
+    Returns:
+        home経由で開始すべきならTrue。
+    """
+    if threshold_rad <= 0.0:
+        return False
+    home = home_joint_state()
+    home_by_name = dict(zip(home.joint_names, home.positions_rad))
+    deltas = [
+        abs(position - home_by_name[name])
+        for name, position in zip(joint_state.joint_names, joint_state.positions_rad)
+        if name in home_by_name
+    ]
+    return bool(deltas) and max(deltas) > threshold_rad
+
+
 def ik_goal_is_near_seed(
     *,
     seed: JointStateSnapshot,
@@ -269,6 +297,11 @@ class Ros2MoveIt2PlannerBridge:
         self._ik_service_name = os.environ.get(
             "TOMATO_HARVEST_MOVEIT_IK_SERVICE", "/compute_ik"
         )
+        # home構成との最大関節差がこの閾値を超える初期姿勢はhome経由で開始する
+        # (Issue #39)。10ケースではnear_singularity_extended (差2.0 rad) のみ該当。
+        self._home_via_threshold_rad = float(os.environ.get(
+            "TOMATO_HARVEST_HOME_VIA_THRESHOLD_RAD", "1.2"
+        ))
         self._enforce_orientation_constraint = os.environ.get(
             "TOMATO_HARVEST_MOVEIT_ENFORCE_ORIENTATION",
             "1",
@@ -315,15 +348,27 @@ class Ros2MoveIt2PlannerBridge:
         planning_scene_object_ids = _planning_scene_object_ids()
         current_joint_state = _clamp_joint_state_to_bounds(joint_state)
 
-        pregrasp_trajectory = self._plan_phase(
-            clients=clients,
-            joint_state=current_joint_state,
-            base_frame_id=base_frame_id,
-            scene_snapshot=scene_snapshot,
-            target_pose=plan.pregrasp_pose,
-            attach_tomato=False,
-            phase_label="pregrasp",
-        )
+        pregrasp_trajectory = None
+        if should_start_via_home(
+            current_joint_state, threshold_rad=self._home_via_threshold_rad
+        ):
+            pregrasp_trajectory = self._plan_pregrasp_via_home(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                pregrasp_pose=plan.pregrasp_pose,
+            )
+        if pregrasp_trajectory is None:
+            pregrasp_trajectory = self._plan_phase(
+                clients=clients,
+                joint_state=current_joint_state,
+                base_frame_id=base_frame_id,
+                scene_snapshot=scene_snapshot,
+                target_pose=plan.pregrasp_pose,
+                attach_tomato=False,
+                phase_label="pregrasp",
+            )
         if pregrasp_trajectory is None:
             return self._fallback_result("pregrasp_plan_failed")
         current_joint_state = _joint_state_from_trajectory(pregrasp_trajectory)
@@ -744,6 +789,56 @@ class Ros2MoveIt2PlannerBridge:
             f"end_q={trajectory.points[-1].positions_rad}"
         )
         return trajectory
+
+    def _plan_pregrasp_via_home(
+        self,
+        *,
+        clients: "_Ros2MoveIt2Clients",
+        joint_state: JointStateSnapshot,
+        base_frame_id: str,
+        scene_snapshot: SceneSnapshot,
+        pregrasp_pose: Pose3D,
+    ) -> JointTrajectory | None:
+        """homeから遠い初期姿勢向けに「現在→home→pregrasp」の連結軌道を作る (Issue #39)。
+
+        home区間は関節空間goal (IK不要・特異性の影響なし) で計画し、home以降は
+        通常ケースと同じpregrasp計画に乗せる。失敗時はNoneを返し、呼び出し側が
+        従来の直行pregrasp計画へfallbackする。
+        """
+        if not self._apply_phase_planning_scene(
+            clients=clients,
+            scene_snapshot=scene_snapshot,
+            base_frame_id=base_frame_id,
+            attach_tomato=False,
+        ):
+            return None
+        home_trajectory = self._plan_joint_goal(
+            clients=clients,
+            joint_state=joint_state,
+            base_frame_id=base_frame_id,
+            goal_joint_state=home_joint_state(),
+            phase_label="pregrasp_via_home",
+        )
+        if home_trajectory is None:
+            return None
+        pregrasp_from_home = self._plan_phase(
+            clients=clients,
+            joint_state=_joint_state_from_trajectory(home_trajectory),
+            base_frame_id=base_frame_id,
+            scene_snapshot=scene_snapshot,
+            target_pose=pregrasp_pose,
+            attach_tomato=False,
+            phase_label="pregrasp",
+        )
+        if pregrasp_from_home is None:
+            return None
+        print(
+            "[MoveItBridge] pregrasp planned via home "
+            f"home_points={len(home_trajectory.points)} "
+            f"pregrasp_points={len(pregrasp_from_home.points)}",
+            flush=True,
+        )
+        return _concatenate_trajectories(home_trajectory, pregrasp_from_home)
 
     def _plan_seeded_ik_goal(
         self,
