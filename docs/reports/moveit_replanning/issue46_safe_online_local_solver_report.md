@@ -2,7 +2,7 @@
 
 ## 目的と次につながる判断
 
-tracking error発生時に現在関節状態からglobal plan終端へ直線補間していたlocal solverを、JTCへ渡す前に安全制約を検査するonline再接続solverへ置き換える。検証したいのは、10初期姿勢の収穫成功率を落とさず、危険な補正候補をpublish前に停止できるかである。この結果は、次段でcollision distance/JacobianをMoveIt Servo adapterから実入力する際のproducer契約と成功基準になる。
+tracking error発生時に現在関節状態からglobal plan終端へ直線補間していたlocal solverを、JTCへ渡す前に安全制約を検査するonline再接続solverへ置き換える。検証したいのは、10初期姿勢の収穫成功率を落とさず、危険な補正候補をpublish前に停止できるかである。この結果は、次段でMoveIt PlanningSceneからcollision distanceを取得し、robot modelのJacobian計算から特異姿勢指標を生成する安全観測adapterを追加する際のproducer契約と成功基準になる。
 
 ## 改善対象を示す全体アーキテクチャ
 
@@ -81,11 +81,11 @@ flowchart TB
 | 案 | online性 | 安全制約 | 変更規模 | 判断 |
 |---|---|---|---|---|
 | 従来linear | あり | 速度の概算のみ | 最小 | `TOMATO_HARVEST_LOCAL_SOLVER=linear`で比較用に保持 |
-| safe online reconnect | あり | collision/singularity/位置/速度/加速度 | producer内部だけ | 今回採用 |
+| safe online reconnect | あり | collision/singularity/位置/速度/加速度 | producer内部にsolverを追加。安全観測adapterは別途必要 | 今回採用。ただし、MoveIt PlanningSceneとJacobian計算を使う安全観測adapterを追加する必要がある |
 | 短区間MoveIt replan | service待ち | planning scene全体 | latencyとIK枝変更が増える | hard-stop後のglobal recovery候補 |
-| MoveIt Servo node | 高い | 公式のcollision/singularity/limit | command契約の変更が大きい | adapter実入力の次段候補 |
+| MoveIt Servo node | 高い | 公式のcollision/singularity/limit | 指令生成・安全制御を含み、command契約の変更規模が大きい | safe online reconnectと安全観測adapterの実装・検証完了後に、置き換え効果を比較する次段候補 |
 
-既存の`producer_kind / instance_id / revision`と`harvest_motion_plan`を変えず、下流を変更せずに比較できるsafe online reconnectを採用した。
+既存の`producer_kind / instance_id / revision`と`harvest_motion_plan`を変えず、下流を変更せずに比較できるsafe online reconnectを採用した。ただし、現在実装したのはsolver本体と安全観測の入力境界までである。実環境のcollision proximityとsingularityを判定するには、MoveIt PlanningSceneとJacobian計算を使う安全観測adapterを追加する必要がある。MoveIt Servo nodeはこのadapterではなく、指令生成と安全制御をまとめて担当する別のsolver/controller案として扱う。
 
 ## テスト結果
 
@@ -116,4 +116,4 @@ flowchart TB
 
 ## 結論と残課題
 
-安全制約付きsmooth online solverへの既定切替後も10姿勢成功率100%を維持した。危険入力のhard-stopと減速はunit testで再現できた。一方、今回の実E2Eではcollision clearance topicの実producerは未接続であり、collision guardの実scene距離検証は未完である。次はMoveIt PlanningScene/Servo側adapterからclearanceとJacobian指標を周期供給し、collision近接注入と特異姿勢注入でstop理由、停止距離、復帰latencyをE2E計測する。
+安全制約付きsmooth online solverへの既定切替後も10姿勢成功率100%を維持した。危険入力のhard-stopと減速はunit testで再現できた。一方、今回の実E2Eではcollision clearance topicの実producerは未接続であり、collision guardの実scene距離検証は未完である。次はMoveIt PlanningSceneからclearanceを取得し、robot modelのJacobianから特異姿勢指標を計算する安全観測adapterを追加する。その後、collision近接注入と特異姿勢注入でstop理由、停止距離、復帰latencyをE2E計測する。MoveIt Servo nodeへの置き換え比較は、safe online reconnectと安全観測adapterの実装・検証完了後の次段とする。
