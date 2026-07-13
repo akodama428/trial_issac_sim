@@ -256,8 +256,10 @@ class Ros2MoveIt2PlannerBridge:
             os.environ.get("TOMATO_HARVEST_MOVEIT_ORIENTATION_TOLERANCE_RAD", orientation_tolerance_rad)
         )
         # pose goalのIK枝を現在構成の近傍へ制限する窓 (Issue #37)。0で無効。
+        # 実測した限界フリップ枝の関節差は約3.1 radで、2.2はそれを排除しつつ
+        # 正当な遷移 (~2 rad) とgoal samplerの探索余地を確保する。
         self._goal_joint1_window_rad = float(os.environ.get(
-            "TOMATO_HARVEST_MOVEIT_GOAL_JOINT1_WINDOW_RAD", "1.5"
+            "TOMATO_HARVEST_MOVEIT_GOAL_JOINT1_WINDOW_RAD", "2.2"
         ))
         # seed付きIKで最近傍IK枝を先に確定し、joint-space goalで計画する
         # (Issue #37)。goal samplingの枝選択非決定性を排除する。
@@ -762,44 +764,51 @@ class Ros2MoveIt2PlannerBridge:
             link_to_tool_offset_m=self.MOVEIT_LINK_TO_RUNTIME_TOOL_OFFSET_M,
         )
         quaternion = _quaternion_from_pose(moveit_target_pose)
-        ik_solution = clients.compute_nearest_ik(
-            seed_joint_state=joint_state,
-            base_frame_id=base_frame_id,
-            target_pose_xyz=(
-                float(moveit_target_pose.x),
-                float(moveit_target_pose.y),
-                float(moveit_target_pose.z),
-            ),
-            target_orientation_xyzw=(
-                float(quaternion.x), float(quaternion.y),
-                float(quaternion.z), float(quaternion.w),
-            ),
-            group_name=self._group_name,
-            timeout_sec=self._planning_timeout_sec,
+        target_xyz = (
+            float(moveit_target_pose.x),
+            float(moveit_target_pose.y),
+            float(moveit_target_pose.z),
         )
-        if ik_solution is None:
-            print(
-                f"[MoveItBridge] seeded_ik unsolved phase={phase_label} "
-                "— falling back to pose goal",
-                flush=True,
+        target_xyzw = (
+            float(quaternion.x), float(quaternion.y),
+            float(quaternion.z), float(quaternion.w),
+        )
+        # KDLはseedによっては遠い枝へ収束するため、複数seed (現在構成×2、
+        # home構成) で試行し、現在構成の近傍に収まる解だけを採用する。
+        goal_joint_state: JointStateSnapshot | None = None
+        for seed in (joint_state, joint_state, home_joint_state()):
+            ik_solution = clients.compute_nearest_ik(
+                seed_joint_state=seed,
+                base_frame_id=base_frame_id,
+                target_pose_xyz=target_xyz,
+                target_orientation_xyzw=target_xyzw,
+                group_name=self._group_name,
+                timeout_sec=self._planning_timeout_sec,
             )
-            return None
-        goal_joint_state = arm_joint_goal_from_ik_solution(
-            solution_joint_names=ik_solution.joint_names,
-            solution_positions_rad=ik_solution.positions_rad,
-            arm_joint_names=DEFAULT_JOINT_NAMES,
-        )
-        if goal_joint_state is None:
-            return None
-        # seedから遠い解 (別のIK枝) はここで棄却し、窓付きpose goalへ委ねる。
-        if not ik_goal_is_near_seed(
-            seed=joint_state,
-            goal=goal_joint_state,
-            max_joint_delta_rad=self._goal_joint1_window_rad,
-        ):
+            if ik_solution is None:
+                continue
+            candidate = arm_joint_goal_from_ik_solution(
+                solution_joint_names=ik_solution.joint_names,
+                solution_positions_rad=ik_solution.positions_rad,
+                arm_joint_names=DEFAULT_JOINT_NAMES,
+            )
+            if candidate is None:
+                continue
+            if ik_goal_is_near_seed(
+                seed=joint_state,
+                goal=candidate,
+                max_joint_delta_rad=self._goal_joint1_window_rad,
+            ):
+                goal_joint_state = candidate
+                break
             print(
                 f"[MoveItBridge] seeded_ik solution rejected as far branch "
-                f"phase={phase_label} goal_q={goal_joint_state.positions_rad} "
+                f"phase={phase_label} goal_q={candidate.positions_rad}",
+                flush=True,
+            )
+        if goal_joint_state is None:
+            print(
+                f"[MoveItBridge] seeded_ik unsolved or far phase={phase_label} "
                 "— falling back to pose goal",
                 flush=True,
             )
