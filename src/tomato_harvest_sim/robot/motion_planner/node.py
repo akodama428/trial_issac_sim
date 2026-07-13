@@ -135,9 +135,8 @@ def main() -> None:
             if not isinstance(status, dict):
                 status = {"status": str(status)}
             tracking_error = status.get("tracking_error_rad")
-            self._state.update_tracking_error(
-                float(tracking_error) if tracking_error is not None else None
-            )
+            if tracking_error is not None:
+                self._state.observe_tracking_error(float(tracking_error))
             if str(status.get("status", "")).strip() == "aborted":
                 self._state.observe_abort()
                 phase = self._state.snapshot().phase
@@ -177,7 +176,7 @@ def main() -> None:
                 last_replan_at_sec=None,
                 handled_scene_generation=state.scene_generation,
             )
-            self._state.update_tracking_error(0.20)
+            self._state.observe_tracking_error(0.20)
             self.get_logger().info(metric_line(
                 "suffix_e2e_disturbance_injected",
                 phase=state.phase.value,
@@ -223,7 +222,7 @@ def main() -> None:
                 trigger=decision.trigger.value, route=route.value,
             ))
             if route is PlannerRoute.LOCAL:
-                self._state.update_tracking_error(None)
+                self._state.clear_tracking_error()
                 return
             if not trigger_starts_planner(decision.trigger, state.phase):
                 self.get_logger().info(metric_line(
@@ -305,7 +304,7 @@ def main() -> None:
                 self._publish_plan(candidate, trigger=trigger, phase=phase)
             finally:
                 if phase in self._suffix_injected_phases:
-                    self._state.update_tracking_error(None)
+                    self._state.clear_tracking_error()
                 self._suffix_replan_gate.finish()
 
         def _try_plan(self, *, trigger: str) -> None:

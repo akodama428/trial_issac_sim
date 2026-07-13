@@ -57,12 +57,12 @@ TrackingErrorPeak update_tracking_error_peak(
   const std::vector<double> & desired_positions_rad = {},
   const std::vector<double> & actual_positions_rad = {});
 
-// 直近windowに有効なfeedbackがあり、所定周期に達したときだけrunning診断を配信する。
-bool should_publish_tracking_error(
-  const TrackingErrorPeak & recent_peak,
-  double last_publish_at_sec,
-  double now_sec,
-  double publish_interval_sec);
+// JTC feedback 1回分を、window状態を持たない瞬時tracking error sampleへ変換する。
+TrackingErrorPeak tracking_error_sample(
+  const std::vector<std::string> & joint_names,
+  const std::vector<double> & error_positions_rad,
+  const std::vector<double> & desired_positions_rad = {},
+  const std::vector<double> & actual_positions_rad = {});
 
 // FollowJointTrajectory result の error_code を安定した分類名へ変換する。
 std::string abort_reason_from_jtc(int error_code, const std::string & error_string);

@@ -27,7 +27,6 @@ constexpr char kGripperClosedTopic[] = "/tomato_harvest/gripper_closed";
 // 既定値は franka_controllers.yaml の joint_trajectory_controller に対応する。
 constexpr char kDefaultJointTrajectoryAction[] =
   "/joint_trajectory_controller/follow_joint_trajectory";
-constexpr double kDefaultTrackingErrorPublishIntervalSec = 0.25;
 
 std::string metric_line(
   const std::string & event, const std::string & phase,
@@ -52,8 +51,6 @@ public:
     gripper_pub_ = create_publisher<std_msgs::msg::String>(kGripperClosedTopic, 10);
     const std::string joint_trajectory_action = declare_parameter<std::string>(
       "follow_joint_trajectory_action", kDefaultJointTrajectoryAction);
-    tracking_error_publish_interval_sec_ = declare_parameter<double>(
-      "tracking_error_publish_interval_sec", kDefaultTrackingErrorPublishIntervalSec);
     action_client_ =
       rclcpp_action::create_client<FollowJointTrajectory>(this, joint_trajectory_action);
 
@@ -125,8 +122,6 @@ private:
     }
     // goalごとに追従誤差ピークを取り直す (Issue #32 abort診断)。
     tracking_error_peak_ = franka_ros2_control::TrackingErrorPeak{};
-    recent_tracking_error_peak_ = franka_ros2_control::TrackingErrorPeak{};
-    last_tracking_error_publish_at_sec_ = now().seconds();
 
     FollowJointTrajectory::Goal goal;
     goal.trajectory.joint_names = trajectory.joint_names;
@@ -157,18 +152,12 @@ private:
         tracking_error_peak_ = franka_ros2_control::update_tracking_error_peak(
           tracking_error_peak_, feedback->joint_names, feedback->error.positions,
           feedback->desired.positions, feedback->actual.positions);
-        recent_tracking_error_peak_ = franka_ros2_control::update_tracking_error_peak(
-          recent_tracking_error_peak_, feedback->joint_names, feedback->error.positions,
+        const auto sample = franka_ros2_control::tracking_error_sample(
+          feedback->joint_names, feedback->error.positions,
           feedback->desired.positions, feedback->actual.positions);
-        const double now_sec = now().seconds();
-        if (franka_ros2_control::should_publish_tracking_error(
-            recent_tracking_error_peak_, last_tracking_error_publish_at_sec_, now_sec,
-            tracking_error_publish_interval_sec_))
-        {
-          publish_running_tracking_error(recent_tracking_error_peak_);
-          log_metric("running_tracking_error_published", phase);
-          recent_tracking_error_peak_ = franka_ros2_control::TrackingErrorPeak{};
-          last_tracking_error_publish_at_sec_ = now_sec;
+        if (sample.has_value) {
+          publish_running_tracking_error(sample);
+          log_metric("instantaneous_tracking_error_published", phase);
         }
       };
     options.result_callback =
@@ -242,9 +231,6 @@ private:
   rclcpp_action::Client<FollowJointTrajectory>::SharedPtr action_client_;
   std::shared_ptr<GoalHandleFollowJointTrajectory> goal_handle_;
   franka_ros2_control::TrackingErrorPeak tracking_error_peak_;
-  franka_ros2_control::TrackingErrorPeak recent_tracking_error_peak_;
-  double tracking_error_publish_interval_sec_{kDefaultTrackingErrorPublishIntervalSec};
-  double last_tracking_error_publish_at_sec_{0.0};
   std::optional<bool> gripper_closed_;
   std::size_t cancel_count_{0};
   std::size_t trajectory_replacement_count_{0};

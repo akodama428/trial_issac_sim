@@ -147,15 +147,15 @@ TrackingErrorPeak update_tracking_error_peak(
   return peak;
 }
 
-bool should_publish_tracking_error(
-  const TrackingErrorPeak & recent_peak,
-  const double last_publish_at_sec,
-  const double now_sec,
-  const double publish_interval_sec)
+TrackingErrorPeak tracking_error_sample(
+  const std::vector<std::string> & joint_names,
+  const std::vector<double> & error_positions_rad,
+  const std::vector<double> & desired_positions_rad,
+  const std::vector<double> & actual_positions_rad)
 {
-  return recent_peak.has_value && publish_interval_sec > 0.0 &&
-         now_sec >= last_publish_at_sec &&
-         now_sec - last_publish_at_sec >= publish_interval_sec;
+  return update_tracking_error_peak(
+    TrackingErrorPeak{}, joint_names, error_positions_rad,
+    desired_positions_rad, actual_positions_rad);
 }
 
 std::string abort_reason_from_jtc(int error_code, const std::string & error_string)
