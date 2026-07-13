@@ -35,7 +35,14 @@ class PlannerStateAggregator:
         return self._state
 
     def update_phase(self, phase: HarvestTaskPhase) -> None:
-        self._state = replace(self._state, phase=phase)
+        # tracking error は実行phase内の未処理event。次phaseへ持ち越すと、前の
+        # trajectoryの誤差で新しいtrajectoryを補正してしまうため境界で破棄する。
+        tracking_error_rad = (
+            self._state.tracking_error_rad if self._state.phase == phase else None
+        )
+        self._state = replace(
+            self._state, phase=phase, tracking_error_rad=tracking_error_rad
+        )
 
     def update_joint_state(self, joint_state: JointStateSnapshot) -> None:
         self._state = replace(self._state, joint_state=joint_state)
@@ -45,6 +52,18 @@ class PlannerStateAggregator:
 
     def update_tracking_error(self, tracking_error_rad: float | None) -> None:
         self._state = replace(self._state, tracking_error_rad=tracking_error_rad)
+
+    def observe_tracking_error(self, tracking_error_rad: float) -> None:
+        """未処理の瞬時誤差peakをlocal event受理まで保持する。"""
+        current = self._state.tracking_error_rad
+        self._state = replace(
+            self._state,
+            tracking_error_rad=max(current, tracking_error_rad)
+            if current is not None else tracking_error_rad,
+        )
+
+    def clear_tracking_error(self) -> None:
+        self._state = replace(self._state, tracking_error_rad=None)
 
     def observe_abort(self) -> None:
         self._state = replace(

@@ -188,7 +188,7 @@ TEST(ExecutionStatusJsonTest, NonAbortPayloadHasOnlyStatus)
   EXPECT_EQ(payload, "{\"status\":\"running\"}");
 }
 
-TEST(ExecutionStatusJsonTest, RunningPayloadCarriesRecentTrackingError)
+TEST(ExecutionStatusJsonTest, RunningPayloadCarriesInstantaneousTrackingError)
 {
   franka_ros2_control::TrackingErrorPeak peak;
   peak = franka_ros2_control::update_tracking_error_peak(
@@ -204,19 +204,18 @@ TEST(ExecutionStatusJsonTest, RunningPayloadCarriesRecentTrackingError)
   EXPECT_NE(payload.find("\"limiting_joint_actual_rad\":-0.375"), std::string::npos);
 }
 
-TEST(TrackingErrorPublicationTest, PublishesOnlyAValidWindowAtOrAfterInterval)
+TEST(TrackingErrorPublicationTest, BuildsOneInstantaneousSamplePerFeedback)
 {
-  franka_ros2_control::TrackingErrorPeak empty_peak;
-  franka_ros2_control::TrackingErrorPeak valid_peak;
-  valid_peak = franka_ros2_control::update_tracking_error_peak(
-    valid_peak, {"panda_joint1"}, {0.11});
+  const auto first = franka_ros2_control::tracking_error_sample(
+    {"panda_joint1", "panda_joint2"}, {0.11, -0.04});
+  const auto second = franka_ros2_control::tracking_error_sample(
+    {"panda_joint1", "panda_joint2"}, {0.02, -0.03});
 
-  EXPECT_FALSE(franka_ros2_control::should_publish_tracking_error(
-    empty_peak, 10.0, 10.25, 0.25));
-  EXPECT_FALSE(franka_ros2_control::should_publish_tracking_error(
-    valid_peak, 10.0, 10.249, 0.25));
-  EXPECT_TRUE(franka_ros2_control::should_publish_tracking_error(
-    valid_peak, 10.0, 10.25, 0.25));
+  ASSERT_TRUE(first.has_value);
+  EXPECT_DOUBLE_EQ(first.max_error_rad, 0.11);
+  EXPECT_EQ(first.limiting_joint, "panda_joint1");
+  ASSERT_TRUE(second.has_value);
+  EXPECT_DOUBLE_EQ(second.max_error_rad, 0.03);
 }
 
 TEST(ExecutionStatusJsonTest, AbortWithoutFeedbackOmitsErrorFields)

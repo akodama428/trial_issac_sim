@@ -60,6 +60,14 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
         latencies = [float(v) for v in re.findall(r'"event": "planner_completed"[^\n]*"latency_ms": ([0-9.]+)', robot_log)]
         duration = re.findall(r"E2E_CASE_DURATION_SEC=([0-9.]+)", console)
         live_tracking_errors = _live_tracking_errors(controller_log)
+        local_plan_adoption_latencies_ms = [
+            float(value) * 1000.0
+            for value in re.findall(
+                r'"event": "plan_adopted"[^\n]*"plan_age_sec": ([0-9.]+)[^\n]*'
+                r'"producer_kind": "local_planner"',
+                robot_log,
+            )
+        ]
         results.append({
             "case_id": case_id,
             "initial_positions_rad": list(definition.positions_rad),
@@ -86,6 +94,7 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
                 r'"event": "plan_adopted"[^\n]*"producer_kind": "local_planner"',
                 robot_log,
             )),
+            "local_plan_adoption_latency_ms": local_plan_adoption_latencies_ms,
         })
     success_count = sum(bool(item["success"]) for item in results)
     return {
@@ -99,11 +108,13 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
 def markdown(summary: dict[str, object]) -> str:
     lines = ["# Initial pose E2E result", "", f"Commit: `{summary['commit_sha']}`", "",
              f"Success: {summary['success_count']}/{summary['case_count']} ({float(summary['success_rate']):.0%})", "",
-             "| Case | Result | Failure reason | Live samples | Max tracking error [rad] | Local plan (published/adopted) | E2E sec |", "|---|---|---|---:|---:|---:|---:|"]
+             "| Case | Result | Failure reason | Live samples | Max tracking error [rad] | Local plan (published/adopted) | Max adoption latency [ms] | E2E sec |", "|---|---|---|---:|---:|---:|---:|---:|"]
     for item in summary["cases"]:  # type: ignore[union-attr]
         maximum_error = item["maximum_live_tracking_error_rad"]
         local_plans = f"{item['local_plan_published_count']}/{item['local_plan_adopted_count']}"
-        lines.append(f"| {item['case_id']} | {'PASS' if item['success'] else 'FAIL'} | {item['failure_reason'] or '-'} | {item['live_tracking_sample_count']} | {maximum_error if maximum_error is not None else '-'} | {local_plans} | {item['e2e_duration_sec'] or '-'} |")
+        adoption_latencies = item["local_plan_adoption_latency_ms"]
+        max_adoption_latency = max(adoption_latencies) if adoption_latencies else None
+        lines.append(f"| {item['case_id']} | {'PASS' if item['success'] else 'FAIL'} | {item['failure_reason'] or '-'} | {item['live_tracking_sample_count']} | {maximum_error if maximum_error is not None else '-'} | {local_plans} | {max_adoption_latency if max_adoption_latency is not None else '-'} | {item['e2e_duration_sec'] or '-'} |")
     return "\n".join(lines) + "\n"
 
 

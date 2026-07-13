@@ -62,3 +62,22 @@ class PlannerStateAggregatorTest(unittest.TestCase):
         aggregator.observe_abort()
         aggregator.observe_abort()
         self.assertEqual(aggregator.snapshot().abort_generation, 2)
+
+    def test_tracking_error_peak_is_held_until_explicitly_cleared(self) -> None:
+        aggregator = PlannerStateAggregator()
+
+        aggregator.observe_tracking_error(0.15)
+        aggregator.observe_tracking_error(0.03)
+
+        self.assertEqual(aggregator.snapshot().tracking_error_rad, 0.15)
+        aggregator.clear_tracking_error()
+        self.assertIsNone(aggregator.snapshot().tracking_error_rad)
+
+    def test_pending_tracking_error_is_not_carried_to_next_phase(self) -> None:
+        aggregator = PlannerStateAggregator()
+        aggregator.update_phase(HarvestTaskPhase.MOVING_TO_PREGRASP)
+        aggregator.observe_tracking_error(0.08)
+
+        aggregator.update_phase(HarvestTaskPhase.MOVING_TO_GRASP)
+
+        self.assertIsNone(aggregator.snapshot().tracking_error_rad)

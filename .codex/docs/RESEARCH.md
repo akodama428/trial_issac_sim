@@ -463,6 +463,22 @@ Custom Docker Container
   - https://frankarobotics.github.io/docs/robot_specifications.html
   - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
 
+## 25. Issue #45 tracking error配信責務の簡素化
+- 調査日: 2026-07-14
+- 対象: ROS 2 Control Jazzy `joint_trajectory_controller`、ROS 2 Jazzy QoS
+- 確認済み事項:
+  - `FollowJointTrajectory` actionはexecution monitoringを必要とする用途の主要interfaceである。
+  - JTCの`action_monitor_rate`既定値は20Hzであるため、action feedbackごとの瞬時誤差転送は概ね20Hz、現行250ms window配信は約4Hzとなる。
+  - ROS 2のsensor data向けQoSはKeep Last / Best Effortを標準とするが、現在の`execution_status`契約はReliable depth 10であり、Issue #45ではQoS変更を混在させない。
+- 設計判断:
+  - executorは各feedbackの瞬時最大誤差とlimiting jointを転送し、goal全体peakはabort診断専用として維持する。
+  - 短い閾値超過の保持はplanner側のpending peakで行い、local eventを受理した後にclearする。
+  - threshold、minimum interval、phase guardはplanner側へ集約する。
+- ソース:
+  - https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html
+  - https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/parameters.html
+  - https://docs.ros.org/en/ros2_packages/jazzy/api/rclcpp/generated/classrclcpp_1_1SensorDataQoS.html
+
 # ソース
 - NVIDIA Isaac Sim Container Installation
   - https://docs.isaacsim.omniverse.nvidia.com/latest/installation/install_container.html
