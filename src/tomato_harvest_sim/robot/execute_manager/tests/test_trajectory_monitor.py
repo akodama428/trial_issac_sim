@@ -70,6 +70,23 @@ class TestTrajectoryStatusPayload(unittest.TestCase):
         payload = json.loads(trajectory_status_payload(raw))
         self.assertEqual(payload, {"status": "ok"})
 
+    def test_running_tracking_error_is_forwarded_to_planner(self) -> None:
+        raw = json.dumps({
+            "status": "running",
+            "tracking_error_rad": 0.125,
+            "limiting_joint": "panda_joint2",
+            "limiting_joint_desired_rad": -0.5,
+            "limiting_joint_actual_rad": -0.375,
+        })
+
+        payload = json.loads(trajectory_status_payload(raw))
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertAlmostEqual(payload["tracking_error_rad"], 0.125)
+        self.assertEqual(payload["limiting_joint"], "panda_joint2")
+        self.assertAlmostEqual(payload["limiting_joint_desired_rad"], -0.5)
+        self.assertAlmostEqual(payload["limiting_joint_actual_rad"], -0.375)
+
     def test_unknown_fields_are_not_forwarded(self) -> None:
         """診断以外の未知fieldは下流契約へ流さない。"""
         raw = json.dumps({"status": "aborted", "unexpected": "x"})

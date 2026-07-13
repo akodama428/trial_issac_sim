@@ -52,6 +52,13 @@ if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
   exit 1
 fi
 
+# Issue #38: injection専用値ではなく、JTC feedback由来の実行中tracking errorが
+# executorから周期配信されていることを通常CIでも固定する。
+if ! grep -Eq 'execution_status \{"status":"running","tracking_error_rad":[0-9]' "${CONTROLLER_LOG}"; then
+  echo "Periodic live tracking-error status was not observed." >&2
+  exit 1
+fi
+
 if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" ]]; then
   IFS=',' read -ra LOCAL_PLAN_PHASES <<< "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES}"
   for phase in "${LOCAL_PLAN_PHASES[@]}"; do

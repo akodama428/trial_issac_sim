@@ -37,6 +37,15 @@ def _grasp_diagnostics(log: str) -> dict[str, object]:
     }
 
 
+def _live_tracking_errors(log: str) -> list[float]:
+    """実行中statusから周期配信された追従誤差を抽出する。"""
+    values = re.findall(
+        r'execution_status \{"status":"running","tracking_error_rad":([0-9.eE+-]+)',
+        log,
+    )
+    return [float(value) for value in values]
+
+
 def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
     definitions = {case.case_id: case for case in INITIAL_POSE_CASES}
     results = []
@@ -44,11 +53,13 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
         definition = definitions[case_id]
         case_root = root / case_id / "e2e"
         robot_log = (case_root / "robot_node.log").read_text(errors="replace") if (case_root / "robot_node.log").exists() else ""
+        controller_log = (case_root / "franka_controller.log").read_text(errors="replace") if (case_root / "franka_controller.log").exists() else ""
         console = (case_root / "docker-e2e-console.log").read_text(errors="replace") if (case_root / "docker-e2e-console.log").exists() else ""
         success = bool(re.search(r"Phase: returning_home .* complete", robot_log)) and not bool(re.search(r"Phase: .* failed", robot_log))
         failed = re.findall(r"Phase: ([a-z_]+) .* failed", robot_log)
         latencies = [float(v) for v in re.findall(r'"event": "planner_completed"[^\n]*"latency_ms": ([0-9.]+)', robot_log)]
         duration = re.findall(r"E2E_CASE_DURATION_SEC=([0-9.]+)", console)
+        live_tracking_errors = _live_tracking_errors(controller_log)
         results.append({
             "case_id": case_id,
             "initial_positions_rad": list(definition.positions_rad),
@@ -64,6 +75,17 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
             "planning_latency_ms": latencies,
             "e2e_duration_sec": float(duration[-1]) if duration else None,
             "grasp_diagnostics": _grasp_diagnostics(robot_log),
+            "live_tracking_sample_count": len(live_tracking_errors),
+            "maximum_live_tracking_error_rad": (
+                max(live_tracking_errors) if live_tracking_errors else None
+            ),
+            "local_plan_published_count": len(re.findall(
+                r'"event": "local_plan_published"', robot_log
+            )),
+            "local_plan_adopted_count": len(re.findall(
+                r'"event": "plan_adopted"[^\n]*"producer_kind": "local_planner"',
+                robot_log,
+            )),
         })
     success_count = sum(bool(item["success"]) for item in results)
     return {
@@ -77,13 +99,11 @@ def summarize(root: Path, case_ids: list[str], sha: str) -> dict[str, object]:
 def markdown(summary: dict[str, object]) -> str:
     lines = ["# Initial pose E2E result", "", f"Commit: `{summary['commit_sha']}`", "",
              f"Success: {summary['success_count']}/{summary['case_count']} ({float(summary['success_rate']):.0%})", "",
-             "| Case | Result | Failure reason | Min grasp error [m] | Finger contact (L/R) | E2E sec |", "|---|---|---|---:|---|---:|"]
+             "| Case | Result | Failure reason | Live samples | Max tracking error [rad] | Local plan (published/adopted) | E2E sec |", "|---|---|---|---:|---:|---:|---:|"]
     for item in summary["cases"]:  # type: ignore[union-attr]
-        diagnostic = item["grasp_diagnostics"]
-        terminal = diagnostic.get("terminal", {})
-        minimum = diagnostic.get("minimum_position_error_norm_m")
-        contacts = f"{terminal.get('left_finger_contact', '-')}/{terminal.get('right_finger_contact', '-')}"
-        lines.append(f"| {item['case_id']} | {'PASS' if item['success'] else 'FAIL'} | {item['failure_reason'] or '-'} | {minimum if minimum is not None else '-'} | {contacts} | {item['e2e_duration_sec'] or '-'} |")
+        maximum_error = item["maximum_live_tracking_error_rad"]
+        local_plans = f"{item['local_plan_published_count']}/{item['local_plan_adopted_count']}"
+        lines.append(f"| {item['case_id']} | {'PASS' if item['success'] else 'FAIL'} | {item['failure_reason'] or '-'} | {item['live_tracking_sample_count']} | {maximum_error if maximum_error is not None else '-'} | {local_plans} | {item['e2e_duration_sec'] or '-'} |")
     return "\n".join(lines) + "\n"
 
 

@@ -8,6 +8,33 @@ from scripts.ci.summarize_initial_pose_e2e import summarize
 
 
 class InitialPoseSummaryTest(unittest.TestCase):
+    def test_counts_live_tracking_samples_and_local_corrections(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            case_root = root / "default" / "e2e"
+            case_root.mkdir(parents=True)
+            (case_root / "robot_node.log").write_text(
+                'Phase: returning_home -> complete\n'
+                'MOVEIT_METRIC {"event": "local_plan_published", '
+                '"phase": "returning_home"}\n'
+                'MOVEIT_METRIC {"event": "plan_adopted", '
+                '"producer_kind": "local_planner"}\n'
+            )
+            (case_root / "franka_controller.log").write_text(
+                'execution_status {"status":"running",'
+                '"tracking_error_rad":0.125,"limiting_joint":"panda_joint4"}\n'
+                'execution_status {"status":"running",'
+                '"tracking_error_rad":0.025,"limiting_joint":"panda_joint2"}\n'
+            )
+
+            result = summarize(root, ["default"], "abc")
+
+        case = result["cases"][0]
+        self.assertEqual(case["live_tracking_sample_count"], 2)
+        self.assertAlmostEqual(case["maximum_live_tracking_error_rad"], 0.125)
+        self.assertEqual(case["local_plan_published_count"], 1)
+        self.assertEqual(case["local_plan_adopted_count"], 1)
+
     def test_failed_case_does_not_hide_later_success(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
