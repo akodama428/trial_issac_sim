@@ -20,6 +20,7 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     _moveit_link_target_pose_from_runtime_tool_pose,
     _trajectory_is_noop,
     _tomato_planning_scene_ops,
+    arm_joint_goal_from_ik_solution,
     goal_joint_window,
 )
 
@@ -322,6 +323,38 @@ class MoveItPlannerBackendTest(unittest.TestCase):
     def test_goal_joint_window_requires_base_joint(self) -> None:
         state = JointStateSnapshot(joint_names=("panda_joint2",), positions_rad=(0.5,))
         self.assertIsNone(goal_joint_window(state, window_rad=1.5))
+
+    def test_ik_solution_is_projected_to_arm_joints_in_order(self) -> None:
+        """seed付きIK解 (最近傍IK枝) からarm関節goalを組み立てる (Issue #37)。
+
+        /compute_ik の解はfinger等を含む全関節で返るため、arm関節だけを
+        指定順に取り出してjoint-space goalにする。
+        """
+        goal = arm_joint_goal_from_ik_solution(
+            solution_joint_names=(
+                "panda_finger_joint1", "panda_joint1", "panda_joint2",
+                "panda_joint3", "panda_joint4", "panda_joint5",
+                "panda_joint6", "panda_joint7", "panda_finger_joint2",
+            ),
+            solution_positions_rad=(0.02, 0.1, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8, 0.02),
+            arm_joint_names=(
+                "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+                "panda_joint5", "panda_joint6", "panda_joint7",
+            ),
+        )
+
+        self.assertIsNotNone(goal)
+        assert goal is not None
+        self.assertEqual(goal.joint_names[0], "panda_joint1")
+        self.assertEqual(goal.positions_rad, (0.1, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8))
+
+    def test_ik_solution_missing_arm_joint_is_rejected(self) -> None:
+        goal = arm_joint_goal_from_ik_solution(
+            solution_joint_names=("panda_joint1",),
+            solution_positions_rad=(0.1,),
+            arm_joint_names=("panda_joint1", "panda_joint2"),
+        )
+        self.assertIsNone(goal)
 
     def test_noop_trajectory_is_detected(self) -> None:
         self.assertTrue(
