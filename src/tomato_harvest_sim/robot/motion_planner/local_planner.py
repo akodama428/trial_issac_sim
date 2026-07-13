@@ -25,8 +25,13 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     SUFFIX_TRAJECTORY_FIELD_BY_PHASE,
     suffix_trajectory,
 )
+from tomato_harvest_sim.robot.motion_planner.safe_online_solver import (
+    SafetyObservation,
+    solve_safe_reconnection,
+)
 
 LOCAL_PLANNER_NAME = "joint_space_local_planner"
+SAFE_ONLINE_PLANNER_NAME = "safe_online_local_planner"
 
 # 接続軌道の速度・時間パラメータ。JTCの許容時間内で確実に完了するよう、
 # global plannerのvelocity scaling (0.2) と同程度の保守的な速度に抑える。
@@ -93,6 +98,8 @@ def build_local_refinement_plan(
     now_sec: float,
     instance_id: str,
     revision: int,
+    solver_mode: str = "safe_online",
+    safety_observation: SafetyObservation = SafetyObservation(),
 ) -> HarvestMotionPlan | None:
     """現在状態から採用済みplan終端への接続軌道を持つ補正planを作る。
 
@@ -125,11 +132,26 @@ def build_local_refinement_plan(
     start_positions = tuple(
         current_by_name[name] for name in target_names
     )
-    connection = build_connection_trajectory(
-        joint_names=target_names,
-        start_positions_rad=start_positions,
-        target_positions_rad=target_positions,
-    )
+    if solver_mode == "linear":
+        connection = build_connection_trajectory(
+            joint_names=target_names,
+            start_positions_rad=start_positions,
+            target_positions_rad=target_positions,
+        )
+        planner_name = LOCAL_PLANNER_NAME
+    elif solver_mode == "safe_online":
+        result = solve_safe_reconnection(
+            joint_names=target_names,
+            start_positions_rad=start_positions,
+            target_positions_rad=target_positions,
+            observation=safety_observation,
+        )
+        if result.trajectory is None:
+            return None
+        connection = result.trajectory
+        planner_name = SAFE_ONLINE_PLANNER_NAME
+    else:
+        return None
     final_point = connection.points[-1]
     settling_point = replace(
         final_point,
@@ -147,7 +169,7 @@ def build_local_refinement_plan(
     return replace(
         base_plan,
         **{trajectory_field: correction},
-        planner_name=LOCAL_PLANNER_NAME,
+        planner_name=planner_name,
         plan_revision=revision,
         generated_at_sec=now_sec,
         planned_from_phase=phase,
@@ -184,7 +206,8 @@ def main() -> None:
     from std_msgs.msg import String
 
     from tomato_harvest_sim.msg.topics import (
-        HARVEST_MOTION_PLAN_TOPIC, HYBRID_PLANNING_EVENT_TOPIC, PHASE_TOPIC,
+        HARVEST_MOTION_PLAN_TOPIC, HYBRID_PLANNING_EVENT_TOPIC,
+        LOCAL_SAFETY_STATUS_TOPIC, PHASE_TOPIC,
     )
     from tomato_harvest_sim.msg.serialization import (
         harvest_motion_plan_from_json,
@@ -209,6 +232,10 @@ def main() -> None:
             ) | parse_suffix_injection_phases(
                 os.environ.get("TOMATO_HARVEST_LOCAL_PLANNER_PHASES", "")
             )
+            self._solver_mode = os.environ.get(
+                "TOMATO_HARVEST_LOCAL_SOLVER", "safe_online"
+            ).strip().lower()
+            self._safety_observation = SafetyObservation()
             from tomato_harvest_sim.robot.motion_planner.hybrid_event import LocalEventMemory
             self._event_memory = LocalEventMemory()
             self._latest_plan: HarvestMotionPlan | None = None
@@ -220,6 +247,9 @@ def main() -> None:
             self.create_subscription(String, PHASE_TOPIC, self._on_phase, 10)
             self.create_subscription(String, HARVEST_MOTION_PLAN_TOPIC, self._on_plan, 10)
             self.create_subscription(String, HYBRID_PLANNING_EVENT_TOPIC, self._on_event, 10)
+            self.create_subscription(
+                String, LOCAL_SAFETY_STATUS_TOPIC, self._on_safety_status, 10
+            )
             from sensor_msgs.msg import JointState
             from tomato_harvest_sim.msg.topics import JOINT_STATES_TOPIC
             self.create_subscription(JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10)
@@ -227,7 +257,24 @@ def main() -> None:
                 "local_planner_started",
                 enabled_phases=",".join(sorted(p.value for p in self._enabled_phases)),
                 producer_instance_id=self._instance_id,
+                solver_mode=self._solver_mode,
             ))
+
+        def _on_safety_status(self, msg: String) -> None:
+            """Accept the collision/Jacobian adapter's latest observation."""
+            import json
+            try:
+                payload = json.loads(msg.data)
+                self._safety_observation = SafetyObservation(
+                    collision_clearance_m=(None if payload.get("collision_clearance_m") is None
+                                           else float(payload["collision_clearance_m"])),
+                    singularity_measure=(None if payload.get("singularity_measure") is None
+                                         else float(payload["singularity_measure"])),
+                )
+            except (TypeError, ValueError, json.JSONDecodeError):
+                self.get_logger().info(metric_line(
+                    "local_safety_status_rejected", reason="invalid_payload"
+                ))
 
         def _on_plan(self, msg: String) -> None:
             plan = harvest_motion_plan_from_json(msg.data)
@@ -293,6 +340,7 @@ def main() -> None:
                             else "no_current_joint_state"),
                 ))
                 return
+            solver_started = time.perf_counter()
             candidate = build_local_refinement_plan(
                 base_plan=self._latest_plan,
                 phase=phase,
@@ -300,12 +348,20 @@ def main() -> None:
                 now_sec=time.time(),
                 instance_id=self._instance_id,
                 revision=self._revision + 1,
+                solver_mode=self._solver_mode,
+                safety_observation=self._safety_observation,
+            )
+            solver_latency_ms = round(
+                (time.perf_counter() - solver_started) * 1000.0, 3
             )
             if candidate is None:
                 self.get_logger().info(metric_line(
                     "local_plan_skipped",
                     phase=phase.value,
-                    reason="missing_phase_trajectory",
+                    reason="unsafe_or_unavailable_candidate",
+                    solver_mode=self._solver_mode,
+                    solver_latency_ms=solver_latency_ms,
+                    recovery="delegate_global_replan",
                 ))
                 return
             self._revision += 1
@@ -318,6 +374,8 @@ def main() -> None:
                 plan_revision=candidate.plan_revision,
                 producer_kind=candidate.producer_kind.value,
                 producer_instance_id=candidate.producer_instance_id,
+                solver_mode=self._solver_mode,
+                solver_latency_ms=solver_latency_ms,
             ))
 
     node = LocalPlannerNode()

@@ -251,6 +251,26 @@ Custom Docker Container
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
 
+## 22. Issue #46 safety-constrained online local solver
+
+- 調査日: 2026-07-14
+- 対象: MoveIt 2 Rolling公式文書・公式実装
+- 確認済みの事実:
+  - MoveIt Servoはcollision、singularity、joint limitを監視し、collisionまたはsingularityへの接近時に速度をscale downする。
+  - Servoの公式parameter例はsingularityにlower thresholdとhard-stop threshold、joint limit marginを持つ。
+  - `AccelerationLimitedPlugin`は実行可能な範囲で加速度制限を適用する。MoveItの通常planning pathはkinematicであり、実行前にtime parameterizationが必要である。
+  - MoveItのTime-Optimal Trajectory Generationは速度・加速度制限をtrajectoryへ付与し、Ruckig smoothingはjerk制限を追加できる。
+- 設計への反映:
+  - Issue #46ではServoの責務をproducer境界内の純粋Python solverで先行検証する。collision clearanceとJacobian由来singularity measureはadapter入力、joint position/velocity/accelerationはsolver内のhard constraintとする。
+  - 現行linear solverは比較baselineとして明示選択時だけ残し、既定をsmoothstep time-scaling付きsafe online solverへ切り替える。
+  - hard stop時はtrajectoryを生成せず、local publisherから下流へunsafe planを渡さない。実機安全認証を意味するものではない。
+- 一次情報:
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+  - https://github.com/ros-planning/moveit2/blob/main/moveit_ros/moveit_servo/config/servo_parameters.yaml
+  - https://moveit.picknik.ai/main/api/html/acceleration__filter_8hpp_source.html
+  - https://moveit.picknik.ai/main/doc/examples/time_parameterization/time_parameterization_tutorial.html
+  - https://moveit.picknik.ai/main/doc/concepts/trajectory_processing.html
+
 ## 19. Step 6 local planner初期導入の境界
 
 - 調査日: 2026-07-12

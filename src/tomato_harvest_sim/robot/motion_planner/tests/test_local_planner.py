@@ -16,6 +16,7 @@ from tomato_harvest_sim.msg.contracts import (
 from tomato_harvest_sim.robot.motion_planner.local_planner import (
     build_local_refinement_plan,
 )
+from tomato_harvest_sim.robot.motion_planner.safe_online_solver import SafetyObservation
 
 
 def _base_plan() -> HarvestMotionPlan:
@@ -61,7 +62,7 @@ class LocalRefinementPlanTest(unittest.TestCase):
         self.assertEqual(
             candidate.planned_from_phase, HarvestTaskPhase.MOVING_TO_PLACE
         )
-        self.assertEqual(candidate.planner_name, "joint_space_local_planner")
+        self.assertEqual(candidate.planner_name, "safe_online_local_planner")
 
     def test_executor_contract_fields_are_preserved(self) -> None:
         """下流(motion_command / executor)が読むtrajectory契約を変えない。"""
@@ -110,7 +111,38 @@ class LocalRefinementPlanTest(unittest.TestCase):
             trajectory.points[-1].time_from_start_sec,
             trajectory.points[-2].time_from_start_sec,
         )
+        self.assertEqual(candidate.planner_name, "safe_online_local_planner")
+
+    def test_linear_baseline_remains_selectable(self) -> None:
+        candidate = build_local_refinement_plan(
+            base_plan=_base_plan(), phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.4, 0.2)
+            ), now_sec=200.0, instance_id="local-instance-a", revision=1,
+            solver_mode="linear",
+        )
+        assert candidate is not None
         self.assertEqual(candidate.planner_name, "joint_space_local_planner")
+
+    def test_collision_hard_stop_does_not_create_publishable_plan(self) -> None:
+        candidate = build_local_refinement_plan(
+            base_plan=_base_plan(), phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.4, 0.2)
+            ), now_sec=200.0, instance_id="local-instance-a", revision=1,
+            safety_observation=SafetyObservation(collision_clearance_m=0.01),
+        )
+        self.assertIsNone(candidate)
+
+    def test_singularity_hard_stop_does_not_create_publishable_plan(self) -> None:
+        candidate = build_local_refinement_plan(
+            base_plan=_base_plan(), phase=HarvestTaskPhase.MOVING_TO_PLACE,
+            current_joint_state=JointStateSnapshot(
+                joint_names=("joint1", "joint2"), positions_rad=(0.4, 0.2)
+            ), now_sec=200.0, instance_id="local-instance-a", revision=1,
+            safety_observation=SafetyObservation(singularity_measure=0.01),
+        )
+        self.assertIsNone(candidate)
 
     def test_connection_duration_respects_joint_velocity_limit(self) -> None:
         """最大関節差分 / 制限速度 より短い時間で終端へ到達しない。"""
@@ -128,9 +160,9 @@ class LocalRefinementPlanTest(unittest.TestCase):
         assert candidate is not None
         trajectory = candidate.place_joint_trajectory
         assert trajectory is not None
-        # 最大差分 0.8 rad / 0.5 rad/s = 1.6 s (最後の静止点は除く)
+        # smoothstepのpeak速度は1.5倍なので、0.8*1.5/0.5 = 2.4 s。
         motion_end_sec = trajectory.points[-2].time_from_start_sec
-        self.assertAlmostEqual(motion_end_sec, 1.6, places=6)
+        self.assertAlmostEqual(motion_end_sec, 2.4, places=6)
 
     def test_near_goal_state_still_produces_executable_trajectory(self) -> None:
         """既に終端近傍でも、実行可能な非ゼロ長の接続軌道を返す。"""
