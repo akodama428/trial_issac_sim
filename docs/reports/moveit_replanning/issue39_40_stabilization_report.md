@@ -118,4 +118,40 @@ flowchart TD
 - unit test: pytest 239 passed + gtest (コンテナCI同等)。追加は、home経由判定 (3件: 特異近傍該当・通常非該当・閾値0で無効)、起動失敗分類 (1件)
 - **near_singularity_extended 3回連続実行: 3/3 PASS、全runでabortゼロ**。via-home経路の発動 (home区間50点+pregrasp16点の連結) をログで確認した。このケースはIssue #28以降、単発・マトリクスを通じて安定完走したことがなく、abortゼロでの3連続成功は初である
 
-<!-- MATRIX39_RESULTS -->
+## 効果検証: 初期姿勢10ケースの前後比較 (2026-07-13)
+
+同条件 (`CI_HEADLESS_STEPS=3600`、外乱注入なし、同一GPU) の直列10ケース。
+
+| 計測 | 成功率 | abort合計 | 備考 |
+|---|---:|---:|---|
+| Issue #32時点 | 8/10 | 13 | 固着ループ・99999あり |
+| Issue #37最終 (v5) | 8/10 | 5 | 失敗=起動flake 1 + near_singularity固着 1 |
+| **本対応後 (#39/#40)** | **10/10 (100%)** | **0** | **全計測を通じて初の全ケース成功・abortゼロ** |
+
+ケース別 (本対応後):
+
+| Case | #37 v5 | 今回 | E2E [s] |
+|---|---|---|---:|
+| default | PASS | PASS | 102 |
+| elbow_left | FAIL (起動flake) | PASS | 96 |
+| elbow_right | PASS | PASS | 93 |
+| shoulder_high | PASS | PASS | 91 |
+| shoulder_low | PASS | PASS | 86 |
+| wrist_left | PASS | PASS | 93 |
+| wrist_right | PASS | PASS | 101 |
+| folded_near | PASS | PASS | 79 |
+| extended_far | PASS | PASS | 105 |
+| near_singularity_extended | FAIL (固着) | **PASS** | 92 |
+
+### 評価
+
+1. **初の10/10・abortゼロ。** E2E時間も全ケース79〜105秒に収束しており (復旧に費やす時間がない)、Issue #28ベースライン (81〜147秒、abort 13回) から実行品質が根本的に変わった。
+2. **near_singularity_extendedはvia-home経路の発動 (このrunで1回) を含め、単発3連続と合わせて4連続PASS・abortゼロ。** 特異近傍ケースの固着対策として機能している。
+3. 今回runでは起動flakeは発生しなかった (リトライの発動なし)。分類機構 (`stack_startup_failed`) は発生時の計測汚染を防ぐ保険として機能する。
+4. 単一runの100%はflake支配系では過大評価になり得る。ただし固着の機序 (遠いIK枝・ゼロscene) はIssue #37で決定的に除去済みであり、残る変動要因は物理把持 (Issue #33) に限られる。週次CIでの複数run蓄積で確認する。
+
+## 残課題
+
+1. **Issue #41 (JTC指令凍結の制御層整理)**: 初期調査済み (静止判定gate・open_loop holdとcancel競合の疑い)。home経由・IK枝対策で実質踏まなくなったが、根本対応は#41で継続する。
+2. CI閾値: 70%のまま据え置き中。複数run蓄積後、90%への引き上げを判断する。
+3. 物理把持flake (grasp_evaluation失敗・トマト落下) はIssue #33の診断データ蓄積で対応する。
