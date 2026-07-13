@@ -46,24 +46,24 @@ flowchart TB
   classDef changed fill:#fff0a8,stroke:#a16207,stroke-width:3px,color:#111
   classDef kept fill:#e5e7eb,stroke:#4b5563,color:#111
 
-  subgraph N[local_planner_node]
-    Event[Hybrid planning event callback]:::kept
-    State[/joint_states snapshot]:::kept
-    Status[/local_safety_status adapter input]:::added
-    Select[solver selector<br/>safe_online default / linear baseline]:::changed
-    Guard[Safety guards<br/>collision / singularity / joint position]:::added
-    Timing[Smoothstep time scaling<br/>velocity / acceleration limits]:::added
-    Stamp[producer metadata stamping]:::kept
-    Publish[harvest_motion_plan publisher]:::kept
-    Stop[No publish + global recovery metric]:::added
+  subgraph N["local_planner_node"]
+    Event["Hybrid planning event callback"]:::kept
+    State["/joint_states snapshot"]:::kept
+    Status["/local_safety_status adapter input"]:::added
+    Select["solver selector<br/>safe_online default or linear baseline"]:::changed
+    Guard["Safety guards<br/>collision, singularity, joint position"]:::added
+    Timing["Smoothstep time scaling<br/>velocity and acceleration limits"]:::added
+    Stamp["producer metadata stamping"]:::kept
+    Publish["harvest_motion_plan publisher"]:::kept
+    Stop["Hard stop<br/>no publish and global recovery metric"]:::added
   end
 
   Event --> Select
   State --> Select
   Status --> Guard
   Select --> Guard
-  Guard -->|safe| Timing
-  Guard -->|hard stop| Stop
+  Guard --> Timing
+  Guard --> Stop
   Timing --> Stamp --> Publish
 ```
 
