@@ -303,26 +303,29 @@ class MoveItPlannerBackendTest(unittest.TestCase):
 
         self.assertEqual(clamped.positions_rad, home_state.positions_rad)
 
-    def test_goal_joint_window_centers_on_current_base_joint(self) -> None:
-        """pose goalへ併置するjoint1窓は現在値中心で、遠いIK枝を刈る (Issue #37)。
+    def test_goal_joint_window_covers_all_arm_joints(self) -> None:
+        """pose goalへ併置する窓は全arm関節を現在値中心で拘束する (Issue #37)。
 
-        abort診断の実測で、graspのpose goalがjoint1=2.45 radの遠いIK枝を選び、
-        JTCが追従不能なbase旋回 (goal_tolerance_violated) を誘発していた。
+        joint1のみの窓では、goal samplingがjoint2/3で関節限界張り付きの
+        遠いIK枝を選ぶ経路が残っていた (place固着 joint2=0.82 radを実測)。
         """
-        window = goal_joint_window(_joint_state(), window_rad=1.5)
+        windows = goal_joint_window(_joint_state(), window_rad=1.5)
 
-        self.assertIsNotNone(window)
-        assert window is not None
-        joint_name, position, tolerance = window
-        self.assertEqual(joint_name, "panda_joint1")
-        self.assertAlmostEqual(position, 0.0)
-        self.assertAlmostEqual(tolerance, 1.5)
+        self.assertIsNotNone(windows)
+        assert windows is not None
+        self.assertEqual(len(windows), 7)
+        names = [name for name, _, _ in windows]
+        self.assertIn("panda_joint1", names)
+        self.assertIn("panda_joint3", names)
+        joint3 = next(w for w in windows if w[0] == "panda_joint3")
+        self.assertAlmostEqual(joint3[1], 0.0)   # 現在値中心
+        self.assertAlmostEqual(joint3[2], 1.5)   # 半幅
 
     def test_goal_joint_window_disabled_by_zero_width(self) -> None:
         self.assertIsNone(goal_joint_window(_joint_state(), window_rad=0.0))
 
-    def test_goal_joint_window_requires_base_joint(self) -> None:
-        state = JointStateSnapshot(joint_names=("panda_joint2",), positions_rad=(0.5,))
+    def test_goal_joint_window_requires_arm_joints(self) -> None:
+        state = JointStateSnapshot(joint_names=("panda_finger_joint1",), positions_rad=(0.02,))
         self.assertIsNone(goal_joint_window(state, window_rad=1.5))
 
     def test_ik_solution_is_projected_to_arm_joints_in_order(self) -> None:
