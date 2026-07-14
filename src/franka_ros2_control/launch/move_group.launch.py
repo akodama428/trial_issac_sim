@@ -20,6 +20,9 @@ import xml.etree.ElementTree as ET
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -62,6 +65,8 @@ def generate_launch_description() -> LaunchDescription:
     kinematics = _load_yaml(os.path.join(pkg, "config", "kinematics.yaml"))
     ompl = _load_yaml(os.path.join(pkg, "config", "ompl_planning.yaml"))
     joint_limits = _load_yaml(os.path.join(pkg, "config", "joint_limits.yaml"))
+    servo = _load_yaml(os.path.join(pkg, "config", "moveit_servo.yaml"))
+    servo_mode = LaunchConfiguration("servo_mode")
 
     move_group_node = Node(
         package="moveit_ros_move_group",
@@ -107,4 +112,31 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    return LaunchDescription([move_group_node, safety_observation_node])
+    # off: Servoなし、jtc: JTCへ直接接続。
+    # jtc modeではrun_ros2_components.shがaction executorを起動しない。
+    servo_common_parameters = [
+            {"moveit_servo": servo},
+            {"robot_description": _safety_observation_urdf(urdf_content)},
+            {"robot_description_semantic": srdf_content},
+            {"robot_description_kinematics": kinematics},
+            {"use_sim_time": False},
+    ]
+    servo_jtc_node = Node(
+        package="moveit_servo",
+        executable="servo_node",
+        output="screen",
+        condition=IfCondition(PythonExpression(["'", servo_mode, "' == 'jtc'"])),
+        parameters=servo_common_parameters,
+    )
+
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            "servo_mode",
+            default_value="off",
+            choices=["off", "jtc"],
+            description="MoveIt Servo output mode; jtc requires exclusive executor ownership",
+        ),
+        move_group_node,
+        safety_observation_node,
+        servo_jtc_node,
+    ])

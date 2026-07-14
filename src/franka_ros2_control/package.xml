@@ -12,6 +12,7 @@
   <depend>hardware_interface</depend>
   <depend>moveit_core</depend>
   <depend>moveit_ros_planning</depend>
+  <exec_depend>moveit_servo</exec_depend>
   <depend>rclcpp</depend>
   <depend>rclcpp_action</depend>
   <depend>rclcpp_lifecycle</depend>

@@ -35,6 +35,7 @@ RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
     python3-rosdep \
     ros-${ROS_DISTRO}-desktop \
     ros-${ROS_DISTRO}-moveit \
+    ros-${ROS_DISTRO}-moveit-servo \
     ros-${ROS_DISTRO}-ros2-control \
     ros-${ROS_DISTRO}-ros2-controllers \
     ros-${ROS_DISTRO}-joint-trajectory-controller \

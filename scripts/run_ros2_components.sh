@@ -319,10 +319,19 @@ done
 # 4. MoveIt2 move_group 起動（optional, background）
 # ---------------------------------------------------------------------------- #
 if [[ "${USE_MOVEIT}" == "true" ]]; then
+  SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-off}"
+  case "${SERVO_MODE}" in
+    off|jtc) ;;
+    *)
+      log "ERROR: TOMATO_HARVEST_SERVO_MODE must be off or jtc: ${SERVO_MODE}"
+      exit 2
+      ;;
+  esac
   log "--- MoveIt2 move_group 起動 ---"
+  log "  MoveIt Servo mode: ${SERVO_MODE}"
   log "  ログ: ${CONTROLLER_LOG}.move_group"
   start_bg "move_group" \
-    ros2 launch franka_ros2_control move_group.launch.py \
+    ros2 launch franka_ros2_control move_group.launch.py servo_mode:="${SERVO_MODE}" \
     >> "${CONTROLLER_LOG}.move_group" 2>&1
 
   log "  move_group 起動待機中（/plan_kinematic_path サービス）..."
@@ -374,7 +383,8 @@ start_bg "motion_command_node" \
 # joint-space local planner (Issue #14, Issue #28 改善3)。有効化されたphaseで
 # 現在関節状態からglobal planの既存終端へ接続する補正planをpublishする。
 # INJECT_* は外乱注入E2E用、LOCAL_PLANNER_PHASES は通常運転での有効化。
-if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" || -n "${TOMATO_HARVEST_LOCAL_PLANNER_PHASES:-}" ]]; then
+if [[ "${TOMATO_HARVEST_SERVO_MODE:-off}" != "jtc" ]] && \
+   [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" || -n "${TOMATO_HARVEST_LOCAL_PLANNER_PHASES:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
   start_bg "local_planner_node" \
     python3 -m tomato_harvest_sim.robot.motion_planner.local_planner \
@@ -384,9 +394,18 @@ fi
 # ---------------------------------------------------------------------------- #
 # 6. franka_ros2_control の motion_command_executor_node 起動（background）
 # ---------------------------------------------------------------------------- #
-start_bg "motion_command_executor_node" \
-  ros2 run franka_ros2_control motion_command_executor_node \
-  >> "${CONTROLLER_LOG}" 2>&1
+SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-off}"
+if [[ "${SERVO_MODE}" != "jtc" ]]; then
+  start_bg "motion_command_executor_node" \
+    ros2 run franka_ros2_control motion_command_executor_node \
+    >> "${CONTROLLER_LOG}" 2>&1
+else
+  log "--- ServoExecutionAdapter起動（ServoがJTCを排他所有）---"
+  PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+  start_bg "servo_execution_adapter" \
+    python3 -m tomato_harvest_sim.robot.execute_manager.servo_execution_adapter \
+    >> "${CONTROLLER_LOG}" 2>&1
+fi
 
 # ---------------------------------------------------------------------------- #
 # 7. auto-start コマンド送信タスク（background）
