@@ -61,10 +61,9 @@ class PhaseId(StrEnum):
 
 
 class PlanProducerKind(StrEnum):
-    """plan を生成した producer の種別。将来の local planner 複線化で識別に使う。"""
+    """planを生成したproducerの種別。"""
 
     GLOBAL_PLANNER = "global_planner"
-    LOCAL_PLANNER = "local_planner"
     UNKNOWN = "unknown"
 
 
@@ -221,7 +220,7 @@ class HarvestMotionPlan:
     pull_joint_trajectory: JointTrajectory | None = None
     place_joint_trajectory: JointTrajectory | None = None
     # home区間trajectory (Issue #32)。初期planではNoneで、returning_home中の
-    # abort復旧 (suffix replan) やlocal補正が現在状態→home構成の軌道を刻む。
+    # abort復旧 (suffix replan) が現在状態→home構成の軌道を刻む。
     # Noneの場合、motion_commandは従来どおり現在位置→home定数の直行軌道を使う。
     home_joint_trajectory: JointTrajectory | None = None
     planning_scene_object_ids: tuple[str, ...] = ()
@@ -230,7 +229,8 @@ class HarvestMotionPlan:
     #   consumer の adoption policy はこれを契約違反として採用しない。
     # generated_at_sec: 生成時刻 (epoch 秒)。観測用でありノード間の採用判定には使わない。
     # planned_from_phase: 計画起点 phase。実行 phase 起点の replan は phase-bound になる。
-    # producer_kind: 生成した producer 種別。plan producer 複線化 (Step 5) の識別子。
+    # producer_kind: 生成した producer 種別。global planner 以外は arbitration が
+    #   fail-closed で棄却する。
     # producer_instance_id: producer process の起動単位。再起動による revision reset を識別する。
     plan_revision: int = 0
     generated_at_sec: float | None = None

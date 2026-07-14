@@ -10,6 +10,14 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Issue #46-4 MoveIt Servo速度調整（2026-07-14）
+
+- MoveIt Servo公式仕様では、`command_in_type: speed_units`のJointJog速度はrad/sとして扱われ、`scale.joint`はunitless入力の場合だけ適用される。このため今回の調整対象はadapterの比例gainと速度clampであり、`scale.joint`の変更ではない。
+- Franka公式のPanda推奨矩形速度上限は関節ごとに1.0〜3.0 rad/sで、最小はjoint 2の1.0 rad/sである。また実機では位置と移動方向に依存する速度上限がさらに適用される。
+- PoCの調整値は全関節共通0.8 rad/sとし、最小公称上限に20%の余裕を残す。比例gainは1.5から3.0へ上げるが、MoveIt ServoのURDF joint limit処理とButterworth smoothingは維持する。
+- 参照: https://moveit.picknik.ai/humble/doc/examples/realtime_servo/realtime_servo_tutorial.html
+- 参照: https://frankarobotics.github.io/docs/robot_specifications.html
+
 ```text
 Custom Docker Container
   ├─ Isaac Sim
@@ -250,6 +258,44 @@ Custom Docker Container
 - greenhouse row の寸法を決めた後に、camera の FOV と遮蔽率をどう再調整するか
 - fixed joint break の閾値を、トマトサイズと把持力に対してどの値から試すか
 - market asset の商品詳細を確認し、`fruit / stem / branch が別階層` を満たす候補を具体的に確定できるか
+
+## 22. Issue #46 safety-constrained online local solver
+
+- 調査日: 2026-07-14
+- 対象: MoveIt 2 Rolling公式文書・公式実装
+- 確認済みの事実:
+  - MoveIt Servoはcollision、singularity、joint limitを監視し、collisionまたはsingularityへの接近時に速度をscale downする。
+  - Servoの公式parameter例はsingularityにlower thresholdとhard-stop threshold、joint limit marginを持つ。
+  - `AccelerationLimitedPlugin`は実行可能な範囲で加速度制限を適用する。MoveItの通常planning pathはkinematicであり、実行前にtime parameterizationが必要である。
+  - MoveItのTime-Optimal Trajectory Generationは速度・加速度制限をtrajectoryへ付与し、Ruckig smoothingはjerk制限を追加できる。
+- 設計への反映:
+  - Issue #46ではServoの責務をproducer境界内の純粋Python solverで先行検証する。collision clearanceとJacobian由来singularity measureはadapter入力、joint position/velocity/accelerationはsolver内のhard constraintとする。
+  - 現行linear solverは比較baselineとして明示選択時だけ残し、既定をsmoothstep time-scaling付きsafe online solverへ切り替える。
+  - hard stop時はtrajectoryを生成せず、local publisherから下流へunsafe planを渡さない。実機安全認証を意味するものではない。
+- 一次情報:
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+  - https://github.com/ros-planning/moveit2/blob/main/moveit_ros/moveit_servo/config/servo_parameters.yaml
+  - https://moveit.picknik.ai/main/api/html/acceleration__filter_8hpp_source.html
+  - https://moveit.picknik.ai/main/doc/examples/time_parameterization/time_parameterization_tutorial.html
+  - https://moveit.picknik.ai/main/doc/concepts/trajectory_processing.html
+
+## 23. Issue #46-2 PlanningScene / Jacobian safety observation adapter
+
+- 調査日: 2026-07-14
+- 対象バージョン: MoveIt 2 Jazzy実行環境、MoveIt 2 main公式API（2026-07-14閲覧）
+- 確認済みの事実:
+  - `PlanningScene::distanceToCollision(robot_state)`は、Allowed Collision Matrixを考慮したrobotとworldの最近接距離を返す。公式APIはこの関数がself-collisionを含まないことも明記している。
+  - `PlanningScene::isStateColliding()`はenvironment collisionとself-collisionの双方を判定する。
+  - `RobotState::getJacobian()`は指定JointModelGroupとtip linkについてJacobianを計算できる。
+  - PlanningSceneMonitorはscene monitorとcurrent state monitorを開始し、monitored planning sceneとjoint statesから最新snapshotを維持できる。
+- 設計への反映:
+  - adapter nodeは`distanceToCollision()`をworld proximity、`isStateColliding()`を衝突時の0 m化、translational Jacobianのcondition numberをsingularity指標に用いる。
+  - condition number 17を減速開始、30をhard stopとするMoveIt Servo既定値の区間を0〜1へ正規化する。
+  - global MoveIt planningは従来のgeometryなしURDFを維持し、adapterだけに保守的primitive collision modelを渡す。把持の意図的接触をglobal plannerが拒否する回帰を避けるためである。
+- 一次情報:
+  - https://github.com/moveit/moveit2/blob/main/moveit_core/planning_scene/include/moveit/planning_scene/planning_scene.hpp
+  - https://moveit.picknik.ai/main/doc/examples/visualizing_collisions/visualizing_collisions_tutorial.html
+  - https://github.com/frankarobotics/franka_description
 
 ## 19. Step 6 local planner初期導入の境界
 
@@ -499,6 +545,24 @@ Custom Docker Container
   - https://github.com/ros-controls/ros2_controllers/blob/master/joint_trajectory_controller/src/joint_trajectory_controller.cpp
   - https://docs.ros.org/en/ros2_packages/jazzy/api/control_msgs/action/FollowJointTrajectory.html
   - https://docs.ros.org/en/jazzy/p/control_msgs/msg/JointTrajectoryControllerState.html
+
+## 27. Issue #46-3 MoveIt Servo node比較時の接続境界
+- 調査日: 2026-07-14
+- 対象version: MoveIt 2 Jazzy
+- 確認済み事項:
+  - Servo ROS nodeは`JointJog`、`TwistStamped`、`PoseStamped`を入力し、`JointTrajectory`または`Float64MultiArray`を周期出力する。
+  - Servoはcollision、singularity、joint limit、smoothingを内部で扱う。Jazzyの標準設定では100 Hz出力、singularity condition number 17から減速、30で停止する。
+  - `command_out_topic`はcontroller command topicへ直接接続する設計であり、現在の`FollowJointTrajectory` actionと同時に同じJTCへ接続すると、2つのcommand producerが競合する。
+  - `is_primary_planning_scene_monitor=false`により、既存`move_group`をPlanningSceneの正本として利用できる。
+- 設計判断:
+  - Issue #46-3ではlaunchの`servo_mode`を`off`、`jtc`から選ぶ。`jtc`ではServo出力をJTC command topicへ接続し、既存FollowJointTrajectory executorを停止してcommand producerを排他化する。実制御比較に寄与しないshadow modeは持たない。
+  - E2E収穫の置換判定には、phase lifecycle、Servo commandの連続供給、完了判定を担うadapterが必要である。JTC接続だけでは非劣化を証明できないため、既存solverは削除しない。
+  - 実装Gateでは既存`motion_command`のtrajectory終端を関節目標として再利用し、`ServoExecutionAdapter`が現在関節誤差から`JointJog`速度を50 Hzで連続生成する。Servoは公式ROS APIどおりJTC向け`JointTrajectory`へ変換し、collision、singularity、joint limit、smoothingを適用する。
+  - CI imageは`--no-install-recommends`を使うため、`ros-jazzy-moveit-servo`を明示依存にする。
+- ソース:
+  - https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+  - https://github.com/ros-planning/moveit2/blob/jazzy/moveit_ros/moveit_servo/config/servo_parameters.yaml
+  - https://github.com/ros-planning/moveit2/blob/jazzy/moveit_ros/moveit_servo/config/panda_simulated_config.yaml
 
 # ソース
 - NVIDIA Isaac Sim Container Installation

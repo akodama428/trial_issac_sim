@@ -52,45 +52,8 @@ if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
   exit 1
 fi
 
-# Issue #38: injection専用値ではなく、JTC feedback由来の実行中tracking errorが
-# executorから周期配信されていることを通常CIでも固定する。
+# JTC feedback由来の実行中tracking errorがServo adapterから周期配信されることを固定する。
 if ! grep -Eq 'execution_status \{"status":"running","tracking_error_rad":[0-9]' "${CONTROLLER_LOG}"; then
   echo "Periodic live tracking-error status was not observed." >&2
   exit 1
-fi
-
-if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" ]]; then
-  IFS=',' read -ra LOCAL_PLAN_PHASES <<< "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES}"
-  for phase in "${LOCAL_PLAN_PHASES[@]}"; do
-    phase="$(echo "${phase}" | tr -d '[:space:]')"
-    [[ -z "${phase}" ]] && continue
-    if ! grep -Eq "\"event\": \"local_plan_published\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
-      echo "Local correction plan was not published in phase ${phase}." >&2
-      exit 1
-    fi
-    if ! grep -Eq "\"event\": \"plan_adopted\".*\"planned_from_phase\": \"${phase}\".*\"producer_kind\": \"local_planner\"" "${ROBOT_LOG}"; then
-      echo "Local correction plan was not adopted through arbitration for phase ${phase}." >&2
-      exit 1
-    fi
-  done
-fi
-
-if [[ -n "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES:-}" ]]; then
-  IFS=',' read -ra INJECTION_PHASES <<< "${TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES}"
-  for phase in "${INJECTION_PHASES[@]}"; do
-    phase="$(echo "${phase}" | tr -d '[:space:]')"
-    [[ -z "${phase}" ]] && continue
-    if ! grep -Eq "\"event\": \"suffix_e2e_disturbance_injected\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
-      echo "Suffix E2E disturbance was not injected in phase ${phase}." >&2
-      exit 1
-    fi
-    if ! grep -Eq "\"event\": \"hybrid_event_routed\".*\"phase\": \"${phase}\".*\"route\": \"local\".*\"trigger\": \"tracking_error\"" "${ROBOT_LOG}"; then
-      echo "Tracking-error event was not routed exclusively to the local planner in phase ${phase}." >&2
-      exit 1
-    fi
-    if grep -Eq "\"event\": \"suffix_replan_completed\".*\"phase\": \"${phase}\".*\"trigger\": \"tracking_error\"" "${ROBOT_LOG}"; then
-      echo "Tracking error incorrectly started the global suffix planner in phase ${phase}." >&2
-      exit 1
-    fi
-  done
 fi

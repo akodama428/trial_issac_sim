@@ -7,7 +7,7 @@
     ROS2 robot nodes for tomato harvest simulation.
     Five component nodes (perception / behavior_planner / motion_planner /
     trajectory_monitor / motion_command) that communicate with the simulator
-    node and the C++ motion_command_executor in franka_ros2_control.
+    nodes and the MoveIt Servo execution adapter.
   </description>
   <maintainer email="kodamaatsushi428@gmail.com">atsushi</maintainer>
   <license>Apache-2.0</license>

@@ -1,0 +1,46 @@
+move_group_name: panda_arm
+
+# 100 Hz matches ros2_control. The node is launched only when Servo has
+# exclusive ownership of the JointTrajectoryController command input.
+publish_period: 0.01
+max_expected_latency: 0.10
+command_in_type: speed_units
+
+scale:
+  linear: 0.20
+  rotational: 0.50
+  joint: 0.40
+
+pose_command_in_topic: /tomato_harvest/moveit_servo/pose_target_cmds
+cartesian_command_in_topic: /tomato_harvest/moveit_servo/delta_twist_cmds
+joint_command_in_topic: /tomato_harvest/moveit_servo/delta_joint_cmds
+joint_topic: /joint_states
+status_topic: /tomato_harvest/moveit_servo/status
+
+command_out_type: trajectory_msgs/JointTrajectory
+command_out_topic: /joint_trajectory_controller/joint_trajectory
+publish_joint_positions: true
+publish_joint_velocities: false
+publish_joint_accelerations: false
+
+# move_group is the primary PlanningScene monitor. Servo consumes its updates.
+monitored_planning_scene_topic: /monitored_planning_scene
+is_primary_planning_scene_monitor: false
+check_octomap_collisions: false
+# The CI URDF intentionally has no collision geometry.  Enabling Servo's
+# collision monitor therefore produces a permanent halt.  The separate
+# PlanningScene/Jacobian safety adapter remains active in this comparison;
+# Servo collision checking is enabled only after the production geometry is
+# supplied.
+check_collisions: false
+collision_check_rate: 20.0
+self_collision_proximity_threshold: 0.01
+scene_collision_proximity_threshold: 0.02
+
+lower_singularity_threshold: 17.0
+hard_stop_singularity_threshold: 30.0
+leaving_singularity_threshold_multiplier: 2.0
+joint_limit_margins: [0.10]
+
+use_smoothing: true
+smoothing_filter_plugin_name: online_signal_smoothing::ButterworthFilterPlugin

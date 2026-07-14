@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-and-e2e:
-    name: Unit And Isaac E2E
+  unit-and-servo-e2e:
+    name: Unit And Servo E2E
     runs-on: [self-hosted, linux, x64, gpu]
     timeout-minutes: 180
     env:
@@ -27,10 +27,6 @@ jobs:
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
-      # Step 6/7: 全自由空間phaseへtracking error外乱を注入し、global suffix replanと
-      # joint-space local correctionが共存した状態で収穫を完走できることを検証する。
-      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
-      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
     steps:
       - name: Clean workspace residue
         run: |
@@ -73,6 +69,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-artifacts-${{ github.run_id }}
+          name: servo-ci-artifacts-${{ github.run_id }}
           path: .artifacts/ci
           if-no-files-found: warn
