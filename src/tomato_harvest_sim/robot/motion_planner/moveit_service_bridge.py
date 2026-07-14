@@ -158,10 +158,9 @@ class MoveIt2ServiceBridgePlanner(MotionPlanner):
     def __init__(
         self,
         *,
-        grasp_lateral_offset_m: float = 0.0,
         bridge: MoveIt2PlannerBridge | None = None,
     ) -> None:
-        self._fallback = MoveItStylePreGraspPlanner(grasp_lateral_offset_m=grasp_lateral_offset_m)
+        self._fallback = MoveItStylePreGraspPlanner()
         self._bridge = bridge or Ros2MoveIt2PlannerBridge()
 
     def plan(
@@ -1902,18 +1901,18 @@ def _quaternion_from_pose(pose: Pose3D) -> object:
     return quaternion
 
 
-def build_planner(*, grasp_lateral_offset_m: float = 0.0) -> tuple[MotionPlanner, PlannerBackendInfo]:
+def build_planner() -> tuple[MotionPlanner, PlannerBackendInfo]:
     requested = os.environ.get("TOMATO_HARVEST_PLANNER_BACKEND", "auto").strip().lower()
 
     if requested == "geometric":
-        planner = MoveItStylePreGraspPlanner(grasp_lateral_offset_m=grasp_lateral_offset_m)
+        planner = MoveItStylePreGraspPlanner()
         return planner, PlannerBackendInfo(name="geometric_fallback", moveit2_enabled=False)
 
     if _moveit2_python_available():
-        planner = MoveIt2ServiceBridgePlanner(grasp_lateral_offset_m=grasp_lateral_offset_m)
+        planner = MoveIt2ServiceBridgePlanner()
         return planner, PlannerBackendInfo(name="moveit2_service_bridge", moveit2_enabled=True)
 
-    planner = MoveItStylePreGraspPlanner(grasp_lateral_offset_m=grasp_lateral_offset_m)
+    planner = MoveItStylePreGraspPlanner()
     if requested == "moveit2":
         return planner, PlannerBackendInfo(name="geometric_fallback_moveit2_unavailable", moveit2_enabled=False)
     return planner, PlannerBackendInfo(name="geometric_fallback", moveit2_enabled=False)

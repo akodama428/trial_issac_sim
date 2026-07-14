@@ -23,7 +23,6 @@ class MoveItStylePreGraspPlanner:
         pull_offset_z_m: float = 0.08,
         pull_lift_offset_x_m: float = 0.02,
         pull_lift_offset_z_m: float = 0.06,
-        grasp_lateral_offset_m: float = 0.0,
         place_vertical_offset_m: float = 0.12,
         place_hover_offset_m: float = 0.10,
     ) -> None:
@@ -36,7 +35,6 @@ class MoveItStylePreGraspPlanner:
         self._pull_offset_z_m = pull_offset_z_m
         self._pull_lift_offset_x_m = pull_lift_offset_x_m
         self._pull_lift_offset_z_m = pull_lift_offset_z_m
-        self._grasp_lateral_offset_m = grasp_lateral_offset_m
         self._place_vertical_offset_m = place_vertical_offset_m
         self._place_hover_offset_m = place_hover_offset_m
 
@@ -60,7 +58,7 @@ class MoveItStylePreGraspPlanner:
         )
         grasp_hover_pose = Pose3D(
             round(target_pose.x, 6),
-            round(target_pose.y + self._grasp_lateral_offset_m, 6),
+            round(target_pose.y, 6),
             round(target_pose.z + self._grasp_hover_offset_z_m, 6),
             180.0,
             0.0,
@@ -68,7 +66,7 @@ class MoveItStylePreGraspPlanner:
         )
         grasp_entry_pose = Pose3D(
             round(target_pose.x, 6),
-            round(target_pose.y + self._grasp_lateral_offset_m, 6),
+            round(target_pose.y, 6),
             round(target_pose.z + self._grasp_entry_offset_z_m, 6),
             180.0,
             0.0,
@@ -76,7 +74,7 @@ class MoveItStylePreGraspPlanner:
         )
         grasp_pose = Pose3D(
             round(target_pose.x, 6),
-            round(target_pose.y + self._grasp_lateral_offset_m, 6),
+            round(target_pose.y, 6),
             round(target_pose.z + self._grasp_target_offset_z_m, 6),
             180.0,
             0.0,
@@ -84,7 +82,7 @@ class MoveItStylePreGraspPlanner:
         )
         pull_lift_pose = Pose3D(
             round(target_pose.x - self._pull_lift_offset_x_m, 6),
-            round(target_pose.y + self._grasp_lateral_offset_m, 6),
+            round(target_pose.y, 6),
             round(target_pose.z + self._pull_lift_offset_z_m, 6),
             180.0,
             0.0,
@@ -92,7 +90,7 @@ class MoveItStylePreGraspPlanner:
         )
         pull_pose = Pose3D(
             round(target_pose.x - self._pull_offset_x_m, 6),
-            round(target_pose.y + self._grasp_lateral_offset_m, 6),
+            round(target_pose.y, 6),
             round(target_pose.z + self._pull_offset_z_m, 6),
             180.0,
             0.0,
