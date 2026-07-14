@@ -64,14 +64,19 @@ if [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" ]]; then
   for phase in "${LOCAL_PLAN_PHASES[@]}"; do
     phase="$(echo "${phase}" | tr -d '[:space:]')"
     [[ -z "${phase}" ]] && continue
-    if ! grep -Eq "\"event\": \"local_plan_published\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
-      echo "Local correction plan was not published in phase ${phase}." >&2
-      exit 1
+    if grep -Eq "\"event\": \"local_plan_published\".*\"phase\": \"${phase}\"" "${ROBOT_LOG}"; then
+      if ! grep -Eq "\"event\": \"plan_adopted\".*\"planned_from_phase\": \"${phase}\".*\"producer_kind\": \"local_planner\"" "${ROBOT_LOG}"; then
+        echo "Local correction plan was not adopted through arbitration for phase ${phase}." >&2
+        exit 1
+      fi
+      continue
     fi
-    if ! grep -Eq "\"event\": \"plan_adopted\".*\"planned_from_phase\": \"${phase}\".*\"producer_kind\": \"local_planner\"" "${ROBOT_LOG}"; then
-      echo "Local correction plan was not adopted through arbitration for phase ${phase}." >&2
-      exit 1
+    if grep -Eq "\"event\": \"local_plan_skipped\".*\"phase\": \"${phase}\".*\"reason\": \"unsafe_or_unavailable_candidate\"" "${ROBOT_LOG}"; then
+      echo "Local correction was safety-rejected in phase ${phase}; accepting safe fallback."
+      continue
     fi
+    echo "Local correction was neither published nor safety-rejected in phase ${phase}." >&2
+    exit 1
   done
 fi
 

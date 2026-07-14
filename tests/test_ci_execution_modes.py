@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
+E2E_ASSERTIONS = ROOT / "scripts/ci/in_container_e2e.sh"
 
 
 def _jobs() -> dict[str, object]:
@@ -36,3 +37,12 @@ def test_legacy_job_explicitly_selects_off_mode_and_injections() -> None:
     assert legacy_env["TOMATO_HARVEST_SERVO_MODE"] == "off"
     assert legacy_env["TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES"]
     assert legacy_env["TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES"]
+
+
+def test_legacy_local_assertion_accepts_only_published_or_safety_rejected() -> None:
+    assertions = E2E_ASSERTIONS.read_text(encoding="utf-8")
+
+    assert "local_plan_published" in assertions
+    assert "local_plan_skipped" in assertions
+    assert "unsafe_or_unavailable_candidate" in assertions
+    assert "neither published nor safety-rejected" in assertions
