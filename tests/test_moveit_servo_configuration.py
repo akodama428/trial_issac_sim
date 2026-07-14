@@ -34,23 +34,35 @@ def test_servo_keeps_singularity_and_joint_limit_safety_thresholds() -> None:
     assert config["joint_limit_margins"] == [0.10]
 
 
-def test_servo_launch_defaults_to_jtc_and_supports_explicit_fallback() -> None:
+def test_servo_launch_is_the_only_execution_mode() -> None:
     launch_source = LAUNCH.read_text(encoding="utf-8")
 
-    assert '"servo_mode"' in launch_source
-    assert 'default_value="jtc"' in launch_source
-    assert 'choices=["off", "jtc"]' in launch_source
+    assert '"servo_mode"' not in launch_source
+    assert "LaunchConfiguration" not in launch_source
+    assert "IfCondition" not in launch_source
     assert "shadow" not in launch_source
     assert 'package="moveit_servo"' in launch_source
 
 
-def test_jtc_mode_disables_follow_joint_trajectory_executor() -> None:
+def test_runner_starts_only_servo_execution_adapter() -> None:
     runner = (ROOT / "scripts/run_ros2_components.sh").read_text(encoding="utf-8")
 
-    assert 'TOMATO_HARVEST_SERVO_MODE:-jtc' in runner
-    assert '"${SERVO_MODE}" != "jtc"' in runner
     assert 'python3 -m tomato_harvest_sim.robot.execute_manager.servo_execution_adapter' in runner
-    assert '"${SERVO_MODE}" != "jtc"' in runner
+    assert "TOMATO_HARVEST_SERVO_MODE" not in runner
+    assert "motion_command_executor_node" not in runner
+    assert "local_planner_node" not in runner
+
+
+def test_removed_execution_path_sources_do_not_exist() -> None:
+    removed = (
+        ROOT / "src/franka_ros2_control/src/motion_command_executor_node.cpp",
+        ROOT / "src/franka_ros2_control/src/motion_command_executor_core.cpp",
+        ROOT / "src/franka_ros2_control/include/franka_ros2_control/motion_command_executor_core.hpp",
+        ROOT / "src/tomato_harvest_sim/robot/motion_planner/local_planner.py",
+        ROOT / "src/tomato_harvest_sim/robot/motion_planner/safe_online_solver.py",
+    )
+
+    assert all(not path.exists() for path in removed)
 
 
 def test_ci_image_installs_servo_explicitly() -> None:

@@ -9,7 +9,7 @@
 #   3. controller_manager の起動待機とコントローラーのスポウン
 #   4. MoveIt2 move_group を background 起動（--moveit 指定時のみ）
 #   5. tomato_harvest_robot の Python ノード群を background 起動
-#   6. franka_ros2_control の motion_command_executor_node を background 起動
+#   6. MoveIt Servo execution adapter を background 起動
 #   7. tomato_harvest_simulator_node（または Isaac Sim）を foreground 起動
 #   8. 終了時に全 background プロセスをクリーンアップ
 #
@@ -216,7 +216,6 @@ cleanup() {
   # ros2_control / spawner の残留プロセスも念のため終了
   pkill -f "ros2_control_node" 2>/dev/null || true
   pkill -f "spawner joint_" 2>/dev/null || true
-  pkill -f "motion_command_executor_node" 2>/dev/null || true
   log "クリーンアップ完了"
 }
 trap cleanup EXIT INT TERM
@@ -224,7 +223,6 @@ trap cleanup EXIT INT TERM
 log "--- 既存プロセスのクリーンアップ ---"
 pkill -f "ros2_control_node" 2>/dev/null || true
 pkill -f "tomato_harvest_sim\." 2>/dev/null || true  # 全 tomato_harvest_sim ノード
-pkill -f "motion_command_executor_node" 2>/dev/null || true
 pkill -f "run_harvest_viewer" 2>/dev/null || true
 pkill -f "moveit_ros_move_group" 2>/dev/null || true
 pkill -f "robot_state_publisher" 2>/dev/null || true
@@ -319,19 +317,10 @@ done
 # 4. MoveIt2 move_group 起動（optional, background）
 # ---------------------------------------------------------------------------- #
 if [[ "${USE_MOVEIT}" == "true" ]]; then
-  SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-jtc}"
-  case "${SERVO_MODE}" in
-    off|jtc) ;;
-    *)
-      log "ERROR: TOMATO_HARVEST_SERVO_MODE must be off or jtc: ${SERVO_MODE}"
-      exit 2
-      ;;
-  esac
   log "--- MoveIt2 move_group 起動 ---"
-  log "  MoveIt Servo mode: ${SERVO_MODE}"
   log "  ログ: ${CONTROLLER_LOG}.move_group"
   start_bg "move_group" \
-    ros2 launch franka_ros2_control move_group.launch.py servo_mode:="${SERVO_MODE}" \
+    ros2 launch franka_ros2_control move_group.launch.py \
     >> "${CONTROLLER_LOG}.move_group" 2>&1
 
   log "  move_group 起動待機中（/plan_kinematic_path サービス）..."
@@ -380,32 +369,14 @@ start_bg "motion_command_node" \
   python3 -m tomato_harvest_sim.robot.execute_manager.motion_command \
   >> "${ROBOT_LOG}" 2>&1
 
-# joint-space local planner (Issue #14, Issue #28 改善3)。有効化されたphaseで
-# 現在関節状態からglobal planの既存終端へ接続する補正planをpublishする。
-# INJECT_* は外乱注入E2E用、LOCAL_PLANNER_PHASES は通常運転での有効化。
-if [[ "${TOMATO_HARVEST_SERVO_MODE:-jtc}" != "jtc" ]] && \
-   [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" || -n "${TOMATO_HARVEST_LOCAL_PLANNER_PHASES:-}" ]]; then
-  PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  start_bg "local_planner_node" \
-    python3 -m tomato_harvest_sim.robot.motion_planner.local_planner \
-    >> "${ROBOT_LOG}" 2>&1
-fi
-
 # ---------------------------------------------------------------------------- #
-# 6. franka_ros2_control の motion_command_executor_node 起動（background）
+# 6. MoveIt Servo execution adapter 起動（background）
 # ---------------------------------------------------------------------------- #
-SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-jtc}"
-if [[ "${SERVO_MODE}" != "jtc" ]]; then
-  start_bg "motion_command_executor_node" \
-    ros2 run franka_ros2_control motion_command_executor_node \
-    >> "${CONTROLLER_LOG}" 2>&1
-else
-  log "--- ServoExecutionAdapter起動（ServoがJTCを排他所有）---"
-  PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
-  start_bg "servo_execution_adapter" \
-    python3 -m tomato_harvest_sim.robot.execute_manager.servo_execution_adapter \
-    >> "${CONTROLLER_LOG}" 2>&1
-fi
+log "--- ServoExecutionAdapter起動（ServoがJTCを排他所有）---"
+PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
+start_bg "servo_execution_adapter" \
+  python3 -m tomato_harvest_sim.robot.execute_manager.servo_execution_adapter \
+  >> "${CONTROLLER_LOG}" 2>&1
 
 # ---------------------------------------------------------------------------- #
 # 7. auto-start コマンド送信タスク（background）

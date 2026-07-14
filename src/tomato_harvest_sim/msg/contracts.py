@@ -61,10 +61,9 @@ class PhaseId(StrEnum):
 
 
 class PlanProducerKind(StrEnum):
-    """plan を生成した producer の種別。将来の local planner 複線化で識別に使う。"""
+    """planを生成したproducerの種別。"""
 
     GLOBAL_PLANNER = "global_planner"
-    LOCAL_PLANNER = "local_planner"
     UNKNOWN = "unknown"
 
 

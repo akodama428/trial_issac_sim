@@ -221,9 +221,6 @@ def main() -> None:
                 "hybrid_event_routed", phase=phase,
                 trigger=decision.trigger.value, route=route.value,
             ))
-            if route is PlannerRoute.LOCAL:
-                self._state.clear_tracking_error()
-                return
             if not trigger_starts_planner(decision.trigger, state.phase):
                 self.get_logger().info(metric_line(
                     "replan_trigger_observed",

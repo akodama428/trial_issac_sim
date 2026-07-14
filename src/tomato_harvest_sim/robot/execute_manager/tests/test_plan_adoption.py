@@ -199,15 +199,13 @@ class TestProducerAndMetadataRule(unittest.TestCase):
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_unknown_producer")
 
-    def test_known_producer_kinds_share_the_same_contract_rules(self) -> None:
-        """producer間の裁定はarbitration policyの責務であり、adoption policyは
-        既知のproducer種別に対して共通の契約・順序規則だけを適用する。"""
+    def test_global_producer_uses_contract_rules(self) -> None:
         decision = evaluate_plan_adoption(
             candidate=make_plan(
                 plan_revision=1,
                 planned_from_phase=HarvestTaskPhase.MOVING_TO_PLACE,
-                producer_kind=PlanProducerKind.LOCAL_PLANNER,
-                producer_instance_id="local-instance-a",
+                producer_kind=PlanProducerKind.GLOBAL_PLANNER,
+                producer_instance_id="global-instance-a",
             ),
             current_plan=None,
             current_phase=HarvestTaskPhase.MOVING_TO_PLACE,

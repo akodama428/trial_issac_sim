@@ -7,7 +7,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
-E2E_ASSERTIONS = ROOT / "scripts/ci/in_container_e2e.sh"
 
 
 def _jobs() -> dict[str, object]:
@@ -15,12 +14,10 @@ def _jobs() -> dict[str, object]:
     return workflow["jobs"]
 
 
-def test_default_servo_and_legacy_local_e2e_are_separate_jobs() -> None:
+def test_ci_has_only_unit_and_servo_e2e_job() -> None:
     jobs = _jobs()
 
-    assert "unit-and-servo-e2e" in jobs
-    assert "legacy-local-e2e" in jobs
-    assert jobs["legacy-local-e2e"]["needs"] == "unit-and-servo-e2e"
+    assert set(jobs) == {"unit-and-servo-e2e"}
 
 
 def test_default_servo_job_does_not_enable_legacy_injections() -> None:
@@ -31,18 +28,9 @@ def test_default_servo_job_does_not_enable_legacy_injections() -> None:
     assert "TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES" not in servo_env
 
 
-def test_legacy_job_explicitly_selects_off_mode_and_injections() -> None:
-    legacy_env = _jobs()["legacy-local-e2e"]["env"]
+def test_ci_workflow_contains_no_legacy_mode_or_injections() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert legacy_env["TOMATO_HARVEST_SERVO_MODE"] == "off"
-    assert legacy_env["TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES"]
-    assert legacy_env["TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES"]
-
-
-def test_legacy_local_assertion_accepts_only_published_or_safety_rejected() -> None:
-    assertions = E2E_ASSERTIONS.read_text(encoding="utf-8")
-
-    assert "local_plan_published" in assertions
-    assert "local_plan_skipped" in assertions
-    assert "unsafe_or_unavailable_candidate" in assertions
-    assert "neither published nor safety-rejected" in assertions
+    assert "legacy-local-e2e" not in source
+    assert "TOMATO_HARVEST_SERVO_MODE" not in source
+    assert "TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES" not in source

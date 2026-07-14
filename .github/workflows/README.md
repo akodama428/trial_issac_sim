@@ -42,7 +42,7 @@
 
 ### モジュール内の処理概要
 
-2ジョブを同一GPU上で直列実行する。`unit-and-servo-e2e`は**「unit test → default Servo E2E」**を実行し、legacy注入変数を設定しない。成功後に`legacy-local-e2e`が`TOMATO_HARVEST_SERVO_MODE=off`を明示し、local/suffix外乱注入を検証する。local solverが候補を生成できた場合は補正plan採用を必須とし、PlanningScene安全観測が危険と判定した場合は`unsafe_or_unavailable_candidate`による拒否を正しいsafe fallbackとして扱う。`needs`で直列化するため、host networkを使うROS 2/Isaac Simが同時起動しない。
+`unit-and-servo-e2e`の単一ジョブで、**「unit test → MoveIt Servo E2E」**を実行する。ServoがJTCを排他所有し、収穫サイクル完走とJTC feedback由来のtracking error周期配信を検証する。
 
 各ステップの要点:
 
