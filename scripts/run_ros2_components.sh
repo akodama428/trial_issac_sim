@@ -319,7 +319,7 @@ done
 # 4. MoveIt2 move_group 起動（optional, background）
 # ---------------------------------------------------------------------------- #
 if [[ "${USE_MOVEIT}" == "true" ]]; then
-  SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-off}"
+  SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-jtc}"
   case "${SERVO_MODE}" in
     off|jtc) ;;
     *)
@@ -383,7 +383,7 @@ start_bg "motion_command_node" \
 # joint-space local planner (Issue #14, Issue #28 改善3)。有効化されたphaseで
 # 現在関節状態からglobal planの既存終端へ接続する補正planをpublishする。
 # INJECT_* は外乱注入E2E用、LOCAL_PLANNER_PHASES は通常運転での有効化。
-if [[ "${TOMATO_HARVEST_SERVO_MODE:-off}" != "jtc" ]] && \
+if [[ "${TOMATO_HARVEST_SERVO_MODE:-jtc}" != "jtc" ]] && \
    [[ -n "${TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES:-}" || -n "${TOMATO_HARVEST_LOCAL_PLANNER_PHASES:-}" ]]; then
   PYTHONPATH="${REPO_ROOT}/src${PYTHONPATH:+:${PYTHONPATH}}" \
   start_bg "local_planner_node" \
@@ -394,7 +394,7 @@ fi
 # ---------------------------------------------------------------------------- #
 # 6. franka_ros2_control の motion_command_executor_node 起動（background）
 # ---------------------------------------------------------------------------- #
-SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-off}"
+SERVO_MODE="${TOMATO_HARVEST_SERVO_MODE:-jtc}"
 if [[ "${SERVO_MODE}" != "jtc" ]]; then
   start_bg "motion_command_executor_node" \
     ros2 run franka_ros2_control motion_command_executor_node \

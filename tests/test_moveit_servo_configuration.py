@@ -34,11 +34,11 @@ def test_servo_keeps_singularity_and_joint_limit_safety_thresholds() -> None:
     assert config["joint_limit_margins"] == [0.10]
 
 
-def test_servo_launch_supports_only_off_and_jtc_modes() -> None:
+def test_servo_launch_defaults_to_jtc_and_supports_explicit_fallback() -> None:
     launch_source = LAUNCH.read_text(encoding="utf-8")
 
     assert '"servo_mode"' in launch_source
-    assert 'default_value="off"' in launch_source
+    assert 'default_value="jtc"' in launch_source
     assert 'choices=["off", "jtc"]' in launch_source
     assert "shadow" not in launch_source
     assert 'package="moveit_servo"' in launch_source
@@ -47,7 +47,7 @@ def test_servo_launch_supports_only_off_and_jtc_modes() -> None:
 def test_jtc_mode_disables_follow_joint_trajectory_executor() -> None:
     runner = (ROOT / "scripts/run_ros2_components.sh").read_text(encoding="utf-8")
 
-    assert 'TOMATO_HARVEST_SERVO_MODE:-off' in runner
+    assert 'TOMATO_HARVEST_SERVO_MODE:-jtc' in runner
     assert '"${SERVO_MODE}" != "jtc"' in runner
     assert 'python3 -m tomato_harvest_sim.robot.execute_manager.servo_execution_adapter' in runner
     assert '"${SERVO_MODE}" != "jtc"' in runner

@@ -128,7 +128,7 @@ MoveIt Servoの`command_in_type`は`speed_units`である。この場合JointJog
 3. CI/production URDFへcollision geometryを追加し、Servo内部collision checkを再有効化する。
 4. 経路間で同一定義になるJTC desired-versus-actual tracking errorを収集する。
 
-既存executor、`local_planner_node`、safe online solverは現時点では削除しない。今回の結果は速度面の置換条件だけを満たしたものである。
+速度Gate通過後はPR CIでServo経路を常時検証するため、defaultを`jtc`へ変更する。既存executor、`local_planner_node`、safe online solverは`off` fallbackとして現時点では削除しない。今回の結果は速度面の置換条件だけを満たしたものである。
 
 ## テスト
 

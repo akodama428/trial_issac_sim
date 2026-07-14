@@ -132,7 +132,7 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription([
         DeclareLaunchArgument(
             "servo_mode",
-            default_value="off",
+            default_value="jtc",
             choices=["off", "jtc"],
             description="MoveIt Servo output mode; jtc requires exclusive executor ownership",
         ),
