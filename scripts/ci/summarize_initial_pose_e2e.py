@@ -5,14 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
+import runpy
 from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-
-from tomato_harvest_sim.simulator.initial_pose_cases import INITIAL_POSE_CASES
+INITIAL_POSE_CASES = runpy.run_path(
+    str(SRC_ROOT / "tomato_harvest_sim/simulator/initial_pose_cases.py")
+)["INITIAL_POSE_CASES"]
 
 
 def _grasp_diagnostics(log: str) -> dict[str, object]:

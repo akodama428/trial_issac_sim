@@ -104,12 +104,40 @@ flowchart TB
 
 PR #49のrun `29346477237`では、削除前workflowの先頭ジョブ`Unit And Servo E2E`が成功した。これはunit test、MoveIt Servo、JTC、Isaac Simを通る採用後と同じ実行経路の完走証跡である。後続のLegacy jobの失敗は、旧off経路のlocal補正検証に限定される。本変更後は旧実装とjobの双方が存在しないため、次回PR CIはServo単一jobで判定する。
 
+## 10初期姿勢E2E結果
+
+Servo単一路への変更後commit `476d0d58af904350f9ffa7a60458442239520211`を対象に、GitHub Actions run `29372467821`で10ケースを実行した。特異姿勢として`near_singularity_extended`を含む。
+
+| Case | 結果 | E2E時間 [s] | tracking error最大値 [rad] | live sample数 |
+|---|---|---:|---:|---:|
+| `default` | PASS | 85 | 1.931282 | 575 |
+| `elbow_left` | PASS | 85 | 1.950568 | 453 |
+| `elbow_right` | PASS | 94 | 2.967424 | 527 |
+| `shoulder_high` | PASS | 110 | 2.022277 | 539 |
+| `shoulder_low` | PASS | 93 | 4.670453 | 683 |
+| `wrist_left` | PASS | 98 | 3.178522 | 539 |
+| `wrist_right` | PASS | 94 | 2.197251 | 548 |
+| `folded_near` | PASS | 93 | 3.587698 | 628 |
+| `extended_far` | PASS | 80 | 1.448685 | 542 |
+| `near_singularity_extended` | PASS | 92 | 1.531207 | 568 |
+
+成功率は**10/10（100%）**で、設定threshold 70%を上回った。全ケースで収穫cycleが`complete`へ到達し、失敗phaseは記録されなかった。特異姿勢ケースも92秒で完走した。
+
+tracking error最大値は「現在姿勢から最新trajectory終端までの残差」であり、JTCのdesired-versus-actual誤差ではない。`shoulder_low`の4.670453 radを経路追従誤差として直接評価してはならず、Servo command受信直後の目標残差を含む観測値として扱う。
+
+### Workflow表示がFailになった理由
+
+10件のE2E processはすべてexit status 0だったが、最後の集計scriptがself-hosted runnerのPython 3.10で`enum.StrEnum`をimportし、`ImportError`になった。このためActions上のrun conclusionはfailureとなり、summary fileの自動生成だけが失敗した。保存された10ケースartifactを同じ集計関数で再集計し、上表の100%を確認した。
+
+E2Eとは独立した集計環境問題を解消するため、集計scriptはpackage `__init__`を経由せず、Python 3.10互換の`runpy`で初期姿勢定義だけを読むよう修正した。次回workflowではE2E結果とjob conclusionが一致する。
+
 ## ローカル回帰結果
 
 - Servo単一路・CI構成テスト: 11件成功。
 - repository Python test: 238件成功、2件skip（削除対象専用テストを除去後）。
 - shell構文検査とlaunch Python構文検査: 成功。
-- C++ package buildとIsaac Sim E2E: push後の単一Servo PR CIで最終確認する。
+- 変更後の単一Servo PR CI: 成功（run `29347201266`、3分56秒）。
+- 10初期姿勢Isaac Sim E2E: 10/10成功。
 
 ## 結論
 
