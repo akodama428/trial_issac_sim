@@ -50,7 +50,7 @@ class PlannerStateAggregatorTest(unittest.TestCase):
         joints = JointStateSnapshot(("joint1",), (0.25,))
         aggregator.update_phase(HarvestTaskPhase.MOVING_TO_GRASP)
         aggregator.update_joint_state(joints)
-        aggregator.update_tracking_error(0.12)
+        aggregator.observe_tracking_error(0.12)
 
         state = aggregator.snapshot()
         self.assertEqual(state.phase, HarvestTaskPhase.MOVING_TO_GRASP)
@@ -63,15 +63,13 @@ class PlannerStateAggregatorTest(unittest.TestCase):
         aggregator.observe_abort()
         self.assertEqual(aggregator.snapshot().abort_generation, 2)
 
-    def test_tracking_error_peak_is_held_until_explicitly_cleared(self) -> None:
+    def test_tracking_error_holds_the_peak_of_observed_values(self) -> None:
         aggregator = PlannerStateAggregator()
 
         aggregator.observe_tracking_error(0.15)
         aggregator.observe_tracking_error(0.03)
 
         self.assertEqual(aggregator.snapshot().tracking_error_rad, 0.15)
-        aggregator.clear_tracking_error()
-        self.assertIsNone(aggregator.snapshot().tracking_error_rad)
 
     def test_pending_tracking_error_is_not_carried_to_next_phase(self) -> None:
         aggregator = PlannerStateAggregator()

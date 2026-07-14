@@ -7,7 +7,6 @@ from tomato_harvest_sim.msg.contracts import (
 )
 from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     ReplanTrigger, TriggerMemory, evaluate_replan_trigger,
-    parse_suffix_injection_phases, should_inject_suffix_replan,
     should_plan_on_snapshot_arrival,
     trigger_starts_planner,
 )
@@ -23,49 +22,6 @@ def _ready_state(**changes: object) -> PlannerState:
     )
     values.update(changes)
     return PlannerState(**values)
-
-
-class ReplanTriggerPolicyTest(unittest.TestCase):
-    def test_e2e_suffix_replan_injection_runs_once_per_enabled_phase(self) -> None:
-        enabled = frozenset({
-            HarvestTaskPhase.MOVING_TO_PREGRASP, HarvestTaskPhase.MOVING_TO_PLACE,
-        })
-        self.assertTrue(should_inject_suffix_replan(
-            enabled_phases=enabled, injected_phases=frozenset(),
-            phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
-        ))
-        self.assertFalse(should_inject_suffix_replan(
-            enabled_phases=enabled,
-            injected_phases=frozenset({HarvestTaskPhase.MOVING_TO_PREGRASP}),
-            phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
-        ))
-        self.assertTrue(should_inject_suffix_replan(
-            enabled_phases=enabled,
-            injected_phases=frozenset({HarvestTaskPhase.MOVING_TO_PREGRASP}),
-            phase=HarvestTaskPhase.MOVING_TO_PLACE,
-        ))
-        self.assertFalse(should_inject_suffix_replan(
-            enabled_phases=enabled, injected_phases=frozenset(),
-            phase=HarvestTaskPhase.MOVING_TO_GRASP,
-        ))
-
-    def test_injection_phases_are_parsed_from_environment_value(self) -> None:
-        self.assertEqual(
-            parse_suffix_injection_phases("moving_to_pregrasp, moving_to_place"),
-            frozenset({
-                HarvestTaskPhase.MOVING_TO_PREGRASP,
-                HarvestTaskPhase.MOVING_TO_PLACE,
-            }),
-        )
-        self.assertEqual(parse_suffix_injection_phases(""), frozenset())
-        self.assertEqual(parse_suffix_injection_phases("detaching, bogus"), frozenset())
-
-    def test_returning_home_is_a_valid_correction_phase(self) -> None:
-        """home復帰もsuffix replan対象になったため有効化phaseとして受理する (Issue #32)。"""
-        self.assertEqual(
-            parse_suffix_injection_phases("returning_home"),
-            frozenset({HarvestTaskPhase.RETURNING_HOME}),
-        )
 
 
 class PlanOnSnapshotArrivalTest(unittest.TestCase):

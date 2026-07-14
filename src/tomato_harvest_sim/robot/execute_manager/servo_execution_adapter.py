@@ -127,8 +127,8 @@ def execution_status_payload(
         payload["max_joint_error_rad"] = max_error_rad
     if abort_reason is not None:
         payload["abort_reason"] = abort_reason
-    # Keep status first for compatibility with the existing executor's CI log
-    # contract (Issue #38).
+    # Keep status first to preserve the execution_status CI log contract
+    # (Issue #38).
     return json.dumps(payload, separators=(",", ":"))
 
 

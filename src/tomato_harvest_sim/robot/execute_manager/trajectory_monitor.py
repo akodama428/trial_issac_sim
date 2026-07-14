@@ -1,4 +1,4 @@
-"""trajectory_monitor_node — C++ MotionCommandExecutor の execution_status を監視し trajectory_status を publish する。
+"""trajectory_monitor_node — servo_execution_adapter の execution_status を監視し trajectory_status を publish する。
 
 アーキテクチャ仕様: docs/index.html §trajectory_monitor_node
 """
@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 
-# executorの実行中・abort診断のうち、下流 (trajectory_planner_node) の契約へ通す field。
+# 実行中・abort診断のうち、下流 (trajectory_planner_node) の契約へ通す field。
 # 最大追従誤差・律速joint・abort分類はabort原因の特定に使う (Issue #32)。
 # ピーク時の律速joint目標/実位置は関節限界近傍の固着判定に使う (Issue #37)。
 _EXECUTION_DIAGNOSTIC_FIELDS = (
@@ -36,12 +36,12 @@ def trajectory_status_from_execution_status(execution_status: str) -> str:
 def trajectory_status_payload(execution_status_raw: str) -> str:
     """execution_status のraw値を、abort診断付きのtrajectory status JSONへ変換する。
 
-    executorはabort時に status とともに最大joint追従誤差・律速joint・
-    abort reasonをJSONで報告する (Issue #32)。plain文字列 ("running"等) の
-    旧形式も受け付け、常にJSON文字列を返す。
+    servo_execution_adapterはabort時に status とともに最大joint追従誤差・
+    律速joint・abort reasonをJSONで報告する (Issue #32)。plain文字列
+    ("running"等) の旧形式も受け付け、常にJSON文字列を返す。
 
     Args:
-        execution_status_raw: executorが publish した生のstatus文字列。
+        execution_status_raw: servo_execution_adapterが publish した生のstatus文字列。
 
     Returns:
         {"status": "ok"|"aborted", ...診断fields} のJSON文字列。

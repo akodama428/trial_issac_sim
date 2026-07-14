@@ -10,7 +10,6 @@ PHASE_TOPIC = "/tomato_harvest/phase"
 HARVEST_MOTION_PLAN_TOPIC = "/tomato_harvest/harvest_motion_plan"
 EXECUTION_STATUS_TOPIC = "/tomato_harvest/execution_status"
 TRAJECTORY_STATUS_TOPIC = "/tomato_harvest/trajectory_status"
-HYBRID_PLANNING_EVENT_TOPIC = "/tomato_harvest/hybrid_planning_event"
 LOCAL_SAFETY_STATUS_TOPIC = "/tomato_harvest/local_safety_status"
 FIXED_CAMERA_TOPIC = "/camera/fixed/image_raw"
 HAND_CAMERA_TOPIC = "/camera/hand/image_raw"
@@ -32,8 +31,8 @@ DEFAULT_JOINT_POSITIONS_RAD = (0.0, -0.4, 0.0, -2.1, 0.0, 1.7, 0.8)
 def home_joint_state():
     """home復帰の目標となる既知の関節構成を返す (Issue #32)。
 
-    motion_commandの直行home軌道と、returning_homeのsuffix replan /
-    local補正が同じ終端構成を共有するための単一の定義点。
+    motion_commandの直行home軌道と、returning_homeのsuffix replanが
+    同じ終端構成を共有するための単一の定義点。
 
     Returns:
         DEFAULT_JOINT_NAMES / DEFAULT_JOINT_POSITIONS_RAD からなる

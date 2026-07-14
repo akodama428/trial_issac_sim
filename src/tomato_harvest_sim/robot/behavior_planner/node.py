@@ -38,7 +38,7 @@ def _pose_error_m(a: object, b: object) -> float:
 def execution_status_value(raw: str) -> str:
     """execution_statusのraw値からstatus文字列を取り出す。
 
-    executorはabort診断のためstatusをJSONで報告することがある (Issue #32)。
+    servo_execution_adapterはabort診断のためstatusをJSONで報告することがある (Issue #32)。
     旧来のplain文字列 ("succeeded"等) とJSON形式の両方を受け付け、
     phase遷移判定に使うstatus値だけを返す。
     """
@@ -223,7 +223,7 @@ def main() -> None:
             再計画は trajectory_planner_node が /trajectory_status の "aborted" を
             受けて独立に行う。ここで phase を再 publish すると
             motion_command_node が古い plan で即座にコマンドを再生成し、
-            executor の "aborted" と往復する高速ループになるため何もしない。
+            実行系の "aborted" と往復する高速ループになるため何もしない。
             """
             if not self._running:
                 return

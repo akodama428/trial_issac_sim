@@ -10,7 +10,7 @@ IFS=',' read -ra CASE_IDS <<< "${INITIAL_POSE_CASE_IDS:-${CASES}}"
 for case_id in "${CASE_IDS[@]}"; do
   started="$(date +%s)"
   echo "Running initial pose case: ${case_id}"
-  # 外乱注入は無効のまま、Issue #28 改善3のlocal planner補正を通常運転として有効化する。
+  # Servo単一実行経路の通常運転で全初期姿勢を検証する (外乱注入なし)。
   CI_ARTIFACT_ROOT="${RESULT_ROOT}/${case_id}" \
   TOMATO_HARVEST_INITIAL_POSE_ID="${case_id}" \
   TOMATO_HARVEST_DEBUG_PHYSICS_GRASP="${INITIAL_POSE_DEBUG_PHYSICS-1}" \

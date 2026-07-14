@@ -11,8 +11,6 @@ from tomato_harvest_sim.robot.motion_planner.replan_trigger import (
     TriggerMemory,
     evaluate_replan_trigger,
     memory_after_trigger,
-    parse_suffix_injection_phases,
-    should_inject_suffix_replan,
     should_plan_on_snapshot_arrival,
     trigger_starts_planner,
 )
@@ -29,7 +27,6 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
 
 def main() -> None:
     import json
-    import os
     import uuid
     import rclpy
     from rclpy.node import Node
@@ -42,7 +39,6 @@ def main() -> None:
         HarvestTaskPhase,
         JointStateSnapshot,
         PlanProducerKind,
-        TargetEstimate,
     )
     from tomato_harvest_sim.msg.topics import (
         HARVEST_MOTION_PLAN_TOPIC,
@@ -51,7 +47,6 @@ def main() -> None:
         SCENE_SNAPSHOT_TOPIC,
         TARGET_ESTIMATE_TOPIC,
         TRAJECTORY_STATUS_TOPIC,
-        HYBRID_PLANNING_EVENT_TOPIC,
     )
     from tomato_harvest_sim.msg.serialization import (
         harvest_motion_plan_to_json,
@@ -68,15 +63,10 @@ def main() -> None:
             planner, info = build_planner()
             self._planner = planner
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
-            self._event_pub = self.create_publisher(String, HYBRID_PLANNING_EVENT_TOPIC, 10)
             self._state = PlannerStateAggregator()
             self._trigger_memory = TriggerMemory()
             self._suffix_replan_gate = SuffixReplanGate()
             self._latest_plan = None
-            self._suffix_injection_phases = parse_suffix_injection_phases(
-                os.environ.get("TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES", "")
-            )
-            self._suffix_injected_phases: frozenset[HarvestTaskPhase] = frozenset()
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
             self._producer_instance_id = uuid.uuid4().hex
 
@@ -99,8 +89,6 @@ def main() -> None:
             # home区間計画へ能動的に置き換える (Issue #32)。
             if should_plan_home_on_entry(previous_phase, phase):
                 self._try_suffix_plan(trigger="home_entry")
-            if phase in SUFFIX_REPLAN_PHASES:
-                self._inject_suffix_replan_if_requested()
 
         def _on_estimate(self, msg: String) -> None:
             self._state.update_target_estimate(target_estimate_from_json(msg.data))
@@ -140,7 +128,7 @@ def main() -> None:
             if str(status.get("status", "")).strip() == "aborted":
                 self._state.observe_abort()
                 phase = self._state.snapshot().phase
-                # executor由来のabort診断 (Issue #32)。最大追従誤差・律速joint・
+                # 実行系由来のabort診断 (Issue #32)。最大追従誤差・律速joint・
                 # abort分類を同じイベントに載せ、abort原因を後追い可能にする。
                 self.get_logger().info(metric_line(
                     "phase_abort_observed",
@@ -151,37 +139,6 @@ def main() -> None:
                     limiting_joint_actual_rad=status.get("limiting_joint_actual_rad"),
                     abort_reason=status.get("abort_reason"),
                 ))
-            self._evaluate_replan_trigger()
-
-        def _on_replan_timer(self) -> None:
-            self._evaluate_replan_trigger()
-
-        def _inject_suffix_replan_if_requested(self) -> None:
-            """Inject and handle the E2E disturbance at a suffix phase boundary.
-
-            Running this synchronously from ``_on_phase`` prevents the simulator
-            from completing the phase motion before the one-second timer gets a
-            chance to inject the tracking error.
-            """
-            state = self._state.snapshot()
-            if not should_inject_suffix_replan(
-                enabled_phases=self._suffix_injection_phases,
-                injected_phases=self._suffix_injected_phases,
-                phase=state.phase,
-            ):
-                return
-            self._suffix_injected_phases = self._suffix_injected_phases | {state.phase}
-            self._trigger_memory = replace(
-                self._trigger_memory,
-                last_replan_at_sec=None,
-                handled_scene_generation=state.scene_generation,
-            )
-            self._state.observe_tracking_error(0.20)
-            self.get_logger().info(metric_line(
-                "suffix_e2e_disturbance_injected",
-                phase=state.phase.value,
-                tracking_error_rad=0.20,
-            ))
             self._evaluate_replan_trigger()
 
         def _evaluate_replan_trigger(self) -> None:
@@ -203,30 +160,12 @@ def main() -> None:
             self._trigger_memory = memory_after_trigger(
                 state=state, memory=self._trigger_memory, now_sec=now_sec
             )
-            from tomato_harvest_sim.robot.motion_planner.hybrid_event import (
-                PlannerRoute, route_event,
-            )
-            route = route_event(decision.trigger, state.phase)
-            event = String()
-            event.data = json.dumps({
-                "event_id": uuid.uuid4().hex,
-                "event_at_sec": time.time(),
-                "trigger": decision.trigger.value,
-                "phase": phase,
-                "route": route.value,
-                "tracking_error_rad": state.tracking_error_rad,
-            }, sort_keys=True)
-            self._event_pub.publish(event)
-            self.get_logger().info(metric_line(
-                "hybrid_event_routed", phase=phase,
-                trigger=decision.trigger.value, route=route.value,
-            ))
             if not trigger_starts_planner(decision.trigger, state.phase):
                 self.get_logger().info(metric_line(
                     "replan_trigger_observed",
                     phase=phase,
                     trigger=decision.trigger.value,
-                    action="observe_only_until_suffix_planning",
+                    action="observe_only_under_servo",
                 ))
                 return
             if state.phase in SUFFIX_REPLAN_PHASES:
@@ -300,8 +239,6 @@ def main() -> None:
                     return
                 self._publish_plan(candidate, trigger=trigger, phase=phase)
             finally:
-                if phase in self._suffix_injected_phases:
-                    self._state.clear_tracking_error()
                 self._suffix_replan_gate.finish()
 
         def _try_plan(self, *, trigger: str) -> None:

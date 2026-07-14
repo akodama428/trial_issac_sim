@@ -38,7 +38,7 @@ TEST(LocalSafetyObservation, InvalidJacobianIsRejected)
   EXPECT_FALSE(normalized_singularity_margin(Eigen::MatrixXd()).has_value());
 }
 
-TEST(LocalSafetyObservation, JsonUsesExistingLocalPlannerContract)
+TEST(LocalSafetyObservation, JsonSerializesSafetyObservationContract)
 {
   EXPECT_EQ(
     local_safety_observation_json({0.043, 0.75}),

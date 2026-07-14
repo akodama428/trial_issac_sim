@@ -15,6 +15,7 @@ from tomato_harvest_sim.msg.contracts import (
     MotionCommand,
     PhaseId,
     PhaseMotionPlan,
+    Pose3D,
 )
 from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
 
@@ -129,8 +130,8 @@ def _build_phase_motion_command(
                                   plan.place_pose, False, current_joints)
 
     if phase is HarvestTaskPhase.RETURNING_HOME:
-        # abort復旧・local補正が刻んだ衝突考慮済みのhome区間trajectoryがあれば
-        # 優先する (Issue #32)。無ければ従来どおりhome定数への直行軌道を使う。
+        # abort復旧 (suffix replan) が刻んだ衝突考慮済みのhome区間trajectoryが
+        # あれば優先する (Issue #32)。無ければ従来どおりhome定数への直行軌道を使う。
         if plan.home_joint_trajectory is not None:
             return _make_command("move_home", PhaseId.RETURNING_HOME,
                                  None, plan.home_joint_trajectory, False, plan)

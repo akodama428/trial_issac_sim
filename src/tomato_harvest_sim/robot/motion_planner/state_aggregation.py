@@ -13,7 +13,7 @@ from tomato_harvest_sim.msg.contracts import (
 
 @dataclass(frozen=True)
 class PlannerState:
-    """global/local planner と trigger policy が共有する一時点の入力。"""
+    """planner と trigger policy が共有する一時点の入力。"""
 
     phase: HarvestTaskPhase | None = None
     joint_state: JointStateSnapshot | None = None
@@ -50,20 +50,14 @@ class PlannerStateAggregator:
     def update_target_estimate(self, estimate: TargetEstimate) -> None:
         self._state = replace(self._state, target_estimate=estimate)
 
-    def update_tracking_error(self, tracking_error_rad: float | None) -> None:
-        self._state = replace(self._state, tracking_error_rad=tracking_error_rad)
-
     def observe_tracking_error(self, tracking_error_rad: float) -> None:
-        """未処理の瞬時誤差peakをlocal event受理まで保持する。"""
+        """未処理の瞬時誤差peakをphase境界まで保持する。"""
         current = self._state.tracking_error_rad
         self._state = replace(
             self._state,
             tracking_error_rad=max(current, tracking_error_rad)
             if current is not None else tracking_error_rad,
         )
-
-    def clear_tracking_error(self) -> None:
-        self._state = replace(self._state, tracking_error_rad=None)
 
     def observe_abort(self) -> None:
         self._state = replace(

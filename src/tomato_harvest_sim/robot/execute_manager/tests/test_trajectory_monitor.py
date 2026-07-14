@@ -24,7 +24,7 @@ class TestTrajectoryMonitorLogic(unittest.TestCase):
 
 
 class TestTrajectoryStatusPayload(unittest.TestCase):
-    """abort診断をexecutorからplannerまで通すJSON payload変換 (Issue #32)。"""
+    """abort診断を実行系からplannerまで通すJSON payload変換 (Issue #32)。"""
 
     def test_plain_running_becomes_ok_json(self) -> None:
         payload = json.loads(trajectory_status_payload("running"))
