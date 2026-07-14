@@ -12,8 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit-and-e2e:
-    name: Unit And Isaac E2E
+  unit-and-servo-e2e:
+    name: Unit And Servo E2E
     runs-on: [self-hosted, linux, x64, gpu]
     timeout-minutes: 180
     env:
@@ -27,10 +27,6 @@ jobs:
       CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci
       ACCEPT_EULA: "Y"
       PRIVACY_CONSENT: "Y"
-      # Step 6/7: 全自由空間phaseへtracking error外乱を注入し、global suffix replanと
-      # joint-space local correctionが共存した状態で収穫を完走できることを検証する。
-      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
-      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
     steps:
       - name: Clean workspace residue
         run: |
@@ -73,6 +69,66 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ci-artifacts-${{ github.run_id }}
+          name: servo-ci-artifacts-${{ github.run_id }}
           path: .artifacts/ci
+          if-no-files-found: warn
+
+  legacy-local-e2e:
+    name: Legacy Local Planner E2E
+    needs: unit-and-servo-e2e
+    runs-on: [self-hosted, linux, x64, gpu]
+    timeout-minutes: 180
+    env:
+      CI_IMAGE_REPOSITORY: tomato-harvest-sim-ci-base
+      CI_IMAGE_TAG: cached
+      CI_HEADLESS_STEPS: "3600"
+      CI_E2E_TIMEOUT_SEC: "2400"
+      CI_ARTIFACT_ROOT: ${{ github.workspace }}/.artifacts/ci-legacy
+      ACCEPT_EULA: "Y"
+      PRIVACY_CONSENT: "Y"
+      TOMATO_HARVEST_SERVO_MODE: "off"
+      # Legacy fallbackだけでlocal/suffix注入とplan採用を検証する。
+      TOMATO_HARVEST_INJECT_SUFFIX_REPLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
+      TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES: "moving_to_pregrasp,moving_to_grasp,moving_to_place,returning_home"
+    steps:
+      - name: Clean workspace residue
+        run: |
+          docker run --rm -v "${{ github.workspace }}:/w" alpine \
+            chown -R "$(id -u):$(id -g)" /w || true
+          if [ -d "${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}" ]; then
+            docker run --rm -v "${CI_CACHE_ROOT:-/tmp/tomato-harvest-sim-cache-github-actions}:/c" alpine \
+              chown -R "$(id -u):$(id -g)" /c || true
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare artifact root
+        run: mkdir -p "${CI_ARTIFACT_ROOT}"
+
+      - name: Login to NGC
+        env:
+          NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+        run: |
+          if [ -z "${NGC_API_KEY}" ]; then
+            echo "NGC_API_KEY is not set. Skipping docker login to nvcr.io."
+            exit 0
+          fi
+          printf '%s' "${NGC_API_KEY}" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+
+      - name: Check runner prerequisites
+        run: bash ./scripts/ci/check_runner_prereqs.sh
+
+      - name: Prepare cached CI base image
+        run: bash ./scripts/ci/build_ci_image.sh
+
+      - name: Run legacy local planner E2E
+        run: bash ./scripts/ci/run_e2e.sh
+
+      - name: Upload legacy CI artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-ci-artifacts-${{ github.run_id }}
+          path: .artifacts/ci-legacy
           if-no-files-found: warn

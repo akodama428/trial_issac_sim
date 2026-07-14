@@ -42,7 +42,7 @@
 
 ### モジュール内の処理概要
 
-単一ジョブ `unit-and-e2e`(`runs-on: [self-hosted, linux, x64, gpu]`、timeout 180分)が、**「残骸掃除 → checkout → NGC ログイン → 前提確認 → イメージ準備 → unit テスト → Isaac Sim E2E → 成果物回収」** を直列に実行する。ワークフロー本体は薄いオーケストレーションに徹し、実処理はすべて `scripts/ci/` のシェルスクリプトへ委譲されている(ホスト側 `run_*.sh` と、コンテナ内で実行される `in_container_*.sh` の2層構造)。
+2ジョブを同一GPU上で直列実行する。`unit-and-servo-e2e`は**「unit test → default Servo E2E」**を実行し、legacy注入変数を設定しない。成功後に`legacy-local-e2e`が`TOMATO_HARVEST_SERVO_MODE=off`を明示し、local/suffix外乱注入と補正plan採用を検証する。`needs`で直列化するため、host networkを使うROS 2/Isaac Simが同時起動しない。ワークフロー本体は薄いオーケストレーションに徹し、実処理は `scripts/ci/` のシェルスクリプトへ委譲されている。
 
 各ステップの要点:
 
@@ -62,8 +62,8 @@
 
 ```mermaid
 flowchart TD
-  T[push / pull_request / workflow_dispatch] --> C{concurrency<br>同一refの旧実行をキャンセル}
-  C --> S1[Clean workspace residue<br>alpineでchown 残骸掃除]
+  T[pull_request / workflow_dispatch] --> C{concurrency<br>同一refの旧実行をキャンセル}
+  C --> S1[Servo job<br/>Clean workspace residue]
   S1 --> S2[actions/checkout@v4]
   S2 --> S3[Prepare artifact root]
   S3 --> S4[Login to NGC<br>キー未設定ならスキップ]
@@ -73,7 +73,10 @@ flowchart TD
   S7 --> S7i[in_container_unit_tests.sh<br>colcon build → pytest → colcon test]
   S7i --> S8[run_e2e.sh<br>GPU+host networkコンテナ起動]
   S8 --> S8i[in_container_e2e.sh<br>timeout付きで run_ros2_components.sh<br>--headless-steps 3600 実行<br>ログマーカーで成否判定]
-  S8i --> S9[upload-artifact if: always<br>.artifacts/ci を回収]
+  S8i --> S9[Servo artifact upload]
+  S9 --> L1[Legacy job<br/>explicit off mode]
+  L1 --> L2[local and suffix disturbance E2E]
+  L2 --> L3[Legacy artifact upload]
 
   subgraph ランナーローカル状態
     IMG[(tomato-harvest-sim-ci-base:cached)]
@@ -84,7 +87,7 @@ flowchart TD
   S8 -.マウント.-> CACHE
 ```
 
-- **[ci.yml](ci.yml)**: トリガー・環境変数・ステップ順序の定義のみ。ロジックは持たない
+- **[ci.yml](ci.yml)**: default Servo検証とlegacy local-planner検証を別ジョブとして定義し、`needs`で直列化する
 - **[check_runner_prereqs.sh](../../scripts/ci/check_runner_prereqs.sh)**: ランナー前提条件の検証と環境スナップショット記録
 - **[build_ci_image.sh](../../scripts/ci/build_ci_image.sh)**: フィンガープリントベースの CI イメージキャッシュ管理
 - **[run_unit_tests.sh](../../scripts/ci/run_unit_tests.sh) / [run_e2e.sh](../../scripts/ci/run_e2e.sh)**: ホスト側。`docker run` の引数組み立て(ユーザー・グループ・マウント・環境変数)が責務
