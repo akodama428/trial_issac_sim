@@ -11,6 +11,7 @@ from tomato_harvest_sim.simulator.scene_config import (
     load_physics_tuning_config,
 )
 from tomato_harvest_sim.simulator.physics_observation import (
+    contact_forces_from_impulses,
     FingerContactImpulses,
     estimate_stem_tension_n,
     format_observation_line,
@@ -73,6 +74,7 @@ class IsaacPhysicsHarvestBridge:
         self._detach_reported = False
         self._contact_subscription = None
         self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
+        self._physics_sequence_id = 0
         self._previous_tomato_velocity = (0.0, 0.0, 0.0)
         self._debug_enabled = os.environ.get(
             "TOMATO_HARVEST_DEBUG_PHYSICS_GRASP",
@@ -134,17 +136,21 @@ class IsaacPhysicsHarvestBridge:
             self._debug_log(f"[PhysicsTuning] {line}")
 
     def begin_physics_step(self) -> None:
+        self._physics_sequence_id += 1
         self._pending_finger_contacts = set()
         self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
 
     def finalize_physics_step(self, controller: object) -> None:
         snapshot = controller.current_scene_snapshot()
+        forces = contact_forces_from_impulses(
+            self._pending_contact_impulses, dt_sec=self.OBSERVATION_PHYSICS_DT_SEC
+        )
         self._promote_pending_contacts(gripper_closed=snapshot.gripper_closed)
         controller.sync_grasp_diagnostics(
             left_contact="left" in self._active_finger_contacts,
             right_contact="right" in self._active_finger_contacts,
-            left_force_n=self._pending_contact_impulses.left_ns / self.OBSERVATION_PHYSICS_DT_SEC,
-            right_force_n=self._pending_contact_impulses.right_ns / self.OBSERVATION_PHYSICS_DT_SEC,
+            left_force_n=forces.left_n,
+            right_force_n=forces.right_n,
         )
         self._debug_log(
             "[PhysicsHarvest] finalize "
@@ -362,11 +368,16 @@ class IsaacPhysicsHarvestBridge:
         self._previous_tomato_velocity = velocity
         print(
             format_observation_line(
+                sequence_id=self._physics_sequence_id,
                 timestamp_sec=time.monotonic(),
                 tomato_status=snapshot.tomato_status.value,
                 gripper_closed=bool(snapshot.gripper_closed),
                 grasp_joint_active=self._grasp_joint_active,
                 impulses=self._pending_contact_impulses,
+                forces=contact_forces_from_impulses(
+                    self._pending_contact_impulses,
+                    dt_sec=self.OBSERVATION_PHYSICS_DT_SEC,
+                ),
                 tomato_speed_m_s=speed,
                 hand_distance_m=self._distance(hand_pose, tomato_pose),
                 stem_distance_m=self._distance(stem_pose, tomato_pose),
