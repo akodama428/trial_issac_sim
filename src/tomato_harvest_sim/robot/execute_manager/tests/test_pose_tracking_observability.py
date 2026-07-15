@@ -11,6 +11,7 @@ def test_pose_tracking_sample_keeps_command_tf_error_and_servo_status_together()
         published_count=7,
         planning_frame="panda_link0",
         end_effector_frame="panda_link8",
+        pose_source="scene_snapshot",
         target=Pose3D(0.4, 0.1, 0.55, 180.0, 0.0, 90.0),
         current=Pose3D(0.39, 0.1, 0.54, 179.0, 0.0, 90.0),
         position_error_m=0.014142,
@@ -24,6 +25,7 @@ def test_pose_tracking_sample_keeps_command_tf_error_and_servo_status_together()
 
     assert fields["sequence_id"] == 7
     assert fields["published_count"] == 7
+    assert fields["pose_source"] == "scene_snapshot"
     assert fields["target_xyz_m"] == [0.4, 0.1, 0.55]
     assert fields["current_xyz_m"] == [0.39, 0.1, 0.54]
     assert fields["position_error_m"] == 0.014142

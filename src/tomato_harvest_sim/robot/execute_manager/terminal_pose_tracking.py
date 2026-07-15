@@ -18,6 +18,26 @@ class PoseTrackingDecision:
     reached: bool
 
 
+@dataclass(frozen=True)
+class CurrentLinkPose:
+    """到達判定に使うpanda_link8 poseと取得元。"""
+
+    pose: Pose3D
+    source: str
+
+
+def select_current_link_pose(
+    tf_pose: Pose3D | None,
+    runtime_tool_pose: Pose3D | None,
+) -> CurrentLinkPose | None:
+    """TFを優先し、欠落時はSceneSnapshotのtool poseをlink8へ変換する。"""
+    if tf_pose is not None:
+        return CurrentLinkPose(tf_pose, "tf")
+    if runtime_tool_pose is not None:
+        return CurrentLinkPose(moveit_link_pose(runtime_tool_pose), "scene_snapshot")
+    return None
+
+
 def decide_pose_tracking(
     goal: Pose3D,
     current_pose: Pose3D,

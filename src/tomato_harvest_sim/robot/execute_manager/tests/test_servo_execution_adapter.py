@@ -17,6 +17,9 @@ from tomato_harvest_sim.robot.execute_manager.servo_execution_adapter import (
     gripper_state_at_tracking_start,
     servo_target_from_command,
 )
+from tomato_harvest_sim.robot.execute_manager.terminal_pose_tracking import (
+    select_current_link_pose,
+)
 
 
 def _command(*, phase: PhaseId = PhaseId.MOVING_TO_PREGRASP) -> MotionCommand:
@@ -73,6 +76,31 @@ def test_pose_tracking_requires_stable_position_and_orientation_tolerance() -> N
     assert reached is not None and reached.reached is True
     assert reached.position_error_m == 0.002
     assert outside is not None and outside.reached is False
+
+
+def test_current_link_pose_prefers_tf_observation() -> None:
+    tf_pose = Pose3D(0.3, 0.1, 0.6, 180.0, 0.0, 90.0)
+    runtime_tool_pose = Pose3D(0.4, 0.2, 0.5, 180.0, 0.0, 90.0)
+
+    selected = select_current_link_pose(tf_pose, runtime_tool_pose)
+
+    assert selected is not None
+    assert selected.pose == tf_pose
+    assert selected.source == "tf"
+
+
+def test_current_link_pose_falls_back_to_scene_snapshot_tool_pose() -> None:
+    selected = select_current_link_pose(
+        None, Pose3D(0.4, 0.1, 0.5, 180.0, 0.0, 90.0)
+    )
+
+    assert selected is not None
+    assert selected.pose == Pose3D(0.4, 0.1, 0.5584, 180.0, 0.0, 90.0)
+    assert selected.source == "scene_snapshot"
+
+
+def test_current_link_pose_is_unavailable_without_tf_or_scene_snapshot() -> None:
+    assert select_current_link_pose(None, None) is None
 
 
 def test_joint_jog_reorders_feedback_and_clamps_velocity() -> None:

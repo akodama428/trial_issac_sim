@@ -261,3 +261,63 @@ deadline不足ではない。Pose commandは50 Hzでpublishされている一方
 ## 結論
 
 案Aと案Bのコードおよびunit testは導入でき、repository testは全件成功した。追加観測により、Pose Tracking timeoutの直接原因は`panda_link8` TF欠落で到達判定が一度も実行されないことだと確定した。したがって今回の変更を「摩擦保持改善成功」とは判定しない。次のGateはcurrent EEF poseの供給契約を決定してG2を通し、その後に案Aの実接触整合を検証することである。
+
+## 方式2: SceneSnapshot current pose fallback（2026-07-16）
+
+EEF pose供給契約には方式2を採用した。TFを第一候補として維持し、TFに`panda_link8`が無い場合だけ、0.5秒以内に受信した`SceneSnapshot.robot_tool_pose`へ既存のlocal link/tool offset 58.4 mmを適用してcurrent `panda_link8` poseを導出する。これにより実機向けTF経路を上書きせず、Step 3のsim真値による段階検証を継続できる。
+
+```mermaid
+flowchart LR
+  TF[TF panda_link0 to panda_link8] --> S{current pose selector}
+  SS[SceneSnapshot robot_tool_pose] --> F[58.4 mm local offset transform]
+  F --> S
+  S -->|TF priority| E[6D error and stable samples]
+  S -->|TF missing: scene_snapshot| E
+  E --> X[execution_status]
+```
+
+### 実装と安全条件
+
+- TF poseが存在する場合は従来どおりTFを優先する。
+- SceneSnapshotは受信から0.5秒を超えた場合に利用せず、stale真値による誤到達判定を防ぐ。
+- runtime tool poseとtarget runtime tool poseへ同じ姿勢込みoffset変換を適用する。
+- 観測sampleに`pose_source=tf|scene_snapshot`を追加する。
+- TF失敗countと例外ログはfallback成功時も残し、ROS graph不備を隠さない。
+
+### テスト結果
+
+| 項目 | 結果 |
+|---|---|
+| repository pytest | **PASS: 253件、2件skip** |
+| TF優先選択 | PASS |
+| TF欠落時SceneSnapshot fallback | PASS |
+| 両入力欠落時の判定停止 | PASS |
+| Python compile | PASS |
+| GPU physics E2E | **FAIL: terminal phase `failed`** |
+
+### GPU physics E2E詳細
+
+| 項目 | 結果 |
+|---|---|
+| phase | `idle -> detecting -> target_found -> moving_to_pregrasp -> moving_to_grasp -> at_grasp -> grasp_evaluation -> failed` |
+| current pose source | `scene_snapshot` |
+| TF lookup | 引き続き`panda_link8`欠落、fallbackで継続 |
+| moving-to-grasp Pose収束 | **PASS**、1,556.935 ms、位置誤差4.572 mm、姿勢誤差0 rad |
+| grasp-evaluation hold Pose収束 | **PASS**、124.873 ms、位置誤差4.920 mm、姿勢誤差0 rad |
+| 両指contact | 左右ともfalse |
+| 両指force | 左右ともnull |
+| gripper state | `false`のまま |
+| grasp result | `awaiting_physics_release`後にtimeoutして`failed` |
+
+### Gate更新と残課題
+
+| Gate | 判定 | 根拠 |
+|---|---|---|
+| G0 planner / pregrasp復旧 | PASS | pregraspからgraspへ遷移 |
+| G1 Pose command mode切替 | PASS | Pose commandがcurrent poseを収束させた |
+| G2 終端Pose収束 | **PASS** | 5 mm以内を3 sample連続で満たした |
+| G3 観測整合 | BLOCKED | gripperがopenのままで実接触なし |
+| G4 有効両指接触 | FAIL | 左右contact=false、force=null |
+| G5 friction hold | BLOCKED | 物理把持が開始されない |
+
+方式2はTF欠落による到達判定停止を解消し、G2を通過させた。ただし摩擦保持の全体E2E成功には至っていない。次の直接課題は、Pose Tracking中に遅延した閉爪を`AT_GRASP`または`GRASP_EVALUATION`開始時に確実に有効化し、案Aの左右contact/force整合を実接触で評価することである。
