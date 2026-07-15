@@ -2,10 +2,52 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from tomato_harvest_sim.msg.contracts import Pose3D
 
 MOVEIT_LINK_TO_RUNTIME_TOOL_OFFSET_M = (0.0, 0.0, 0.0584)
+
+
+@dataclass(frozen=True)
+class PoseTrackingDecision:
+    """終端pose trackingの6D誤差と到達判定。"""
+
+    position_error_m: float
+    orientation_error_rad: float
+    reached: bool
+
+
+def decide_pose_tracking(
+    goal: Pose3D,
+    current_pose: Pose3D,
+    *,
+    position_tolerance_m: float,
+    orientation_tolerance_rad: float,
+) -> PoseTrackingDecision:
+    """現在EEF poseが終端目標の6D許容範囲内か判定する。"""
+    position_error = math.sqrt(
+        (goal.x - current_pose.x) ** 2
+        + (goal.y - current_pose.y) ** 2
+        + (goal.z - current_pose.z) ** 2
+    )
+    angle_errors = tuple(
+        math.radians(((desired - current + 180.0) % 360.0) - 180.0)
+        for desired, current in zip(
+            (goal.roll, goal.pitch, goal.yaw),
+            (current_pose.roll, current_pose.pitch, current_pose.yaw),
+            strict=True,
+        )
+    )
+    orientation_error = math.sqrt(sum(error * error for error in angle_errors))
+    return PoseTrackingDecision(
+        position_error_m=round(position_error, 6),
+        orientation_error_rad=round(orientation_error, 6),
+        reached=(
+            position_error <= position_tolerance_m
+            and orientation_error <= orientation_tolerance_rad
+        ),
+    )
 
 
 def moveit_link_pose(runtime_tool_pose: Pose3D) -> Pose3D:

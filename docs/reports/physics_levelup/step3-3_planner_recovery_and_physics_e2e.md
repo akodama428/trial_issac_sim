@@ -220,6 +220,44 @@ timeout延長だけを対策にはしない。まずcommand publish数、Servo s
 4. `panda_link8`とruntime toolのoffsetを同じTF snapshot上で照合する。
 5. 原因修正後に同条件E2Eを再実行し、`AT_GRASP`到達後に案Aの左右actor/collider/force整合を評価する。
 
+## P0 Pose Tracking観測の実装と再E2E（2026-07-16）
+
+前節の改善項目1〜3を実装し、同じE2E条件で再実行した。
+
+### 追加した観測
+
+- Pose commandごとの`sequence_id`と累積`published_count`。
+- planning frame、EEF frame、target/currentのxyz・rpy。
+- position/orientation error、到達判定、連続到達sample数。
+- TF lookup成功/失敗累積、例外理由、最終成功からの経過時間。
+- 同一sample時点のMoveIt Servo status。
+- timeout時のpublish数、TF成功/失敗数、最終Servo status summary。
+
+### 再E2E結果
+
+| 項目 | 結果 |
+|---|---|
+| repository pytest | **PASS: 250件、2件skip** |
+| planning | 成功、584.98 ms |
+| pregrasp Servo | 成功、5827.327 ms、最大joint誤差0.009249 rad |
+| Pose command publish | 各試行210回 |
+| TF lookup成功 | 各試行0回 |
+| TF lookup失敗 | 各試行210回 |
+| TF例外 | `"panda_link8" ... source_frame does not exist` |
+| Servo status sample | 全sample `null` |
+| grasp試行 | 2回とも`servo_target_timeout` |
+
+### 確定した直接原因
+
+deadline不足ではない。Pose commandは50 Hzでpublishされている一方、到達判定が参照する`panda_link8`がadapterのTF treeに存在しないため、current poseと6D誤差が一度も計算されていなかった。`tf_success_count=0`かつ`tf_failure_count=published_count`で全周期を説明できる。
+
+次の修正では、次のいずれかを仕様として選ぶ必要がある。
+
+1. robot_state_publisher等から`panda_link0 -> panda_link8`を同一ROS graphへ提供する。
+2. simulatorのscene snapshotに含まれるruntime tool poseを入力し、同じlink/tool offset変換でcurrent `panda_link8` poseを導出する。
+
+後者はsim真値を使う段階的検証というStep 3-2の方針に合うが、ROS実機経路との契約が異なる。どちらを採るか決める前にtimeoutだけを延長してはならない。
+
 ## 結論
 
-案Aと案Bのコードおよびunit testは導入でき、repository testは全件成功した。統合E2Eでは既存pregrasp経路とPose mode切替までは成功したが、Pose Tracking終端収束がtimeoutし、把持接触へ到達しなかった。したがって今回の変更を「摩擦保持改善成功」とは判定しない。次のGateはPose commandとTF誤差の周期観測を追加してG2を通し、その後に案Aの実接触整合を検証することである。
+案Aと案Bのコードおよびunit testは導入でき、repository testは全件成功した。追加観測により、Pose Tracking timeoutの直接原因は`panda_link8` TF欠落で到達判定が一度も実行されないことだと確定した。したがって今回の変更を「摩擦保持改善成功」とは判定しない。次のGateはcurrent EEF poseの供給契約を決定してG2を通し、その後に案Aの実接触整合を検証することである。

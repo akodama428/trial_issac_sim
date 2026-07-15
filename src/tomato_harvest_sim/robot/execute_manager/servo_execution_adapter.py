@@ -1,9 +1,7 @@
 """MoveIt Servoと既存motion command契約を接続する実行adapter。"""
 from __future__ import annotations
-
 from dataclasses import dataclass
 import json
-import math
 
 from tomato_harvest_sim.msg.contracts import (
     JointStateSnapshot,
@@ -12,9 +10,15 @@ from tomato_harvest_sim.msg.contracts import (
     Pose3D,
 )
 from tomato_harvest_sim.robot.execute_manager.terminal_pose_tracking import (
+    PoseTrackingDecision,
+    decide_pose_tracking as decide_terminal_pose_tracking,
     moveit_link_pose,
     pose_from_transform,
     quaternion_from_pose,
+)
+from tomato_harvest_sim.robot.execute_manager.pose_tracking_observability import (
+    pose_tracking_metric_fields,
+    tf_lookup_failure_metric_fields,
 )
 
 
@@ -22,18 +26,15 @@ SERVO_JOINT_COMMAND_TOPIC = "/tomato_harvest/moveit_servo/delta_joint_cmds"
 SERVO_SWITCH_COMMAND_TYPE_SERVICE = "/servo_node/switch_command_type"
 GRIPPER_CLOSED_TOPIC = "/tomato_harvest/gripper_closed"
 SERVO_CONTROL_RATE_HZ = 50.0
-# Issue #46-4 tuned profile.  The 0.8 rad/s cap stays below Panda's slowest
-# nominal joint velocity limit (joint 2: 1.0 rad/s); MoveIt Servo still applies
-# the URDF's position-dependent joint limits and output smoothing.
+# Issue #46-4: Pandaの最小公称上限未満とし、URDF limitとsmoothingも維持する。
 SERVO_JOINT_GAIN = 3.0
 SERVO_MAX_VELOCITY_RAD_S = 0.8
-# 0.05 rad left about 16 mm of Cartesian grasp error in the E2E scene and
-# caused the physics grasp gate to fail.  Complete only after a tighter joint
-# endpoint convergence suitable for the existing grasp acceptance window.
+# 旧0.05 radでは約16 mmの終端誤差が残ったため、把持窓に合わせて厳格化する。
 SERVO_GOAL_TOLERANCE_RAD = 0.01
 SERVO_STABLE_SAMPLES = 3
 SERVO_TIMEOUT_MARGIN_SEC = 5.0
 SERVO_POSE_COMMAND_TOPIC = "/tomato_harvest/moveit_servo/pose_target_cmds"
+SERVO_STATUS_TOPIC = "/tomato_harvest/moveit_servo/status"
 SERVO_PLANNING_FRAME = "panda_link0"
 SERVO_END_EFFECTOR_FRAME = "panda_link8"
 SERVO_POSE_POSITION_TOLERANCE_M = 0.005
@@ -63,15 +64,6 @@ class JointJogDecision:
     reached: bool
 
 
-@dataclass(frozen=True)
-class PoseTrackingDecision:
-    """終端pose trackingの6D誤差と到達判定。"""
-
-    position_error_m: float
-    orientation_error_rad: float
-    reached: bool
-
-
 def decide_pose_tracking(
     target: ServoTarget,
     current_pose: Pose3D,
@@ -83,27 +75,11 @@ def decide_pose_tracking(
     goal = target.pose_tracking_goal
     if goal is None:
         return None
-    position_error = math.sqrt(
-        (goal.x - current_pose.x) ** 2
-        + (goal.y - current_pose.y) ** 2
-        + (goal.z - current_pose.z) ** 2
-    )
-    angle_errors = tuple(
-        math.radians(((desired - current + 180.0) % 360.0) - 180.0)
-        for desired, current in zip(
-            (goal.roll, goal.pitch, goal.yaw),
-            (current_pose.roll, current_pose.pitch, current_pose.yaw),
-            strict=True,
-        )
-    )
-    orientation_error = math.sqrt(sum(error * error for error in angle_errors))
-    return PoseTrackingDecision(
-        position_error_m=round(position_error, 6),
-        orientation_error_rad=round(orientation_error, 6),
-        reached=(
-            position_error <= position_tolerance_m
-            and orientation_error <= orientation_tolerance_rad
-        ),
+    return decide_terminal_pose_tracking(
+        goal,
+        current_pose,
+        position_tolerance_m=position_tolerance_m,
+        orientation_tolerance_rad=orientation_tolerance_rad,
     )
 
 
@@ -212,7 +188,7 @@ def main() -> None:
     from moveit_msgs.srv import ServoCommandType
     from rclpy.node import Node
     from sensor_msgs.msg import JointState
-    from std_msgs.msg import String
+    from std_msgs.msg import Int8, String
     from tf2_ros import Buffer, TransformException, TransformListener
 
     from tomato_harvest_sim.msg.serialization import motion_command_from_json
@@ -238,6 +214,12 @@ def main() -> None:
             self._active_command_type: int | None = None
             self._switch_request_pending = False
             self._last_gripper_closed: bool | None = None
+            self._pose_sequence_id = 0
+            self._pose_published_count = 0
+            self._tf_success_count = 0
+            self._tf_failure_count = 0
+            self._last_tf_success_sec: float | None = None
+            self._servo_status: int | None = None
             self._jog_pub = self.create_publisher(
                 JointJog, SERVO_JOINT_COMMAND_TOPIC, 10
             )
@@ -257,6 +239,9 @@ def main() -> None:
             )
             self.create_subscription(
                 JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10
+            )
+            self.create_subscription(
+                Int8, SERVO_STATUS_TOPIC, self._on_servo_status, 10
             )
             self._switch_client = self.create_client(
                 ServoCommandType, SERVO_SWITCH_COMMAND_TYPE_SERVICE
@@ -318,6 +303,7 @@ def main() -> None:
             )
             self._target_started_sec = started_at_sec
             self._stable_samples = 0
+            self._reset_pose_tracking_observation()
             self._publish_gripper(gripper_state_at_tracking_start(target))
             self._publish_status("running")
             self.get_logger().info(metric_line(
@@ -331,6 +317,16 @@ def main() -> None:
                 tuple(float(position) for position in msg.position),
             )
 
+        def _on_servo_status(self, msg: Int8) -> None:
+            self._servo_status = int(msg.data)
+
+        def _reset_pose_tracking_observation(self) -> None:
+            self._pose_sequence_id = 0
+            self._pose_published_count = 0
+            self._tf_success_count = 0
+            self._tf_failure_count = 0
+            self._last_tf_success_sec = None
+
         def _control_step(self) -> None:
             if (
                 self._active_command_type != self._desired_command_type
@@ -339,6 +335,14 @@ def main() -> None:
                 return
             now_sec = time.monotonic()
             if now_sec > self._target.deadline_sec:
+                if self._target.pose_tracking_goal is not None:
+                    self.get_logger().info(metric_line(
+                        "servo_pose_tracking_timeout",
+                        published_count=self._pose_published_count,
+                        servo_status=self._servo_status,
+                        tf_failure_count=self._tf_failure_count,
+                        tf_success_count=self._tf_success_count,
+                    ))
                 self._publish_status("aborted", abort_reason="servo_target_timeout")
                 self._target = None
                 return
@@ -381,6 +385,7 @@ def main() -> None:
             if self._target is None or self._target.pose_tracking_goal is None:
                 return
             goal = self._target.pose_tracking_goal
+            self._pose_sequence_id += 1
             command = PoseStamped()
             command.header.stamp = self.get_clock().now().to_msg()
             command.header.frame_id = SERVO_PLANNING_FRAME
@@ -393,17 +398,59 @@ def main() -> None:
             command.pose.orientation.z = qz
             command.pose.orientation.w = qw
             self._pose_pub.publish(command)
+            self._pose_published_count += 1
             try:
                 transform = self._tf_buffer.lookup_transform(
                     SERVO_PLANNING_FRAME, SERVO_END_EFFECTOR_FRAME, rclpy.time.Time()
                 )
-            except TransformException:
+            except TransformException as exc:
+                self._tf_failure_count += 1
+                last_success_age_sec = (
+                    round(now_sec - self._last_tf_success_sec, 6)
+                    if self._last_tf_success_sec is not None else None
+                )
+                self.get_logger().info(metric_line(
+                    "servo_pose_tracking_sample",
+                    **tf_lookup_failure_metric_fields(
+                        sequence_id=self._pose_sequence_id,
+                        published_count=self._pose_published_count,
+                        planning_frame=SERVO_PLANNING_FRAME,
+                        end_effector_frame=SERVO_END_EFFECTOR_FRAME,
+                        error=str(exc),
+                        servo_status=self._servo_status,
+                        tf_success_count=self._tf_success_count,
+                        tf_failure_count=self._tf_failure_count,
+                        last_success_age_sec=last_success_age_sec,
+                    ),
+                ))
                 return
-            decision = decide_pose_tracking(self._target, pose_from_transform(transform))
+            self._tf_success_count += 1
+            self._last_tf_success_sec = now_sec
+            current_pose = pose_from_transform(transform)
+            decision = decide_pose_tracking(self._target, current_pose)
             if decision is None:
                 return
             self._publish_status("running")
-            self._stable_samples = self._stable_samples + 1 if decision.reached else 0
+            next_stable_samples = self._stable_samples + 1 if decision.reached else 0
+            self.get_logger().info(metric_line(
+                "servo_pose_tracking_sample",
+                **pose_tracking_metric_fields(
+                    sequence_id=self._pose_sequence_id,
+                    published_count=self._pose_published_count,
+                    planning_frame=SERVO_PLANNING_FRAME,
+                    end_effector_frame=SERVO_END_EFFECTOR_FRAME,
+                    target=goal,
+                    current=current_pose,
+                    position_error_m=decision.position_error_m,
+                    orientation_error_rad=decision.orientation_error_rad,
+                    reached=decision.reached,
+                    stable_samples=next_stable_samples,
+                    servo_status=self._servo_status,
+                    tf_success_count=self._tf_success_count,
+                    tf_failure_count=self._tf_failure_count,
+                ),
+            ))
+            self._stable_samples = next_stable_samples
             if self._stable_samples < SERVO_STABLE_SAMPLES:
                 return
             self.get_logger().info(metric_line(
