@@ -2,7 +2,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
 import json
-
 from tomato_harvest_sim.msg.contracts import (
     JointStateSnapshot,
     MotionCommand,
@@ -15,7 +14,6 @@ from tomato_harvest_sim.robot.execute_manager.terminal_pose_tracking import (
     moveit_link_pose,
     pose_from_transform,
     quaternion_from_pose,
-    select_current_link_pose,
 )
 from tomato_harvest_sim.robot.execute_manager.pose_tracking_observability import (
     pose_tracking_metric_fields,
@@ -40,7 +38,6 @@ SERVO_PLANNING_FRAME = "panda_link0"
 SERVO_END_EFFECTOR_FRAME = "panda_link8"
 SERVO_POSE_POSITION_TOLERANCE_M = 0.005
 SERVO_POSE_ORIENTATION_TOLERANCE_RAD = 0.03
-SCENE_SNAPSHOT_MAX_AGE_SEC = 0.5
 
 
 @dataclass(frozen=True)
@@ -193,15 +190,11 @@ def main() -> None:
     from std_msgs.msg import Int8, String
     from tf2_ros import Buffer, TransformException, TransformListener
 
-    from tomato_harvest_sim.msg.serialization import (
-        motion_command_from_json,
-        scene_snapshot_from_json,
-    )
+    from tomato_harvest_sim.msg.serialization import motion_command_from_json
     from tomato_harvest_sim.msg.topics import (
         EXECUTION_STATUS_TOPIC,
         JOINT_STATES_TOPIC,
         MOTION_COMMAND_TOPIC,
-        SCENE_SNAPSHOT_TOPIC,
     )
     from tomato_harvest_sim.robot.motion_planner.observability import metric_line
 
@@ -226,8 +219,6 @@ def main() -> None:
             self._tf_failure_count = 0
             self._last_tf_success_sec: float | None = None
             self._servo_status: int | None = None
-            self._runtime_tool_pose: Pose3D | None = None
-            self._runtime_tool_pose_updated_sec: float | None = None
             self._jog_pub = self.create_publisher(
                 JointJog, SERVO_JOINT_COMMAND_TOPIC, 10
             )
@@ -244,9 +235,6 @@ def main() -> None:
             )
             self.create_subscription(
                 String, MOTION_COMMAND_TOPIC, self._on_command, 10
-            )
-            self.create_subscription(
-                String, SCENE_SNAPSHOT_TOPIC, self._on_scene_snapshot, 10
             )
             self.create_subscription(
                 JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10
@@ -331,15 +319,6 @@ def main() -> None:
         def _on_servo_status(self, msg: Int8) -> None:
             self._servo_status = int(msg.data)
 
-        def _on_scene_snapshot(self, msg: String) -> None:
-            try:
-                snapshot = scene_snapshot_from_json(msg.data)
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                self.get_logger().warning("Invalid scene snapshot ignored")
-                return
-            self._runtime_tool_pose = snapshot.robot_tool_pose
-            self._runtime_tool_pose_updated_sec = time.monotonic()
-
         def _reset_pose_tracking_observation(self) -> None:
             self._pose_sequence_id = 0
             self._pose_published_count = 0
@@ -419,7 +398,6 @@ def main() -> None:
             command.pose.orientation.w = qw
             self._pose_pub.publish(command)
             self._pose_published_count += 1
-            tf_pose: Pose3D | None = None
             try:
                 transform = self._tf_buffer.lookup_transform(
                     SERVO_PLANNING_FRAME, SERVO_END_EFFECTOR_FRAME, rclpy.time.Time()
@@ -444,21 +422,10 @@ def main() -> None:
                         last_success_age_sec=last_success_age_sec,
                     ),
                 ))
-            else:
-                self._tf_success_count += 1
-                self._last_tf_success_sec = now_sec
-                tf_pose = pose_from_transform(transform)
-            snapshot_pose = self._runtime_tool_pose
-            if (
-                self._runtime_tool_pose_updated_sec is None
-                or now_sec - self._runtime_tool_pose_updated_sec
-                > SCENE_SNAPSHOT_MAX_AGE_SEC
-            ):
-                snapshot_pose = None
-            selected_pose = select_current_link_pose(tf_pose, snapshot_pose)
-            if selected_pose is None:
                 return
-            current_pose = selected_pose.pose
+            self._tf_success_count += 1
+            self._last_tf_success_sec = now_sec
+            current_pose = pose_from_transform(transform)
             decision = decide_pose_tracking(self._target, current_pose)
             if decision is None:
                 return
@@ -471,7 +438,7 @@ def main() -> None:
                     published_count=self._pose_published_count,
                     planning_frame=SERVO_PLANNING_FRAME,
                     end_effector_frame=SERVO_END_EFFECTOR_FRAME,
-                    pose_source=selected_pose.source,
+                    pose_source="tf",
                     target=goal,
                     current=current_pose,
                     position_error_m=decision.position_error_m,

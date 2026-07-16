@@ -2,7 +2,7 @@
 
 ## 目的
 
-Step 3-3で判明した`panda_link8` TF欠落に対し、実ロボットではrobot stateをrobot systemへ入力し、そのkinematic modelからTFを生成するという前提で、TFをどのmoduleが配信すべきかを決定する。本Stepは設計レポートであり、実装とE2Eは後続作業とする。
+Step 3-3で判明した`panda_link8` TF欠落に対し、実ロボットではrobot stateをrobot systemへ入力し、そのkinematic modelからTFを生成するという前提で、TFをどのmoduleが配信すべきかを決定し、実装とE2E評価まで行う。
 
 ## 結論
 
@@ -43,7 +43,6 @@ flowchart TB
   classDef robot fill:#dcecff,stroke:#316ca6,stroke-width:2px,color:#111
   classDef tf fill:#d5f2dc,stroke:#287a3d,stroke-width:3px,color:#111
   classDef consumer fill:#eee,stroke:#666,color:#111
-  classDef fallback fill:#ffe0cc,stroke:#a95000,stroke-dasharray:5 3,color:#111
 
   subgraph Source[Hardware source - one selected]
     Real[Real Franka<br/>FCI and franka hardware]:::source
@@ -67,8 +66,6 @@ flowchart TB
   Buffer --> MoveIt[MoveIt and PlanningScene]:::consumer
   Buffer --> Viz[RViz and diagnostics]:::consumer
 
-  Snapshot[SceneSnapshot robot_tool_pose]:::fallback
-  Snapshot -. temporary fallback .-> Servo
 ```
 
 ### 責務境界
@@ -80,7 +77,7 @@ flowchart TB
 | canonical robot description | link/joint topologyとfixed transformを定義する | TF計算の唯一のmodel |
 | `robot_state_publisher` | URDFと`/joint_states`から`/tf`、`/tf_static`を生成する | robot kinematic TFの唯一のauthority |
 | `servo_execution_adapter` | TFを消費して6D誤差を判定する | 持たない |
-| Isaac Sim SceneSnapshot | sim真値、物理観測、移行中のfallback | robot TFのauthorityにしない |
+| Isaac Sim SceneSnapshot | tomato、接触、物理状態などのscene観測 | robot pose到達判定には使用しない |
 
 ## 配置案の比較
 
@@ -188,15 +185,14 @@ flowchart TB
 | authority | robot link child frameごとにpublisherは1つ |
 | environment | `world -> panda_link0`はcell/environment calibration責務としてrobot内部TFから分離 |
 
-## 段階的な実施案
+## 実装結果
 
-1. canonical URDFへ`panda_link8`を含む公式frame topologyを導入する。
-2. MoveIt、ros2_control、robot_state_publisherが同じdescription builderを使うよう統合する。
-3. `franka_ros2_control.launch.py`へrobot_state_publisherを追加し、shellからの個別起動を削除する。
-4. launch testで`/joint_states`入力後に`panda_link0 -> panda_link8`が取得できることを確認する。
-5. sim E2EでTF sourceが選択され、SceneSnapshot fallback countが0になることを確認する。
-6. fallbackを警告付き縮退経路として一定期間残す。
-7. 実機bringupでも同じTF contract testを実行してからfallback廃止を判断する。
+1. canonical URDFへ`panda_joint8`と`panda_link8`を追加し、`panda_link7 -> panda_link8 -> panda_hand`を公式frame topologyに合わせた。
+2. SRDFのarm chain tipとServo command frameを`panda_link8`へ統一し、hand/toolの45度fixed yawを目標姿勢変換へ反映した。
+3. `franka_ros2_control.launch.py`が、ros2_controlと同じ`robot_description`を標準`robot_state_publisher`へ渡す構成にした。
+4. `run_ros2_components.sh`はpackage bringupを呼ぶ薄いorchestratorとし、robot state publisherとcontrollerの二重組み立てを削除した。
+5. E2EでTFによる制御成功を確認した後、`servo_execution_adapter`からSceneSnapshot subscription、pose cache、parser、fallback選択を削除した。TF取得不能時はfail-closedとする。
+6. SRDF変更がinstall treeへ確実に反映されるよう、起動スクリプトのbuild freshness判定へ`*.srdf`を追加した。
 
 ## 受け入れ条件
 
@@ -206,7 +202,7 @@ flowchart TB
 - MoveIt、Servo、robot_state_publisherのframe名とrobot description hash/versionが一致する。
 - Isaac Sim direct TF publisherを同時起動していない。
 - physics E2EのPose Tracking sampleが`pose_source=tf`となる。
-- TFを停止したfault injection時だけ`pose_source=scene_snapshot`へ縮退する。
+- SceneSnapshot由来のrobot pose fallbackが実装に残っていない。
 - duplicate TF authority、stale TF、unknown frameをCIが検出する。
 
 ## テスト計画
@@ -228,9 +224,38 @@ flowchart TB
 ### E2E
 
 - sim正常系: `pose_source=tf`、TF lookup failure 0、G2通過。
-- TF fault injection: SceneSnapshotへfallbackし、警告とcounterを記録。
 - stale JointState: 到達成功にせずfail-closed。
 - 実機dry-run: measured joint stateから同一frame contractを満たすこと。
+
+ユーザー指示によりTF fault injectionは本Stepの対象外とする。
+
+## テスト・E2E評価結果
+
+### Automated tests
+
+- `pytest -q`: **255 passed, 2 skipped**
+- URDF/SRDF/launch契約テストにより、`panda_link8` topology、bringupによるrobot state publisher所有、SRDF tip、Servo frame、fallback不在を検証した。
+- `bash -n scripts/run_ros2_components.sh`、Python compile、`git diff --check`: 合格。
+- E2E起動内の`colcon build`: `franka_ros2_control`を含め成功。
+
+### Physics E2E
+
+実行条件は`CI_HEADLESS_STEPS=3600`、`CI_GRASP_MODE=physics`、timeout 2400秒とした。TF fault injectionは実施していない。
+
+| 観点 | 結果 |
+|---|---|
+| pose source | 全到達判定sampleで`tf` |
+| TF frame | `panda_link0 -> panda_link8` |
+| TF lookup | 成功156回、失敗0回（最初の移動） |
+| 最初のPose到達 | 成功、3連続stable sample |
+| 最初の到達時位置誤差 | 0.004961 m |
+| 最初の到達時姿勢誤差 | 0.023734 rad |
+| 後続の同一Pose到達 | 2回とも成功（56.407 ms、53.994 ms） |
+| SceneSnapshot fallback | 削除済み、使用なし |
+
+以上から「TFで正しく制御できること」は合格と判定する。`panda_link8`のyawは目標-45度に対し-43.710度まで収束し、その後-45.009度まで追従した。
+
+ただし収穫サイクル全体は、TF/Pose Tracking通過後にグリッパが閉じず、tomatoが`attached`のままterminal phase `failed`となった。この既存のgripper/physics問題はTF配信の受け入れ条件とは分離し、E2E全体としては未合格として扱う。
 
 ## 外部一次情報
 

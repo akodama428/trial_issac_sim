@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from tomato_harvest_sim.msg.contracts import Pose3D
 
 MOVEIT_LINK_TO_RUNTIME_TOOL_OFFSET_M = (0.0, 0.0, 0.0584)
+MOVEIT_LINK_TO_RUNTIME_TOOL_YAW_DEG = 45.0
 
 
 @dataclass(frozen=True)
@@ -16,26 +17,6 @@ class PoseTrackingDecision:
     position_error_m: float
     orientation_error_rad: float
     reached: bool
-
-
-@dataclass(frozen=True)
-class CurrentLinkPose:
-    """到達判定に使うpanda_link8 poseと取得元。"""
-
-    pose: Pose3D
-    source: str
-
-
-def select_current_link_pose(
-    tf_pose: Pose3D | None,
-    runtime_tool_pose: Pose3D | None,
-) -> CurrentLinkPose | None:
-    """TFを優先し、欠落時はSceneSnapshotのtool poseをlink8へ変換する。"""
-    if tf_pose is not None:
-        return CurrentLinkPose(tf_pose, "tf")
-    if runtime_tool_pose is not None:
-        return CurrentLinkPose(moveit_link_pose(runtime_tool_pose), "scene_snapshot")
-    return None
 
 
 def decide_pose_tracking(
@@ -95,7 +76,9 @@ def moveit_link_pose(runtime_tool_pose: Pose3D) -> Pose3D:
         round(runtime_tool_pose.x + rotated_x, 6),
         round(runtime_tool_pose.y + rotated_y, 6),
         round(runtime_tool_pose.z + rotated_z, 6),
-        runtime_tool_pose.roll, runtime_tool_pose.pitch, runtime_tool_pose.yaw,
+        runtime_tool_pose.roll,
+        runtime_tool_pose.pitch,
+        ((runtime_tool_pose.yaw - MOVEIT_LINK_TO_RUNTIME_TOOL_YAW_DEG + 180.0) % 360.0) - 180.0,
     )
 
 

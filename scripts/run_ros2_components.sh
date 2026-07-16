@@ -5,8 +5,8 @@
 #
 # 起動順:
 #   1. C++ パッケージをビルド（未ビルドまたは --rebuild 指定時）
-#   2. franka_ros2_control (controller_manager + JTC + JSB) を background 起動
-#   3. controller_manager の起動待機とコントローラーのスポウン
+#   2. franka_ros2_control bringup (RSP + controller_manager + JTC + JSB) を起動
+#   3. controller_manager とコントローラーのactive待機
 #   4. MoveIt2 move_group を background 起動（--moveit 指定時のみ）
 #   5. tomato_harvest_robot の Python ノード群を background 起動
 #   6. MoveIt Servo execution adapter を background 起動
@@ -176,7 +176,7 @@ needs_build() {
   fi
 
   if find "${PKG_SRC}" -type f \
-    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.py' -o -name '*.yaml' -o -name '*.urdf' -o \
+    \( -name '*.cpp' -o -name '*.hpp' -o -name '*.py' -o -name '*.yaml' -o -name '*.urdf' -o -name '*.srdf' -o \
        -name '*.xml' -o -name 'CMakeLists.txt' -o -name 'package.xml' \) \
     -newer "${WS_SETUP}" -print -quit | grep -q .; then
     return 0
@@ -239,30 +239,11 @@ sleep 3
 log "--- franka_ros2_control 起動 ---"
 log "  ログ: ${CONTROLLER_LOG}"
 
-URDF_PATH="${PKG_SRC}/config/franka_ros2_control.urdf"
-CONTROLLERS_YAML="${PKG_SRC}/config/franka_controllers.yaml"
-
-if [[ ! -f "${URDF_PATH}" ]]; then
-  log "ERROR: URDF が見つかりません: ${URDF_PATH}"
-  exit 1
-fi
-
-ROBOT_DESCRIPTION="$(cat "${URDF_PATH}")"
-
-start_bg "robot_state_publisher" \
-  ros2 run robot_state_publisher robot_state_publisher \
-  --ros-args -p "robot_description:=${ROBOT_DESCRIPTION}" \
-  >> "${CONTROLLER_LOG}" 2>&1
-sleep 1
-
-start_bg "ros2_control_node" \
-  ros2 run controller_manager ros2_control_node \
-  --ros-args --params-file "${CONTROLLERS_YAML}" \
+start_bg "franka_ros2_control bringup" \
+  ros2 launch franka_ros2_control franka_ros2_control.launch.py \
   >> "${CONTROLLER_LOG}" 2>&1
 
 # controller_manager の起動待機 (Issue #40)。
-# 15秒待機では起動flakeがE2E失敗として計上されるため、45秒へ延長し、
-# タイムアウト時は ros2_control_node を1回だけ再起動して再待機する。
 wait_controller_manager() {
   local timeout_steps=90  # 0.5秒 × 90 = 45秒
   for i in $(seq 1 "${timeout_steps}"); do
@@ -278,31 +259,10 @@ log "  controller_manager 起動待機中..."
 if wait_controller_manager; then
   log "  controller_manager 起動確認"
 else
-  log "WARN: controller_manager 起動タイムアウト（45秒）。ros2_control_node を再起動します。"
-  pkill -f "controller_manager ros2_control_node" 2>/dev/null || true
-  sleep 2
-  start_bg "ros2_control_node (retry)" \
-    ros2 run controller_manager ros2_control_node \
-    --ros-args --params-file "${CONTROLLERS_YAML}" \
-    >> "${CONTROLLER_LOG}" 2>&1
-  if wait_controller_manager; then
-    log "  controller_manager 起動確認（リトライ後）"
-  else
-    # 集計スクリプトが起動flakeを実行失敗と区別するためのマーカー (Issue #40)。
-    log "STACK_STARTUP_FAILED: controller_manager"
-    log "ERROR: controller_manager 起動タイムアウト（リトライ後も失敗）。ログ: ${CONTROLLER_LOG}"
-    exit 1
-  fi
+  log "STACK_STARTUP_FAILED: controller_manager"
+  log "ERROR: controller_manager 起動タイムアウト。ログ: ${CONTROLLER_LOG}"
+  exit 1
 fi
-
-# コントローラースポウン
-ros2 run controller_manager spawner joint_state_broadcaster \
-  --controller-manager /controller_manager \
-  >> "${CONTROLLER_LOG}" 2>&1 &
-
-ros2 run controller_manager spawner joint_trajectory_controller \
-  --controller-manager /controller_manager \
-  >> "${CONTROLLER_LOG}" 2>&1 &
 
 log "  コントローラースポウン完了待機中..."
 for i in $(seq 1 40); do

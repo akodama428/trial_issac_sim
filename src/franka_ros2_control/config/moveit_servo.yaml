@@ -1,4 +1,5 @@
 move_group_name: panda_arm
+robot_link_command_frame: panda_link8
 
 # 100 Hz matches ros2_control. The node is launched only when Servo has
 # exclusive ownership of the JointTrajectoryController command input.

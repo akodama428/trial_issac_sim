@@ -23,6 +23,13 @@ def generate_launch_description() -> LaunchDescription:
         output="screen",
     )
 
+    robot_state_publisher_node = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        parameters=[robot_description],
+        output="screen",
+    )
+
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -38,6 +45,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     return LaunchDescription([
+        robot_state_publisher_node,
         controller_manager_node,
         joint_state_broadcaster_spawner,
         joint_trajectory_controller_spawner,
