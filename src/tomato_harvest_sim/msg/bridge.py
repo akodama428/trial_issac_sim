@@ -731,10 +731,14 @@ def _motion_command_to_dict(command: MotionCommand) -> dict[str, object]:
         "target_pose": _pose_to_dict(command.target_pose),
         "gripper_closed": command.gripper_closed,
         "phase_motion_plan": _phase_motion_plan_to_dict(command.phase_motion_plan),
+        "motion_kind": command.motion_kind.value,
+        "terminal_pose_tracking": command.terminal_pose_tracking,
     }
 
 
 def _motion_command_from_dict(data: dict[str, object]) -> MotionCommand:
+    from tomato_harvest_sim.msg.contracts import MotionKind
+
     return MotionCommand(
         command_name=str(data["command_name"]),
         planner_name=str(data["planner_name"]),
@@ -743,6 +747,8 @@ def _motion_command_from_dict(data: dict[str, object]) -> MotionCommand:
         phase_motion_plan=_phase_motion_plan_from_dict(
             data.get("phase_motion_plan") if isinstance(data.get("phase_motion_plan"), dict) else None
         ),
+        motion_kind=MotionKind(str(data.get("motion_kind", MotionKind.FOLLOW_TRAJECTORY.value))),
+        terminal_pose_tracking=bool(data.get("terminal_pose_tracking", False)),
     )
 
 

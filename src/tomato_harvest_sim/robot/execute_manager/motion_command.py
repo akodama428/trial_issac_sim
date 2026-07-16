@@ -4,7 +4,7 @@
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
@@ -13,11 +13,35 @@ from tomato_harvest_sim.msg.contracts import (
     JointTrajectory,
     JointTrajectoryPoint,
     MotionCommand,
+    MotionKind,
     PhaseId,
     PhaseMotionPlan,
     Pose3D,
 )
 from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
+
+
+@dataclass(frozen=True)
+class PhaseCommandSpec:
+    command_name: str
+    phase_id: PhaseId
+    motion_kind: MotionKind
+    terminal_pose_tracking: bool
+    gripper_closed: bool
+    pose_field: str | None
+    trajectory_field: str | None
+
+
+PHASE_COMMAND_TABLE = {
+    HarvestTaskPhase.MOVING_TO_PREGRASP: PhaseCommandSpec("move_to_pregrasp", PhaseId.MOVING_TO_PREGRASP, MotionKind.FOLLOW_TRAJECTORY, False, True, "pregrasp_pose", "pregrasp_joint_trajectory"),
+    HarvestTaskPhase.MOVING_TO_GRASP: PhaseCommandSpec("move_to_grasp", PhaseId.MOVING_TO_GRASP, MotionKind.FOLLOW_TRAJECTORY, True, False, "grasp_pose", "grasp_joint_trajectory"),
+    HarvestTaskPhase.AT_GRASP: PhaseCommandSpec("hold_at_grasp", PhaseId.MOVING_TO_GRASP, MotionKind.HOLD, True, True, "grasp_pose", None),
+    HarvestTaskPhase.GRASP_EVALUATION: PhaseCommandSpec("hold_grasp_eval", PhaseId.MOVING_TO_GRASP, MotionKind.HOLD, True, True, "grasp_pose", None),
+    HarvestTaskPhase.DETACHING: PhaseCommandSpec("pull_to_detach", PhaseId.PULL_TO_DETACH, MotionKind.FOLLOW_TRAJECTORY, False, True, "pull_pose", "pull_joint_trajectory"),
+    HarvestTaskPhase.MOVING_TO_PLACE: PhaseCommandSpec("move_to_place", PhaseId.MOVING_TO_PLACE, MotionKind.FOLLOW_TRAJECTORY, False, True, "place_pose", "place_joint_trajectory"),
+    HarvestTaskPhase.PLACED: PhaseCommandSpec("hold_placed", PhaseId.MOVING_TO_PLACE, MotionKind.HOLD, False, False, "place_pose", None),
+    HarvestTaskPhase.RETURNING_HOME: PhaseCommandSpec("move_home", PhaseId.RETURNING_HOME, MotionKind.FOLLOW_TRAJECTORY, False, False, None, "home_joint_trajectory"),
+}
 
 
 def _arm_only_trajectory(trajectory: JointTrajectory) -> JointTrajectory:
@@ -100,41 +124,15 @@ def _build_phase_motion_command(
     plan: HarvestMotionPlan,
     current_joints: JointStateSnapshot,
 ) -> MotionCommand:
-    """phase固有のcommandを組み立て、共通境界へ渡す。"""
-    if phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
-        return _make_command("move_to_pregrasp", PhaseId.MOVING_TO_PREGRASP,
-                             plan.pregrasp_pose, plan.pregrasp_joint_trajectory, True, plan)
-
-    if phase is HarvestTaskPhase.MOVING_TO_GRASP:
-        return _make_command("move_to_grasp", PhaseId.MOVING_TO_GRASP,
-                             plan.grasp_pose, plan.grasp_joint_trajectory, False, plan)
-
-    if phase is HarvestTaskPhase.AT_GRASP:
-        return _make_stop_command("hold_at_grasp", PhaseId.MOVING_TO_GRASP,
-                                  plan.grasp_pose, True, current_joints)
-
-    if phase is HarvestTaskPhase.GRASP_EVALUATION:
-        return _make_stop_command("hold_grasp_eval", PhaseId.MOVING_TO_GRASP,
-                                  plan.grasp_pose, True, current_joints)
-
-    if phase is HarvestTaskPhase.DETACHING:
-        return _make_command("pull_to_detach", PhaseId.PULL_TO_DETACH,
-                             plan.pull_pose, plan.pull_joint_trajectory, True, plan)
-
-    if phase is HarvestTaskPhase.MOVING_TO_PLACE:
-        return _make_command("move_to_place", PhaseId.MOVING_TO_PLACE,
-                             plan.place_pose, plan.place_joint_trajectory, True, plan)
-
-    if phase is HarvestTaskPhase.PLACED:
-        return _make_stop_command("hold_placed", PhaseId.MOVING_TO_PLACE,
-                                  plan.place_pose, False, current_joints)
-
+    """宣言テーブルの実行意図からcommandを組み立てる。"""
+    spec = PHASE_COMMAND_TABLE.get(phase)
+    if spec is None:
+        raise ValueError(f"build_motion_command: unsupported phase {phase!r}")
     if phase is HarvestTaskPhase.RETURNING_HOME:
         # abort復旧 (suffix replan) が刻んだ衝突考慮済みのhome区間trajectoryが
         # あれば優先する (Issue #32)。無ければ従来どおりhome定数への直行軌道を使う。
         if plan.home_joint_trajectory is not None:
-            return _make_command("move_home", PhaseId.RETURNING_HOME,
-                                 None, plan.home_joint_trajectory, False, plan)
+            return _make_command(spec, None, plan.home_joint_trajectory, plan)
         home_positions_by_name = dict(zip(
             DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD, strict=True
         ))
@@ -159,61 +157,67 @@ def _build_phase_motion_command(
             ),
         )
         return MotionCommand(
-            command_name="move_home",
+            command_name=spec.command_name,
             planner_name="direct",
             target_pose=None,
             gripper_closed=False,
             phase_motion_plan=PhaseMotionPlan(
-                phase_id=PhaseId.RETURNING_HOME,
+                phase_id=spec.phase_id,
                 phase_goal_pose=None,
                 active_waypoints=(),
                 joint_trajectory=home_trajectory,
             ),
+            motion_kind=spec.motion_kind,
+            terminal_pose_tracking=spec.terminal_pose_tracking,
         )
 
-    raise ValueError(f"build_motion_command: unsupported phase {phase!r}")
+    goal_pose = getattr(plan, spec.pose_field) if spec.pose_field is not None else None
+    if spec.motion_kind is MotionKind.HOLD:
+        return _make_stop_command(spec, goal_pose, current_joints)
+    trajectory = getattr(plan, spec.trajectory_field) if spec.trajectory_field is not None else None
+    return _make_command(spec, goal_pose, trajectory, plan)
 
 
 def _make_command(
-    command_name: str,
-    phase_id: PhaseId,
+    spec: PhaseCommandSpec,
     goal_pose: Pose3D | None,
     trajectory: JointTrajectory | None,
-    gripper_closed: bool,
     plan: HarvestMotionPlan,
 ) -> MotionCommand:
     return MotionCommand(
-        command_name=command_name,
+        command_name=spec.command_name,
         planner_name=plan.planner_name,
         target_pose=goal_pose,
-        gripper_closed=gripper_closed,
+        gripper_closed=spec.gripper_closed,
         phase_motion_plan=PhaseMotionPlan(
-            phase_id=phase_id,
+            phase_id=spec.phase_id,
             phase_goal_pose=goal_pose,
             active_waypoints=(),
             joint_trajectory=trajectory,
         ),
+        motion_kind=spec.motion_kind,
+        terminal_pose_tracking=spec.terminal_pose_tracking,
     )
 
 
 def _make_stop_command(
-    command_name: str,
-    phase_id: PhaseId,
+    spec: PhaseCommandSpec,
     goal_pose: Pose3D | None,
-    gripper_closed: bool,
     current_joints: JointStateSnapshot,
 ) -> MotionCommand:
     return MotionCommand(
-        command_name=command_name,
+        command_name=spec.command_name,
         planner_name="stop",
         target_pose=goal_pose,
-        gripper_closed=gripper_closed,
+        gripper_closed=spec.gripper_closed,
         phase_motion_plan=PhaseMotionPlan(
-            phase_id=phase_id,
+            phase_id=spec.phase_id,
             phase_goal_pose=goal_pose,
             active_waypoints=(),
             joint_trajectory=_stop_trajectory(current_joints),
         ),
+        motion_kind=spec.motion_kind,
+        terminal_pose_tracking=spec.terminal_pose_tracking,
     )
 
 

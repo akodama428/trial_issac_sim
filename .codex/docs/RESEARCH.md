@@ -10,6 +10,26 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Step 3-6 GRASP状態機械リファクタリング（2026-07-17）
+
+### 確認済みの事実
+
+- Python公式の`dataclasses` failed-value semanticsでは、`frozen=True`により生成された`__setattr__`/`__delattr__`が更新を拒否する。完全な不変性ではないが、状態遷移を新しい値の返却として表す用途に適合する。
+- Python公式の`StrEnum`は`Enum`であると同時に文字列として扱え、`str()`はmember値を返す。JSON契約に定義済みの実行意図を追加する用途に適合する。
+- ROS 2 Jazzy公式`rclpy`ではsubscription、timer、service等のcallbackがexecutorの実行単位である。そのためcallbackはROS I/Oを受け、ROS非依存の遷移関数へ値を渡し、返値をpublish/logするshellとして構成できる。
+
+### 設計への反映（推論）
+
+- `PhaseMachineState`とevent/resultをfrozen dataclassで表し、`advance`が次状態を返すことで、ROS callbackとGRASP遷移ロジックを分離する。
+- `MotionKind`は`StrEnum`で定義し、旧JSONの欠落fieldはdeserialize時の既定値で受理する。phase IDから実行意図を推測しない。
+- node callbackはparse、pure transition呼び出し、publish/logに限定し、timer/counterの更新は状態機械だけが所有する。
+
+### 一次情報
+
+- Python `dataclasses`: https://docs.python.org/3/library/dataclasses.html
+- Python `enum.StrEnum`: https://docs.python.org/3/library/enum.html#enum.StrEnum
+- ROS 2 Jazzy `rclpy` Execution and Callbacks: https://docs.ros.org/en/jazzy/p/rclpy/api/execution_and_callbacks.html
+
 ## Step 3-5 グリッパ指令の確定と評価（2026-07-16）
 
 ### 調査目的と条件

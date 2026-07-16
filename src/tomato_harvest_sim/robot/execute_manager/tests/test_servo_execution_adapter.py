@@ -34,6 +34,7 @@ def _command(*, phase: PhaseId = PhaseId.MOVING_TO_PREGRASP) -> MotionCommand:
                 points=(JointTrajectoryPoint((0.8, -0.4), 2.0),),
             ),
         ),
+        terminal_pose_tracking=phase is PhaseId.MOVING_TO_GRASP,
     )
 
 
@@ -55,6 +56,23 @@ def test_grasp_target_uses_terminal_pose_tracking_goal() -> None:
     assert target is not None
     assert target.pose_tracking_goal == Pose3D(0.4, 0.1, 0.5584, 180.0, 0.0, 45.0)
     assert gripper_state_for_tracking(target) is True
+
+
+def test_phase_id_does_not_implicitly_enable_pose_tracking() -> None:
+    command = _command(phase=PhaseId.MOVING_TO_GRASP)
+    command = MotionCommand(
+        command_name=command.command_name,
+        planner_name=command.planner_name,
+        target_pose=command.target_pose,
+        gripper_closed=command.gripper_closed,
+        phase_motion_plan=command.phase_motion_plan,
+        terminal_pose_tracking=False,
+    )
+
+    target = servo_target_from_command(command, started_at_sec=10.0)
+
+    assert target is not None
+    assert target.pose_tracking_goal is None
 
 
 def test_closed_hold_command_never_reopens_gripper_during_pose_tracking() -> None:
