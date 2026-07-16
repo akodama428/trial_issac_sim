@@ -10,6 +10,47 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Step 3-4 実機互換TF配信責務（2026-07-16）
+
+### 調査目的と条件
+
+- 目的: `panda_link0 -> panda_link8`が配信されない直接原因を特定し、sim/実機で共通化できるTF配信責務を決める。
+- 対象: ROS 2 Jazzy、Isaac Sim 6.0、Franka Panda/Franka ROS 2の2026-07-16時点の公式情報、および現行repository実装。
+- 確認済み事実と設計推論を分離した。
+
+### 確認済みの事実
+
+- ROS 2公式`robot_state_publisher`はURDFと`/joint_states`を入力に、可動jointを`/tf`、fixed jointをtransient-localの`/tf_static`へ配信する。TF計算をhardware driverやapplication nodeが個別実装する必要はない。
+- ros2_control公式`joint_state_broadcaster`はhardware state interfaceから標準`/joint_states`を配信する。
+- Franka公式はrobot model生成元として`franka_description`を独立packageで提供している。
+- Isaac Sim 6.0公式にも`Isaac Read Joint State -> ROS2 Publish Joint State`と`Isaac Compute Transform Tree -> ROS2 Publish Transform Tree`があるが、これはsimulatorから直接TFを配信できる機能であり、実機共通の責務配置を要求するものではない。
+- 現行repositoryは`scripts/run_ros2_components.sh`から`robot_state_publisher`を既に起動し、`joint_state_broadcaster`も`/joint_states`を配信している。
+- 現行`franka_ros2_control.urdf`は`panda_link0`から`panda_link7`、`panda_hand`を持つが、`panda_link8`を定義していない。このため`robot_state_publisher`が正常でも`panda_link8`はTF treeに現れない。
+- Step 3-3 fallbackが使うのはSceneSnapshotの関節角ではなく`robot_tool_pose`であり、58.4 mm offsetからcurrent `panda_link8` poseを導出している。
+
+### 現時点の推奨方針（設計推論）
+
+- TF配信の所有者は`franka_ros2_control`のbringupとし、hardware sourceだけをsim/実機で差し替える。
+- `joint_state_broadcaster -> /joint_states -> robot_state_publisher -> /tf,/tf_static`を唯一のrobot kinematic TF経路にする。
+- robot modelはMoveIt、ros2_control、robot_state_publisherで同じcanonical descriptionを使い、`panda_link8`とtool/hand fixed jointsを含める。
+- Isaac Simからのdirect TF publishは二重authorityを避けるため既定では無効にする。SceneSnapshot fallbackは移行期間の診断・縮退経路に限定する。
+- `robot_state_publisher`はcontroller plugin内部へ入れず、launch/bringupで独立nodeとして構成する。これによりhardware I/O、joint state公開、kinematic TF生成の単一責務を保つ。
+
+### 未解決の確認事項
+
+- 採用中のPanda modelと公式`franka_description` releaseのlink8/hand/tool frame名・fixed transformの完全一致。
+- Isaac Sim USD articulation joint名とcanonical URDF joint名の対応、およびfinger mimicの扱い。
+- 実機Frankaで使う`franka_ros2`/`franka_description`のROS 2 Jazzy対応版をどのrevisionで固定するか。
+- base/world固定TFをrobot bringupとcell/environment bringupのどちらが所有するか。robot内部TFとは別の判断が必要。
+
+### 一次情報
+
+- ROS 2 robot_state_publisher: https://docs.ros.org/en/ros2_packages/rolling/api/robot_state_publisher/index.html
+- ros2_control Jazzy JointStateBroadcaster: https://control.ros.org/jazzy/doc/api/classjoint__state__broadcaster_1_1JointStateBroadcaster.html
+- Franka公式description: https://github.com/frankarobotics/franka_description
+- Franka公式ROS 2 integration: https://github.com/frankarobotics/franka_ros2
+- Isaac Sim 6.0 ROS 2 OmniGraph migration: https://docs.isaacsim.omniverse.nvidia.com/latest/migration_guides/isaac_sim_6_0/ros2_omnigraph_migration.html
+
 ## Issue #46-4 MoveIt Servo速度調整（2026-07-14）
 
 - MoveIt Servo公式仕様では、`command_in_type: speed_units`のJointJog速度はrad/sとして扱われ、`scale.joint`はunitless入力の場合だけ適用される。このため今回の調整対象はadapterの比例gainと速度clampであり、`scale.joint`の変更ではない。
