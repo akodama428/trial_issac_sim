@@ -10,6 +10,42 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Step 3-5 グリッパ指令の確定と評価（2026-07-16）
+
+### 調査目的と条件
+
+- 目的: Step 3-4 E2EでPose Tracking通過後もgripperがopenのままになった原因を特定し、simと実機に共通する指令ライフサイクルを決める。
+- 対象: Franka公式`franka_ros2` humble branch、ROS 2 `control_msgs`、Isaac Sim 6.0.1公式資料、現行repositoryとGPU E2Eログ。
+- Web調査日は2026-07-16。確認済みの事実と設計推論を分離した。
+
+### 確認済みの事実
+
+- Franka公式`franka_gripper_node`は`move`、`grasp`、MoveIt用`gripper_action`を提供する。`grasp`はwidth、speed、forceを受け、実finger間距離がepsilon範囲内に入った場合に成功する。
+- ROS 2公式`control_msgs/GripperCommand` resultはposition、effort、stalled、reached_goalを返す。指令発行と物理到達は別イベントである。
+- Isaac Sim 6.0.1公式Articulation Controllerはjoint name/indexとposition commandを対応させて適用する。同じjointをpositionとeffortなど複数方式で同時制御できない。
+- 現行sim経路は`servo_execution_adapter -> /tomato_harvest/gripper_closed -> IsaacSimHardwareInterface -> finger position target -> Isaac articulation`である。
+- Step 3-4ログでは`hold_at_grasp`と`hold_grasp_eval`が開始してPose Trackingは成功したが、全PhysicsObsで`grip=0`、finger gap 0.0800 mだった。
+- 直接原因は、Pose Tracking開始時にcloseを安全のためopenへ遅延する一方、成功時に元のclose指令を確定publishしていなかったことである。両hold commandも内部`PhaseId.MOVING_TO_GRASP`を使うため同じ遅延規則が再適用された。
+
+### 現時点の推奨方針（設計推論）
+
+- phase plannerが決めたgripper指令をadapterが再解釈しない。`MOVING_TO_GRASP`は上流がopen、`AT_GRASP`以降は上流がcloseを指定するため、各command開始時にその値を適用し、Pose成功時に冪等に再確定する。
+- adapterは指令タイミングだけを所有し、simのfinger target変換はHardwareInterface、実機のwidth/speed/force実行と到達判定はFranka gripper action adapterへ分離する。
+- 今回は既存boolean契約を最小修正し、E2Eでclose後のfinger gap減少、`gripper_closed=true`、両指接触、`HELD`を確認した。pull中もcloseは維持されたが、実接触保持が崩れて`FALLEN`となったため、次の課題はgripper指令ではなく摩擦保持とpull動作である。
+- 将来の実機対応ではboolean topicをFranka/MoveIt gripper actionへ置換し、action resultの`reached_goal`と実測widthをgrasp評価へ渡す。
+
+### 未解決の確認事項
+
+- simのposition target方式を、実機相当のwidth/speed/force action契約へ昇格する時期。
+- tomatoとの接触後にfingerが目標0 mへ到達しない正常な把持を、gap、force、stalled相当値のどの組合せで成功判定するか。
+- 現行physics grasp joint生成を実接触だけで成立させられるか、geometry補助を残すか。
+
+### 一次情報
+
+- Franka Robotics公式`franka_gripper`: https://github.com/frankarobotics/franka_ros2/blob/humble/franka_gripper/doc/index.rst
+- ROS 2 `control_msgs/GripperCommand`: https://github.com/ros-controls/control_msgs/blob/master/control_msgs/action/GripperCommand.action
+- Isaac Sim 6.0.1 Articulation Controller: https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
+
 ## Step 3-4 実機互換TF配信責務（2026-07-16）
 
 ### 調査目的と条件

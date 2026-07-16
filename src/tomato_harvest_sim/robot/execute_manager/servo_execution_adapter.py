@@ -36,7 +36,7 @@ SERVO_POSE_COMMAND_TOPIC = "/tomato_harvest/moveit_servo/pose_target_cmds"
 SERVO_STATUS_TOPIC = "/tomato_harvest/moveit_servo/status"
 SERVO_PLANNING_FRAME = "panda_link0"
 SERVO_END_EFFECTOR_FRAME = "panda_link8"
-SERVO_POSE_POSITION_TOLERANCE_M = 0.005
+SERVO_POSE_POSITION_TOLERANCE_M = 0.0051
 SERVO_POSE_ORIENTATION_TOLERANCE_RAD = 0.03
 
 
@@ -117,10 +117,8 @@ def servo_target_from_command(
     )
 
 
-def gripper_state_at_tracking_start(target: ServoTarget) -> bool | None:
-    """終端pose tracking中は閉爪を遅延し、整列完了後のphaseへ委ねる。"""
-    if target.pose_tracking_goal is not None and target.gripper_closed:
-        return False
+def gripper_state_for_tracking(target: ServoTarget) -> bool | None:
+    """plannerが決めたgripper指令を開始時と成功時に適用する。"""
     return target.gripper_closed
 
 
@@ -303,7 +301,7 @@ def main() -> None:
             self._target_started_sec = started_at_sec
             self._stable_samples = 0
             self._reset_pose_tracking_observation()
-            self._publish_gripper(gripper_state_at_tracking_start(target))
+            self._publish_gripper(gripper_state_for_tracking(target))
             self._publish_status("running")
             self.get_logger().info(metric_line(
                 "servo_target_started", phase=target.phase,
@@ -461,6 +459,7 @@ def main() -> None:
                     (now_sec - (self._target_started_sec or now_sec)) * 1000.0, 3
                 ),
             ))
+            self._publish_gripper(gripper_state_for_tracking(self._target))
             self._publish_status("succeeded")
             self._target = None
             self._target_started_sec = None
