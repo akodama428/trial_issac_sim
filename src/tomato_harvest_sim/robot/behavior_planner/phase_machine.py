@@ -101,7 +101,7 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
             HarvestTaskPhase.MOVING_TO_PREGRASP: HarvestTaskPhase.MOVING_TO_GRASP,
             HarvestTaskPhase.MOVING_TO_GRASP: HarvestTaskPhase.AT_GRASP,
             HarvestTaskPhase.DETACHING: HarvestTaskPhase.MOVING_TO_PLACE,
-            HarvestTaskPhase.MOVING_TO_PLACE: HarvestTaskPhase.PLACED,
+            HarvestTaskPhase.MOVING_TO_PLACE: HarvestTaskPhase.RELEASING,
             HarvestTaskPhase.RETURNING_HOME: HarvestTaskPhase.COMPLETE,
         }
         next_phase = next_by_phase.get(state.phase)
@@ -138,12 +138,14 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
         if event.tomato_status is TomatoStatus.FALLEN:
             return Transition(_enter(state, HarvestTaskPhase.FAILED))
         if event.place_reached:
-            return Transition(_enter(state, HarvestTaskPhase.PLACED))
-    if state.phase is HarvestTaskPhase.PLACED:
+            return Transition(_enter(state, HarvestTaskPhase.RELEASING))
+    if state.phase is HarvestTaskPhase.RELEASING:
         if event.tomato_status is TomatoStatus.PLACED:
-            return Transition(_enter(state, HarvestTaskPhase.RETURNING_HOME))
+            return Transition(_enter(state, HarvestTaskPhase.PLACED))
         if event.tomato_status is TomatoStatus.FALLEN:
             return Transition(_enter(state, HarvestTaskPhase.FAILED))
+    if state.phase is HarvestTaskPhase.PLACED:
+        return Transition(_enter(state, HarvestTaskPhase.RETURNING_HOME))
     if state.phase is HarvestTaskPhase.RETURNING_HOME and event.robot_home:
         return Transition(_enter(state, HarvestTaskPhase.COMPLETE))
     return Transition(state)

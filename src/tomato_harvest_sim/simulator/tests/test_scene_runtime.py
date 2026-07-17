@@ -86,6 +86,16 @@ class SceneRuntimeLayoutTest(unittest.TestCase):
         snapshot = runtime.apply_finger_positions(finger_open, finger_open)
         self.assertFalse(snapshot.gripper_closed)
 
+    def test_physics_gripper_command_does_not_replace_measured_finger_state(self) -> None:
+        runtime = IsaacSceneRuntime(physics_grasp_enabled=True)
+        runtime.boot()
+
+        commanded = runtime.apply_gripper_command(True)
+        measured = runtime.apply_finger_positions(0.0, 0.0)
+
+        self.assertFalse(commanded.gripper_closed)
+        self.assertTrue(measured.gripper_closed)
+
 
 if __name__ == "__main__":
     unittest.main()

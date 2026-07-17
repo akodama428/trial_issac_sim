@@ -19,10 +19,6 @@ import math
 from tomato_harvest_sim.msg.contracts import HarvestTaskPhase, TomatoStatus
 
 
-# -----------------------------------------------------------------------
-# 定数
-# -----------------------------------------------------------------------
-_POSITION_TOLERANCE_M = 0.05   # 5cm: 移動フェーズ完了判定距離
 def _pose_error_m(a: object, b: object) -> float:
     dx = a.x - b.x
     dy = a.y - b.y
@@ -70,18 +66,24 @@ def moving_to_place_outcome(
     tomato_status: TomatoStatus,
     robot_tool_pose: object | None,
     place_pose: object | None,
+    position_tolerance_m: float | None = None,
 ) -> HarvestTaskPhase | None:
     """MOVING_TO_PLACE の物理的成果からの遷移先を返す。遷移不要なら None。
 
-    ツールが place_pose の _POSITION_TOLERANCE_M 以内へ到達したら PLACED。
+    ツールが place_pose の許容距離内へ到達したら RELEASING。
     搬送中の落下は FAILED。DETACHING と同じく JTC abort に対する救済経路。
     """
     if tomato_status is TomatoStatus.FALLEN:
         return HarvestTaskPhase.FAILED
     if robot_tool_pose is None or place_pose is None:
         return None
-    if _pose_error_m(robot_tool_pose, place_pose) < _POSITION_TOLERANCE_M:
-        return HarvestTaskPhase.PLACED
+    if position_tolerance_m is None:
+        from tomato_harvest_sim.simulator.scene_config import load_placement_config
+        position_tolerance_m = (
+            load_placement_config().release_ready.position_tolerance_m
+        )
+    if _pose_error_m(robot_tool_pose, place_pose) < position_tolerance_m:
+        return HarvestTaskPhase.RELEASING
     return None
 
 
@@ -199,7 +201,7 @@ def main() -> None:
             self._apply_transition(advance(self._machine, ExecutionAborted()))
 
         # ------------------------------------------------------------------
-        # Scene-snapshot-driven step (AT_GRASP / GRASP_EVALUATION / PLACED)
+        # Scene-snapshot-driven step
         # ------------------------------------------------------------------
 
         def _step(self) -> None:
@@ -210,7 +212,7 @@ def main() -> None:
                 snapshot.tomato_status,
                 snapshot.robot_tool_pose,
                 self._last_plan.place_pose if self._last_plan is not None else None,
-            ) is HarvestTaskPhase.PLACED
+            ) is HarvestTaskPhase.RELEASING
             self._apply_transition(advance(
                 self._machine,
                 SnapshotTick(snapshot.tomato_status, place_reached, snapshot.robot_home),

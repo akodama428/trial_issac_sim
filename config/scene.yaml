@@ -67,6 +67,28 @@ scene:
   hand_camera_focal_length_mm: 18.0
   hand_camera_clipping_range_m: [0.01, 1000.0]
 
+placement:
+  release_pose:
+    vertical_offset_m: 0.15
+    hover_offset_m: 0.10
+  release_ready:
+    position_tolerance_m: 0.05
+    max_joint_speed_rad_s: 0.05
+    required_consecutive_steps: 6
+  gripper_open:
+    measured_closed_gap_threshold_m: 0.065
+    measured_gap_threshold_m: 0.07
+    timeout_sec: 1.0
+  containment:
+    boundary_margin_m: 0.005
+    escape_margin_m: 0.03
+  settling:
+    max_linear_speed_m_s: 0.03
+    max_angular_speed_rad_s: 0.5
+    required_consecutive_steps: 12
+    release_timeout_sec: 1.5
+    settle_timeout_sec: 3.0
+
 # Step 1（物理モデル土台）: 摩擦・コリジョン・ソルバのチューニング。
 # 値の根拠と検証結果は docs/reports/physics_levelup/step1_physics_foundation.html を参照。
 # TOMATO_HARVEST_PHYSICS_TUNING=0 で一時的に無効化できる（A/B 比較用）。

@@ -24,7 +24,17 @@ class FrictionGraspConfig:
 
 
 def _relative_position(hand: Pose3D, tomato: Pose3D) -> tuple[float, float, float]:
-    return tomato.x - hand.x, tomato.y - hand.y, tomato.z - hand.z
+    """world差分をhand local frameへ回し、剛体回転と実滑りを分離する。"""
+    x, y, z = tomato.x - hand.x, tomato.y - hand.y, tomato.z - hand.z
+    roll, pitch, yaw = (math.radians(value) for value in (hand.roll, hand.pitch, hand.yaw))
+    # world R = Rz(yaw) Ry(pitch) Rx(roll) の逆回転を逆順で適用する。
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    x, y = cy * x + sy * y, -sy * x + cy * y
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    x, z = cp * x - sp * z, sp * x + cp * z
+    cr, sr = math.cos(roll), math.sin(roll)
+    y, z = cr * y + sr * z, -sr * y + cr * z
+    return x, y, z
 
 
 def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:

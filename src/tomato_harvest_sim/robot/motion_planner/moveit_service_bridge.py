@@ -241,6 +241,7 @@ class Ros2MoveIt2PlannerBridge:
     MOVEIT_LINK_TO_RUNTIME_TOOL_OFFSET_M = (0.0, 0.0, 0.0584)
     TRAY_INNER_SIZE_M = (0.22, 0.16, 0.05)
     TRAY_WALL_THICKNESS_M = 0.012
+    TRAY_COLLISION_MARGIN_M = 0.015
     BRANCH_SIZE_M = (0.18, 0.02, 0.02)
     STEM_SIZE_M = (0.008, 0.008, 0.06)
     ATTACHED_TOMATO_RADIUS_M = 0.01
@@ -986,6 +987,7 @@ class Ros2MoveIt2PlannerBridge:
             ),
             tray_inner_size_m=self.TRAY_INNER_SIZE_M,
             tray_wall_thickness_m=self.TRAY_WALL_THICKNESS_M,
+            collision_margin_m=self.TRAY_COLLISION_MARGIN_M,
             branch_size_m=self.BRANCH_SIZE_M,
             stem_size_m=self.STEM_SIZE_M,
             attached_tomato_radius_m=self.ATTACHED_TOMATO_RADIUS_M,
@@ -1598,6 +1600,7 @@ def _build_planning_scene_request(
     tomato_ops: _TomatoPlanningSceneOps,
     tray_inner_size_m: tuple[float, float, float],
     tray_wall_thickness_m: float,
+    collision_margin_m: float,
     branch_size_m: tuple[float, float, float],
     stem_size_m: tuple[float, float, float],
     attached_tomato_radius_m: float,
@@ -1633,6 +1636,7 @@ def _build_planning_scene_request(
             tray_pose=scene_snapshot.tray_pose,
             tray_inner_size_m=tray_inner_size_m,
             tray_wall_thickness_m=tray_wall_thickness_m,
+            collision_margin_m=collision_margin_m,
         )
     )
 
@@ -1695,9 +1699,11 @@ def _tray_collision_objects(
     tray_pose: Pose3D,
     tray_inner_size_m: tuple[float, float, float],
     tray_wall_thickness_m: float,
+    collision_margin_m: float = 0.0,
 ) -> tuple[object, ...]:
     inner_x, inner_y, inner_z = tray_inner_size_m
     wall = tray_wall_thickness_m
+    margin = collision_margin_m
     half_inner_z = inner_z / 2.0
     wall_height = inner_z + wall
     return (
@@ -1705,31 +1711,31 @@ def _tray_collision_objects(
             object_id="place_tray_base",
             frame_id=frame_id,
             pose=Pose3D(tray_pose.x, tray_pose.y, tray_pose.z, 0.0, 0.0, 0.0),
-            size_xyz=(inner_x + 2 * wall, inner_y + 2 * wall, wall),
+            size_xyz=(inner_x + 2 * wall + 2 * margin, inner_y + 2 * wall + 2 * margin, wall + 2 * margin),
         ),
         _box_collision_object(
             object_id="place_tray_wall_front",
             frame_id=frame_id,
-            pose=Pose3D(tray_pose.x + inner_x / 2.0 + wall / 2.0, tray_pose.y, tray_pose.z + half_inner_z, 0.0, 0.0, 0.0),
-            size_xyz=(wall, inner_y + 2 * wall, wall_height),
+            pose=Pose3D(tray_pose.x + inner_x / 2.0 + wall / 2.0, tray_pose.y, tray_pose.z + half_inner_z + margin / 2.0, 0.0, 0.0, 0.0),
+            size_xyz=(wall + 2 * margin, inner_y + 2 * wall + 2 * margin, wall_height + margin),
         ),
         _box_collision_object(
             object_id="place_tray_wall_back",
             frame_id=frame_id,
-            pose=Pose3D(tray_pose.x - inner_x / 2.0 - wall / 2.0, tray_pose.y, tray_pose.z + half_inner_z, 0.0, 0.0, 0.0),
-            size_xyz=(wall, inner_y + 2 * wall, wall_height),
+            pose=Pose3D(tray_pose.x - inner_x / 2.0 - wall / 2.0, tray_pose.y, tray_pose.z + half_inner_z + margin / 2.0, 0.0, 0.0, 0.0),
+            size_xyz=(wall + 2 * margin, inner_y + 2 * wall + 2 * margin, wall_height + margin),
         ),
         _box_collision_object(
             object_id="place_tray_wall_left",
             frame_id=frame_id,
-            pose=Pose3D(tray_pose.x, tray_pose.y + inner_y / 2.0 + wall / 2.0, tray_pose.z + half_inner_z, 0.0, 0.0, 0.0),
-            size_xyz=(inner_x, wall, wall_height),
+            pose=Pose3D(tray_pose.x, tray_pose.y + inner_y / 2.0 + wall / 2.0, tray_pose.z + half_inner_z + margin / 2.0, 0.0, 0.0, 0.0),
+            size_xyz=(inner_x + 2 * margin, wall + 2 * margin, wall_height + margin),
         ),
         _box_collision_object(
             object_id="place_tray_wall_right",
             frame_id=frame_id,
-            pose=Pose3D(tray_pose.x, tray_pose.y - inner_y / 2.0 - wall / 2.0, tray_pose.z + half_inner_z, 0.0, 0.0, 0.0),
-            size_xyz=(inner_x, wall, wall_height),
+            pose=Pose3D(tray_pose.x, tray_pose.y - inner_y / 2.0 - wall / 2.0, tray_pose.z + half_inner_z + margin / 2.0, 0.0, 0.0, 0.0),
+            size_xyz=(inner_x + 2 * margin, wall + 2 * margin, wall_height + margin),
         ),
     )
 

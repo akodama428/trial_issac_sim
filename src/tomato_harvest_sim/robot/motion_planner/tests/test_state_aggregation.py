@@ -63,6 +63,16 @@ class PlannerStateAggregatorTest(unittest.TestCase):
         aggregator.observe_abort()
         self.assertEqual(aggregator.snapshot().abort_generation, 2)
 
+    def test_stall_is_recorded_once_per_rising_edge(self) -> None:
+        aggregator = PlannerStateAggregator()
+
+        aggregator.observe_stall(True)
+        aggregator.observe_stall(True)
+        self.assertEqual(aggregator.snapshot().stall_generation, 1)
+        aggregator.observe_stall(False)
+        aggregator.observe_stall(True)
+        self.assertEqual(aggregator.snapshot().stall_generation, 2)
+
     def test_tracking_error_holds_the_peak_of_observed_values(self) -> None:
         aggregator = PlannerStateAggregator()
 

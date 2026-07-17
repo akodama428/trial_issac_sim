@@ -21,6 +21,8 @@ class PlannerState:
     target_estimate: TargetEstimate | None = None
     tracking_error_rad: float | None = None
     abort_generation: int = 0
+    stall_generation: int = 0
+    stall_active: bool = False
     scene_generation: int = 0
 
 
@@ -41,7 +43,10 @@ class PlannerStateAggregator:
             self._state.tracking_error_rad if self._state.phase == phase else None
         )
         self._state = replace(
-            self._state, phase=phase, tracking_error_rad=tracking_error_rad
+            self._state,
+            phase=phase,
+            tracking_error_rad=tracking_error_rad,
+            stall_active=self._state.stall_active if self._state.phase == phase else False,
         )
 
     def update_joint_state(self, joint_state: JointStateSnapshot) -> None:
@@ -62,6 +67,15 @@ class PlannerStateAggregator:
     def observe_abort(self) -> None:
         self._state = replace(
             self._state, abort_generation=self._state.abort_generation + 1
+        )
+
+    def observe_stall(self, stalled: bool) -> None:
+        """stallの立ち上がりを単調event generationへ変換する。"""
+        generation = self._state.stall_generation
+        if stalled and not self._state.stall_active:
+            generation += 1
+        self._state = replace(
+            self._state, stall_active=stalled, stall_generation=generation
         )
 
     def update_scene_snapshot(self, scene_snapshot: SceneSnapshot) -> None:

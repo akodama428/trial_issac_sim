@@ -16,6 +16,9 @@ _EXECUTION_DIAGNOSTIC_FIELDS = (
     "limiting_joint_desired_rad",
     "limiting_joint_actual_rad",
     "abort_reason",
+    "scale",
+    "stall_elapsed_sec",
+    "stalled",
 )
 
 

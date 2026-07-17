@@ -115,5 +115,6 @@ flowchart TD
 
 - `CI_HEADLESS_STEPS=3600` は「完了検知なしの固定ステップ消化」への時間ベースの当て付けであり、マシン性能・キャッシュ状態に依存する暗黙の結合がある(ci.yml のコメント自体がこれを認めている)。なお feature/headless-early-exit ブランチで早期終了機構が入ったため、この値は「上限」としての意味に変わっている可能性が高い — `run_ros2_components.sh` 側の仕様と合わせて確認が必要
 - `run_e2e.sh` の `--network host` は、ランナー上で他の ROS 2 プロセスが動いているとトピック混線しうる(concurrency 設定で同時実行は抑制されているが、CI 以外のプロセスは防げない)
+- E2Eコンテナ内のROS 2プロセスは`ROS_DOMAIN_ID=99`へ固定し、domain 0を使う手動実行と分離する。ホスト上でdomain 99を使う別プロセスとの混線までは防げない。
 - E2E の成否判定がログの文言(`Headless simulator node setup completed.` など)に密結合しており、アプリ側のログメッセージ変更で CI が壊れる
 - `CI_CACHE_ROOT` が `/tmp` 配下のため、ランナー再起動で消える前提(消えても動くが初回は遅い)
