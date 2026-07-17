@@ -11,6 +11,7 @@ def test_every_motion_phase_declares_execution_intent() -> None:
         HarvestTaskPhase.GRASP_EVALUATION: (MotionKind.HOLD, True),
         HarvestTaskPhase.DETACHING: (MotionKind.FOLLOW_TRAJECTORY, False),
         HarvestTaskPhase.MOVING_TO_PLACE: (MotionKind.FOLLOW_TRAJECTORY, False),
+        HarvestTaskPhase.RELEASING: (MotionKind.HOLD, False),
         HarvestTaskPhase.PLACED: (MotionKind.HOLD, False),
         HarvestTaskPhase.RETURNING_HOME: (MotionKind.FOLLOW_TRAJECTORY, False),
     }

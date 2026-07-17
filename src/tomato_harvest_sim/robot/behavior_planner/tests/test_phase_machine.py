@@ -31,3 +31,21 @@ def test_grasp_evaluation_timeout_fails_and_resets_counters() -> None:
 def test_reset_enters_idle_with_clean_state() -> None:
     state = PhaseMachineState(HarvestTaskPhase.AT_GRASP, True, 12, 4)
     assert advance(state, ControlReceived(ControlCommand.RESET)).state == PhaseMachineState()
+
+
+def test_placed_phase_is_entered_only_after_physical_placement_is_confirmed() -> None:
+    moving = PhaseMachineState(HarvestTaskPhase.MOVING_TO_PLACE, True)
+
+    releasing = advance(
+        moving, SnapshotTick(TomatoStatus.DETACHED, place_reached=True)
+    ).state
+    still_releasing = advance(
+        releasing, SnapshotTick(TomatoStatus.DETACHED)
+    ).state
+    placed = advance(
+        still_releasing, SnapshotTick(TomatoStatus.PLACED)
+    ).state
+
+    assert releasing.phase is HarvestTaskPhase.RELEASING
+    assert still_releasing.phase is HarvestTaskPhase.RELEASING
+    assert placed.phase is HarvestTaskPhase.PLACED

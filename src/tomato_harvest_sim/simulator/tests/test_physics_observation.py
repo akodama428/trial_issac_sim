@@ -14,6 +14,7 @@ from tomato_harvest_sim.simulator.physics_observation import (
     estimate_stem_tension_n,
     format_observation_line,
     summarize_finger_contact_impulses,
+    summarize_matching_contact_impulse,
 )
 
 
@@ -182,6 +183,7 @@ class FormatObservationLineTest(unittest.TestCase):
             finger_gap_m=0.0512,
             finger_midpoint_z_m=0.555,
             tomato_center_z_m=0.540,
+            tray_contact_force_n=3.25,
         )
 
         self.assertTrue(line.startswith("[PhysicsObs] "))
@@ -200,6 +202,19 @@ class FormatObservationLineTest(unittest.TestCase):
         self.assertAlmostEqual(float(fields["finger_z"]), 0.555)
         self.assertAlmostEqual(float(fields["tomato_z"]), 0.540)
         self.assertAlmostEqual(float(fields["grasp_dz"]), 0.015)
+        self.assertAlmostEqual(float(fields["trayF"]), 3.25)
+
+
+def test_matching_contact_impulse_sums_only_selected_pairs() -> None:
+    headers = [
+        _Header(1, 2, 0, 1),
+        _Header(3, 4, 1, 1),
+    ]
+    data = [_Contact(_Vec3(0.3, 0.4, 0.0)), _Contact(_Vec3(9.0, 0.0, 0.0))]
+
+    assert summarize_matching_contact_impulse(
+        headers, data, pair_matches=lambda first, second: (first, second) == (1, 2)
+    ) == 0.5
 
 
 if __name__ == "__main__":

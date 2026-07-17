@@ -37,6 +37,58 @@ class SceneLayoutConfig:
 
 
 @dataclass(frozen=True)
+class PlacementSceneGeometryConfig:
+    tomato_radius_m: float
+    tray_inner_size_m: tuple[float, float, float]
+    tray_wall_thickness_m: float
+
+
+@dataclass(frozen=True)
+class ReleasePoseConfig:
+    vertical_offset_m: float
+    hover_offset_m: float
+
+
+@dataclass(frozen=True)
+class ReleaseReadyConfig:
+    position_tolerance_m: float
+    max_joint_speed_rad_s: float
+    required_consecutive_steps: int
+
+
+@dataclass(frozen=True)
+class GripperOpenConfig:
+    measured_closed_gap_threshold_m: float
+    measured_gap_threshold_m: float
+    timeout_sec: float
+
+
+@dataclass(frozen=True)
+class ContainmentConfig:
+    boundary_margin_m: float
+    escape_margin_m: float
+
+
+@dataclass(frozen=True)
+class SettlingConfig:
+    max_linear_speed_m_s: float
+    max_angular_speed_rad_s: float
+    required_consecutive_steps: int
+    release_timeout_sec: float
+    settle_timeout_sec: float
+
+
+@dataclass(frozen=True)
+class PlacementConfig:
+    scene_geometry: PlacementSceneGeometryConfig
+    release_pose: ReleasePoseConfig
+    release_ready: ReleaseReadyConfig
+    gripper_open: GripperOpenConfig
+    containment: ContainmentConfig
+    settling: SettlingConfig
+
+
+@dataclass(frozen=True)
 class PhysicsMaterialConfig:
     """摩擦・反発の物理マテリアル設定。"""
 
@@ -195,6 +247,106 @@ def _float_tuple(data: list[object], *, expected_len: int) -> tuple[float, ...]:
     if len(values) != expected_len:
         raise ValueError(f"Expected tuple length {expected_len}, got {len(values)}")
     return values
+
+
+def placement_config_from_payload(payload: dict[str, object]) -> PlacementConfig:
+    """scene.yamlから配置設定を構築し、設定間の整合性を検証する。"""
+    scene = payload.get("scene")
+    placement = payload.get("placement")
+    if not isinstance(scene, dict) or not isinstance(placement, dict):
+        raise ValueError("scene and placement mappings are required")
+    release_pose = placement.get("release_pose")
+    release_ready = placement.get("release_ready")
+    gripper_open = placement.get("gripper_open")
+    containment = placement.get("containment")
+    settling = placement.get("settling")
+    sections = (release_pose, release_ready, gripper_open, containment, settling)
+    if not all(isinstance(section, dict) for section in sections):
+        raise ValueError("all placement subsections are required")
+
+    geometry = PlacementSceneGeometryConfig(
+        tomato_radius_m=float(scene["tomato_radius_m"]),
+        tray_inner_size_m=_float_tuple(scene["tray_inner_size_m"], expected_len=3),
+        tray_wall_thickness_m=float(scene["tray_wall_thickness_m"]),
+    )
+    config = PlacementConfig(
+        scene_geometry=geometry,
+        release_pose=ReleasePoseConfig(
+            vertical_offset_m=float(release_pose["vertical_offset_m"]),
+            hover_offset_m=float(release_pose["hover_offset_m"]),
+        ),
+        release_ready=ReleaseReadyConfig(
+            position_tolerance_m=float(release_ready["position_tolerance_m"]),
+            max_joint_speed_rad_s=float(release_ready["max_joint_speed_rad_s"]),
+            required_consecutive_steps=int(release_ready["required_consecutive_steps"]),
+        ),
+        gripper_open=GripperOpenConfig(
+            measured_closed_gap_threshold_m=float(
+                gripper_open["measured_closed_gap_threshold_m"]
+            ),
+            measured_gap_threshold_m=float(gripper_open["measured_gap_threshold_m"]),
+            timeout_sec=float(gripper_open["timeout_sec"]),
+        ),
+        containment=ContainmentConfig(
+            boundary_margin_m=float(containment["boundary_margin_m"]),
+            escape_margin_m=float(containment["escape_margin_m"]),
+        ),
+        settling=SettlingConfig(
+            max_linear_speed_m_s=float(settling["max_linear_speed_m_s"]),
+            max_angular_speed_rad_s=float(settling["max_angular_speed_rad_s"]),
+            required_consecutive_steps=int(settling["required_consecutive_steps"]),
+            release_timeout_sec=float(settling["release_timeout_sec"]),
+            settle_timeout_sec=float(settling["settle_timeout_sec"]),
+        ),
+    )
+    _validate_placement_config(config)
+    return config
+
+
+def _validate_placement_config(config: PlacementConfig) -> None:
+    geometry = config.scene_geometry
+    positive = (
+        geometry.tomato_radius_m,
+        *geometry.tray_inner_size_m,
+        geometry.tray_wall_thickness_m,
+        config.release_pose.vertical_offset_m,
+        config.release_pose.hover_offset_m,
+        config.release_ready.position_tolerance_m,
+        config.release_ready.max_joint_speed_rad_s,
+        config.gripper_open.measured_gap_threshold_m,
+        config.gripper_open.measured_closed_gap_threshold_m,
+        config.gripper_open.timeout_sec,
+        config.settling.max_linear_speed_m_s,
+        config.settling.max_angular_speed_rad_s,
+        config.settling.release_timeout_sec,
+        config.settling.settle_timeout_sec,
+    )
+    if any(value <= 0.0 for value in positive):
+        raise ValueError("placement dimensions, speeds, and timeouts must be positive")
+    required_width = 2.0 * (
+        geometry.tomato_radius_m + config.containment.boundary_margin_m
+    )
+    if any(size <= required_width for size in geometry.tray_inner_size_m[:2]):
+        raise ValueError("tomato and boundary margin must fit inside tray")
+    if config.containment.boundary_margin_m < 0.0:
+        raise ValueError("boundary margin must be non-negative")
+    if config.containment.escape_margin_m < config.containment.boundary_margin_m:
+        raise ValueError("escape margin must be at least boundary margin")
+    if (
+        config.gripper_open.measured_closed_gap_threshold_m
+        >= config.gripper_open.measured_gap_threshold_m
+    ):
+        raise ValueError("closed gripper gap must be smaller than open gripper gap")
+    if config.release_ready.required_consecutive_steps < 1:
+        raise ValueError("release-ready steps must be at least one")
+    if config.settling.required_consecutive_steps < 1:
+        raise ValueError("settling steps must be at least one")
+
+
+@lru_cache(maxsize=1)
+def load_placement_config() -> PlacementConfig:
+    payload = yaml.safe_load(_scene_config_path().read_text(encoding="utf-8"))
+    return placement_config_from_payload(payload if isinstance(payload, dict) else {})
 
 
 @lru_cache(maxsize=1)

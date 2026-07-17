@@ -99,6 +99,32 @@ def summarize_finger_contact_impulses(
     return FingerContactImpulses(left_ns=left_total, right_ns=right_total)
 
 
+def summarize_matching_contact_impulse(
+    contact_headers: Iterable[object],
+    contact_data: Sequence[object],
+    *,
+    pair_matches: Callable[[int, int], bool],
+) -> float:
+    """指定したactor/colliderペアに一致する接触力積ノルムを合算する。"""
+    total = 0.0
+    for header in contact_headers:
+        matches = pair_matches(header.actor0, header.actor1)
+        if not matches and hasattr(header, "collider0") and hasattr(header, "collider1"):
+            matches = pair_matches(header.collider0, header.collider1)
+        if not matches:
+            continue
+        offset = max(0, int(header.contact_data_offset))
+        end = min(len(contact_data), offset + max(0, int(header.num_contact_data)))
+        for index in range(offset, end):
+            impulse = contact_data[index].impulse
+            total += (
+                float(impulse.x) ** 2
+                + float(impulse.y) ** 2
+                + float(impulse.z) ** 2
+            ) ** 0.5
+    return total
+
+
 def format_observation_line(
     *,
     sequence_id: int,
@@ -115,6 +141,7 @@ def format_observation_line(
     finger_gap_m: float = 0.0,
     finger_midpoint_z_m: float = 0.0,
     tomato_center_z_m: float = 0.0,
+    tray_contact_force_n: float = 0.0,
 ) -> str:
     """1 物理ステップ分の観測値を、プロットスクリプトが機械解析できる1行に整形する。
 
@@ -140,6 +167,7 @@ def format_observation_line(
         f"finger_z={finger_midpoint_z_m:.4f} "
         f"tomato_z={tomato_center_z_m:.4f} "
         f"grasp_dz={finger_midpoint_z_m - tomato_center_z_m:.4f}"
+        f" trayF={tray_contact_force_n:.4f}"
     )
 
 

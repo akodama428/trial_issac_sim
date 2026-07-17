@@ -768,6 +768,7 @@ def _scene_snapshot_to_dict(snapshot: SceneSnapshot) -> dict[str, object]:
         "tomato_attached": snapshot.tomato_attached,
         "tomato_status": snapshot.tomato_status.value,
         "gripper_closed": snapshot.gripper_closed,
+        "gripper_commanded_closed": snapshot.gripper_commanded_closed,
         "robot_home": snapshot.robot_home,
         "cycle_id": snapshot.cycle_id,
         "robot_model": snapshot.robot_model,
@@ -793,6 +794,11 @@ def _scene_snapshot_from_dict(data: dict[str, object]) -> SceneSnapshot:
         tomato_attached=bool(data["tomato_attached"]),
         tomato_status=TomatoStatus(str(data["tomato_status"])),
         gripper_closed=bool(data["gripper_closed"]),
+        gripper_commanded_closed=(
+            bool(data["gripper_commanded_closed"])
+            if data.get("gripper_commanded_closed") is not None
+            else None
+        ),
         robot_home=bool(data["robot_home"]),
         cycle_id=int(data["cycle_id"]),
         robot_model=str(data["robot_model"]),

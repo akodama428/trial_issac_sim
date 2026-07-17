@@ -8,6 +8,10 @@ from tomato_harvest_sim.msg.contracts import (
     TargetEstimate,
     TfTreeSnapshot,
 )
+from tomato_harvest_sim.simulator.scene_config import (
+    ReleasePoseConfig,
+    load_placement_config,
+)
 
 
 class MoveItStylePreGraspPlanner:
@@ -24,8 +28,7 @@ class MoveItStylePreGraspPlanner:
         pull_offset_z_m: float = 0.08,
         pull_lift_offset_x_m: float = 0.02,
         pull_lift_offset_z_m: float = 0.06,
-        place_vertical_offset_m: float = 0.12,
-        place_hover_offset_m: float = 0.10,
+        release_pose_config: ReleasePoseConfig | None = None,
     ) -> None:
         self._approach_offset_m = approach_offset_m
         self._vertical_offset_m = vertical_offset_m
@@ -36,8 +39,9 @@ class MoveItStylePreGraspPlanner:
         self._pull_offset_z_m = pull_offset_z_m
         self._pull_lift_offset_x_m = pull_lift_offset_x_m
         self._pull_lift_offset_z_m = pull_lift_offset_z_m
-        self._place_vertical_offset_m = place_vertical_offset_m
-        self._place_hover_offset_m = place_hover_offset_m
+        placement = release_pose_config or load_placement_config().release_pose
+        self._place_vertical_offset_m = placement.vertical_offset_m
+        self._place_hover_offset_m = placement.hover_offset_m
 
     def plan(
         self,

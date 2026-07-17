@@ -10,6 +10,54 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Step 3-8-6 physics配置判定対策（2026-07-17）
+
+### 確認済みの事実
+
+- Isaac Sim 6.0.1公式Contact SensorはPhysX Contact Report APIを基盤とし、接触pair、normal、contact point等の物理情報を取得できる。6.0以降は旧`isaacsim.sensors.physics`ではなく`isaacsim.sensors.experimental.physics.ContactSensor`が推奨される。
+- Isaac Sim公式Physics-based sensorsはphysics simulation後に動作し、primのmass・velocity等へアクセスできる。既定ではphysics rateでground truthを出力する。
+- ROS 2 Jazzy公式parameter仕様は、初期値をYAML/launchから与え、node側でparameterを宣言する。descriptorには説明、型、値域、追加制約を持たせられ、set callbackで不整合な変更を拒否できる。
+- ROS 2公式は未宣言parameterの利用を通常は推奨しない。宣言済みparameterは名前の誤りやuse-before-setを検出しやすくする。
+- 現行実装は`config/scene.yaml`にtray内寸、tomato半径、tray poseを持つ一方、place高さはplanner constructor、到達許容はbehavior planner、release距離はphysics bridgeへ分散している。
+
+### 設計への反映（推論）
+
+- 配置成功はgripper open時のtool距離で即時確定せず、tomatoのtray内包、tomato-tray接触、速度収束をphysics rateで連続観測して確定する。
+- `config/scene.yaml`を配置設定の単一source of truthとし、tray内側の有効境界やrelease高さ範囲はtray寸法、wall厚、tomato半径からpure functionで派生させる。派生値を別設定として重複保持しない。
+- 複数nodeは同じtyped loaderとvalidationを使い、起動時に正値、寸法関係、到達領域とrelease準備領域の包含関係をfail-fast検証する。
+- gripper command intentと実finger open観測を分離し、実開放後にsettling windowを開始する。
+
+### 一次情報
+
+- Isaac Sim 6.0.1 Contact Sensor: https://docs.isaacsim.omniverse.nvidia.com/6.0.1/sensors/isaacsim_sensors_physics_contact.html
+- Isaac Sim Physics-based sensors: https://docs.isaacsim.omniverse.nvidia.com/latest/sensors/isaacsim_sensors_physics.html
+- ROS 2 Jazzy Parameters: https://docs.ros.org/en/jazzy/Concepts/Basic/About-Parameters.html
+- ROS 2 parameter declaration/descriptor background: https://docs.ros.org/en/jazzy/Releases/Release-Dashing-Diademata.html
+
+## Step 3-8-3 time-stretch対策設計（2026-07-17）
+
+### 確認済みの事実
+
+- MoveIt Servo公式は`JointJog`を個別関節速度として受け付け、`speed_units`ではrad/sとして扱う。Servoの出力は関節位置・速度・加速度を含むkinematic stateであり、ROS nodeでは`JointTrajectory`等へ変換できる。
+- MoveIt Servo公式のButterworth smoothingはlow-pass filterであり、入力の不規則性を平滑化する。そのため入力速度の段差は下流で即時には再現されず、位相遅れを持つ。
+- ros2_control Jazzy公式のJointTrajectoryControllerは、waypointを時刻補間して機構が可能な範囲で追従する。positionのみのspline入力は位置連続だが、waypointで速度が不連続になる。
+- JointTrajectoryControllerのtopic入力はfire-and-forgetであり、action入力と異なり送信側へgoal tolerance違反を通知する仕組みを持たない。controller stateによる別監視が必要になる。
+- 現行E2Eではadapter出力約0.73 rad/sに対しhardware出力が約0.40 rad/sとなり、0.10 rad閾値でfeed-forwardを切った後もhardwareは切替前方向へ約0.41 rad/sで動作していた。
+
+### 設計への反映（推論）
+
+- 現行`v_ref`は現在位置から算出せず、MoveIt軌道にvelocityがあればその補間値、なければ隣接する目標角度と`time_from_start`の差分から算出する。`Kp(q_ref-q_actual)`だけがfeedback成分である。
+- time-stretchを「誤差が閾値内へ戻るまでの一時的な参照時計停止」として扱う場合、停止中も`v_cmd = v_ref + Kp e`を維持する方式は成立する。閾値復帰時に時計だけを再開するため、下流へ出す速度指令に段差を作らない。
+- 上記方式の成立条件は、停止中に`e`と`v_ref + Kp e`の内積が正、すなわち誤差ノルムが減少する向きへ指令できることである。phase先頭ずれなどで軌道接線と補正方向が反対の場合は別扱いが必要になる。
+- `q_ref-q_actual`だけではServo/JTCに蓄積したcommand leadを検出できないため、下流commandとactualの差は独立に観測する。ただし最初の対策では制御則へ直ちに混ぜず、clock-only pauseの効果を分離評価する。
+
+### 一次情報
+
+- MoveIt Servo Realtime Servo: https://moveit.picknik.ai/main/doc/examples/realtime_servo/realtime_servo_tutorial.html
+- ros2_control Jazzy JointTrajectoryController: https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html
+- ros2_control Jazzy Trajectory Representation: https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/trajectory.html
+- Isaac Sim Articulation Action API: https://docs.isaacsim.omniverse.nvidia.com/latest/py/source/deprecated/isaacsim.sensors.physics/docs/index.html
+
 ## Step 3-6 GRASP状態機械リファクタリング（2026-07-17）
 
 ### 確認済みの事実

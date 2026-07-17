@@ -10,7 +10,10 @@ from tomato_harvest_sim.msg.contracts import (
     SceneSnapshot,
     TomatoStatus,
 )
-from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
+from tomato_harvest_sim.simulator.scene_config import (
+    load_placement_config,
+    load_scene_layout_config,
+)
 
 
 @dataclass
@@ -58,6 +61,8 @@ class IsaacSceneRuntime:
         self._physics_grasp_enabled = physics_grasp_enabled
         self._physics_soft_fallback_enabled = physics_soft_fallback_enabled
         self._layout = load_scene_layout_config()
+        self._placement = load_placement_config()
+        self._gripper_commanded_closed: bool | None = None
         self.state = self._initial_state()
         self._grasp_constraint_offset = (0.0, 0.0, -self.GRASP_TOMATO_OFFSET_Z_M)
 
@@ -188,15 +193,47 @@ class IsaacSceneRuntime:
             self.state.grasp_result_reason = "released_outside_place_target"
         return self.snapshot()
 
+    def apply_gripper_command(self, closed: bool) -> SceneSnapshot:
+        """gripper intentを受ける。physics modeでは実finger状態を上書きしない。"""
+        if self._physics_grasp_enabled:
+            self._gripper_commanded_closed = closed
+            self.state.grasp_result_reason = (
+                "gripper_close_commanded"
+                if closed
+                else "gripper_open_commanded"
+            )
+            return self.snapshot()
+        return self.close_gripper() if closed else self.open_gripper()
+
     def apply_finger_positions(self, finger_left: float, finger_right: float) -> SceneSnapshot:
         was_closed = self.state.gripper_closed
+        measured_gap = finger_left + finger_right
         is_closed = (
-            finger_left < self.GRIPPER_CLOSED_THRESHOLD_RAD
-            and finger_right < self.GRIPPER_CLOSED_THRESHOLD_RAD
+            (
+                not self._physics_grasp_enabled
+                and finger_left < self.GRIPPER_CLOSED_THRESHOLD_RAD
+                and finger_right < self.GRIPPER_CLOSED_THRESHOLD_RAD
+            )
+            or (
+                self._gripper_commanded_closed is True
+                and measured_gap
+                <= self._placement.gripper_open.measured_closed_gap_threshold_m
+            )
+        )
+        is_open = (
+            (
+                not self._physics_grasp_enabled
+                and not is_closed
+            )
+            or (
+                self._gripper_commanded_closed is False
+                and measured_gap
+                >= self._placement.gripper_open.measured_gap_threshold_m
+            )
         )
         if is_closed and not was_closed:
             return self.close_gripper()
-        if not is_closed and was_closed:
+        if is_open and was_closed:
             return self.open_gripper()
         return self.snapshot()
 
@@ -278,6 +315,7 @@ class IsaacSceneRuntime:
             right_finger_contact=self.state.right_finger_contact,
             left_finger_force_n=self.state.left_finger_force_n,
             right_finger_force_n=self.state.right_finger_force_n,
+            gripper_commanded_closed=self._gripper_commanded_closed,
         )
 
     def _is_stable_grasp_pose(self) -> bool:

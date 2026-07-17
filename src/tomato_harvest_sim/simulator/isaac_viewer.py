@@ -671,6 +671,12 @@ def _run_simulator_node_main_loop(
             scene_runtime.sync_robot_tool_pose(ee_pose)
 
         joint_state = franka_driver.current_joint_state_snapshot()
+        articulation_positions = franka_driver.current_joint_positions()
+        if articulation_positions is not None and articulation_positions.shape[0] >= 9:
+            scene_runtime.apply_finger_positions(
+                float(articulation_positions[7]),
+                float(articulation_positions[8]),
+            )
         node.tick(joint_state=joint_state)
 
         status = control_controller.step_runtime()

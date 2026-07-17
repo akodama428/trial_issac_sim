@@ -69,6 +69,19 @@ class PlanOnSnapshotArrivalTest(unittest.TestCase):
                     ReplanTrigger.TRACKING_ERROR, phase
                 ))
 
+    def test_stall_starts_suffix_planner_only_in_free_space_phases(self) -> None:
+        for phase in (
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+            HarvestTaskPhase.RETURNING_HOME,
+        ):
+            with self.subTest(phase=phase):
+                self.assertTrue(trigger_starts_planner(ReplanTrigger.STALL, phase))
+        self.assertFalse(trigger_starts_planner(
+            ReplanTrigger.STALL, HarvestTaskPhase.DETACHING
+        ))
+
     def test_contact_dominant_detaching_stays_observe_only(self) -> None:
         self.assertFalse(trigger_starts_planner(
             ReplanTrigger.TRACKING_ERROR, HarvestTaskPhase.DETACHING
@@ -112,6 +125,13 @@ class PlanOnSnapshotArrivalTest(unittest.TestCase):
             memory=TriggerMemory(), now_sec=10.0,
         )
         self.assertEqual(decision.trigger, ReplanTrigger.TRACKING_ERROR)
+
+    def test_new_stall_generation_has_priority_over_tracking_error(self) -> None:
+        decision = evaluate_replan_trigger(
+            state=_ready_state(stall_generation=1, tracking_error_rad=1.0),
+            memory=TriggerMemory(handled_stall_generation=0), now_sec=10.0,
+        )
+        self.assertEqual(decision.trigger, ReplanTrigger.STALL)
 
     def test_minimum_interval_suppresses_all_triggers(self) -> None:
         decision = evaluate_replan_trigger(

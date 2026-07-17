@@ -125,6 +125,7 @@ def main() -> None:
             tracking_error = status.get("tracking_error_rad")
             if tracking_error is not None:
                 self._state.observe_tracking_error(float(tracking_error))
+            self._state.observe_stall(bool(status.get("stalled", False)))
             if str(status.get("status", "")).strip() == "aborted":
                 self._state.observe_abort()
                 phase = self._state.snapshot().phase
