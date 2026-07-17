@@ -18,6 +18,7 @@ timeout --signal=INT "${E2E_TIMEOUT_SEC}" \
   ./scripts/run_ros2_components.sh \
   --isaac \
   --moveit \
+  --rebuild \
   --headless \
   --headless-steps "${HEADLESS_STEPS}" \
   --grasp-mode "${CI_GRASP_MODE:-success}" \
