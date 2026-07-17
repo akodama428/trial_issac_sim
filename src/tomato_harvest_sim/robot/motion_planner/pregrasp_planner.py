@@ -18,7 +18,8 @@ class MoveItStylePreGraspPlanner:
         vertical_offset_m: float = 0.09,
         grasp_hover_offset_z_m: float = 0.11,
         grasp_entry_offset_z_m: float = 0.085,
-        grasp_target_offset_z_m: float = 0.060,
+        # Step 3-7実測: 0.060ではfinger pad中点がtomato中心より約12 mm上になる。
+        grasp_target_offset_z_m: float = 0.048,
         pull_offset_x_m: float = 0.08,
         pull_offset_z_m: float = 0.08,
         pull_lift_offset_x_m: float = 0.02,

@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+import yaml
 
 from tomato_harvest_sim.simulator.scene_config import (
     load_physics_tuning_config,
@@ -58,6 +61,16 @@ _FULL_PAYLOAD = {
         },
     }
 }
+
+
+class RepositoryPhysicsProfileTest(unittest.TestCase):
+    def test_finger_drive_uses_franka_safe_initial_force(self) -> None:
+        payload = yaml.safe_load(Path("config/scene.yaml").read_text())
+        self.assertEqual(payload["physics"]["finger_drive"]["max_force_n"], 15.0)
+
+    def test_contact_solver_profile_uses_32_position_iterations(self) -> None:
+        payload = yaml.safe_load(Path("config/scene.yaml").read_text())
+        self.assertEqual(payload["physics"]["tomato_solver"]["position_iterations"], 32)
 
 
 class PhysicsTuningFromPayloadTest(unittest.TestCase):

@@ -92,12 +92,12 @@ physics:
     torsional_patch_radius_m: 0.004 # 球の点接触にねじり摩擦を与える（計画 §9.1-R3）
     min_torsional_patch_radius_m: 0.001
   tomato_solver:
-    position_iterations: 16         # 小物体把持向けにトマト剛体のみ増強
+    position_iterations: 32         # 単一ロボットのcontact-rich把持精度を増強
     velocity_iterations: 4
   finger_drive:                     # Step 2: 位置目標はそのまま、押付け力だけを制限
     stiffness: 3000.0               # USD 既定 400 では 2cm 偏差で 8N しか出ず飽和が見えないため増強
     damping: 120.0
-    max_force_n: 5.0                # トマト(30g)を潰さず保持できる初期値。実測根拠は step0 レポート
+    max_force_n: 15.0               # Franka継続70N未満で保持容量を確保する初期値
   friction_grasp:
     required_steps: 3
     minimum_force_n: 1.0

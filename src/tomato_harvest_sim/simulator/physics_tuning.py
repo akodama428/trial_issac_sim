@@ -78,6 +78,14 @@ def apply_physics_tuning(
             f"vel={config.tomato_solver_velocity_iterations}"
         )
 
+    for finger_path in finger_link_prim_paths:
+        if _apply_tomato_solver_iterations(stage, finger_path, config):
+            applied.append(
+                f"finger solver iterations: {finger_path} "
+                f"pos={config.tomato_solver_position_iterations} "
+                f"vel={config.tomato_solver_velocity_iterations}"
+            )
+
     applied.extend(
         _apply_finger_drive_limits(stage, finger_link_prim_paths, config)
     )

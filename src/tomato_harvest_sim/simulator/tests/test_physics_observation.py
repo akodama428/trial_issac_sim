@@ -180,6 +180,8 @@ class FormatObservationLineTest(unittest.TestCase):
             stem_distance_m=0.001,
             stem_tension_n=0.2943,
             finger_gap_m=0.0512,
+            finger_midpoint_z_m=0.555,
+            tomato_center_z_m=0.540,
         )
 
         self.assertTrue(line.startswith("[PhysicsObs] "))
@@ -195,6 +197,9 @@ class FormatObservationLineTest(unittest.TestCase):
         self.assertAlmostEqual(float(fields["v"]), 0.01)
         self.assertAlmostEqual(float(fields["stemF"]), 0.2943)
         self.assertAlmostEqual(float(fields["gap"]), 0.0512)
+        self.assertAlmostEqual(float(fields["finger_z"]), 0.555)
+        self.assertAlmostEqual(float(fields["tomato_z"]), 0.540)
+        self.assertAlmostEqual(float(fields["grasp_dz"]), 0.015)
 
 
 if __name__ == "__main__":

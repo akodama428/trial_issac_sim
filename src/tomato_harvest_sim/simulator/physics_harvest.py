@@ -32,7 +32,8 @@ class PhysicsHarvestScenePaths:
 
 
 class IsaacPhysicsHarvestBridge:
-    STEM_BREAK_FORCE_N = 50.0
+    # 実トマト離層の0.58〜2.46 Nに動的余裕を加える。
+    STEM_BREAK_FORCE_N = 7.5
     STEM_BREAK_TORQUE_NM = 50.0
     TOMATO_MASS_KG = 0.03
     DETACH_DISTANCE_M = 0.02
@@ -50,7 +51,7 @@ class IsaacPhysicsHarvestBridge:
     FINGER_GAP_MAX_M = 0.065
     TOMATO_COLLISION_PRIM_SUFFIX = "/Geometry"
     # 観測ログ専用の物理ステップ幅の仮定値。判定には使用しない。
-    OBSERVATION_PHYSICS_DT_SEC = 1.0 / 60.0
+    OBSERVATION_PHYSICS_DT_SEC = 1.0 / 120.0
 
     def __init__(
         self,
@@ -355,10 +356,13 @@ class IsaacPhysicsHarvestBridge:
         speed = (velocity[0] ** 2 + velocity[1] ** 2 + velocity[2] ** 2) ** 0.5
         hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
         stem_pose = self._world_pose(self._scene_paths.stem_anchor_prim_path)
-        finger_gap = self._distance(
-            self._world_pose(self._left_finger_prim_path()),
-            self._world_pose(self._right_finger_prim_path()),
-        )
+        left_finger_pose = self._world_pose(self._left_finger_prim_path())
+        right_finger_pose = self._world_pose(self._right_finger_prim_path())
+        finger_gap = self._distance(left_finger_pose, right_finger_pose)
+        finger_midpoint_z = (
+            self._inferred_finger_contact_pose(left_finger_pose).z
+            + self._inferred_finger_contact_pose(right_finger_pose).z
+        ) * 0.5
         stem_tension = estimate_stem_tension_n(
             mass_kg=self.TOMATO_MASS_KG,
             velocity_m_s=velocity,
@@ -383,6 +387,8 @@ class IsaacPhysicsHarvestBridge:
                 stem_distance_m=self._distance(stem_pose, tomato_pose),
                 stem_tension_n=stem_tension,
                 finger_gap_m=finger_gap,
+                finger_midpoint_z_m=finger_midpoint_z,
+                tomato_center_z_m=tomato_pose.z,
             ),
             flush=True,
         )

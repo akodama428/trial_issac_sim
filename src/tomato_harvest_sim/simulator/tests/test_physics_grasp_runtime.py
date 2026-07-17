@@ -7,6 +7,9 @@ from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBrid
 
 
 class PhysicsGraspRuntimeTest(unittest.TestCase):
+    def test_stem_break_force_uses_real_tomato_range_with_margin(self) -> None:
+        self.assertEqual(IsaacPhysicsHarvestBridge.STEM_BREAK_FORCE_N, 7.5)
+
     def test_contact_batches_are_accumulated_within_one_physics_step(self) -> None:
         bridge = IsaacPhysicsHarvestBridge(
             stage=object(),
