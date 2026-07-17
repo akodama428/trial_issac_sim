@@ -8,6 +8,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
 IN_CONTAINER_E2E = ROOT / "scripts/ci/in_container_e2e.sh"
+RUN_E2E = ROOT / "scripts/ci/run_e2e.sh"
 
 
 def _jobs() -> dict[str, object]:
@@ -41,3 +42,9 @@ def test_e2e_rebuilds_ros_components_before_launch() -> None:
     source = IN_CONTAINER_E2E.read_text(encoding="utf-8")
 
     assert "--rebuild" in source
+
+
+def test_e2e_container_isolated_on_ros_domain_99() -> None:
+    source = RUN_E2E.read_text(encoding="utf-8")
+
+    assert "-e ROS_DOMAIN_ID=99" in source

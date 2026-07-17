@@ -28,6 +28,7 @@ docker run --rm \
   --group-add "${ISAAC_SIM_GID}" \
   -e ACCEPT_EULA="${ACCEPT_EULA:-Y}" \
   -e PRIVACY_CONSENT="${PRIVACY_CONSENT:-Y}" \
+  -e ROS_DOMAIN_ID=99 \
   -e CI_ARTIFACT_DIR=/tmp/tomato-harvest-ci-artifacts \
   -e FRANKA_ROS2_WS=/tmp/tomato-harvest-ci-franka-ws \
   -e CI_HEADLESS_STEPS="${CI_HEADLESS_STEPS:-900}" \
