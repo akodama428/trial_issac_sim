@@ -9,6 +9,13 @@ from tomato_harvest_sim.msg.contracts import ControlCommand, HarvestTaskPhase, T
 GRASP_SETTLE_STEPS = 30
 GRASP_EVAL_TIMEOUT = 300
 GRASP_DIAGNOSTIC_INTERVAL_STEPS = 10
+# 搬送・設置中のFALLENはこのtick数連続した場合のみFAILEDへ落とす (Issue #54)。
+# FrictionGraspStrategyの滑落watchdogは、abort/replan時の加減速でhand相対変位が
+# 一瞬5mmを超えるとLOST(FALLEN)を出すが、実把持が残っていれば数physics stepで
+# HELDを再確立する。一過性のFALLENで終端FAILEDへラッチすると、トマトを保持した
+# ままphaseだけが死ぬ復旧不能な固着になる。実落下ならFALLENが継続するため、
+# snapshot tick(約30-60Hz)で30連続 ≒ 0.5〜1.0秒の確認で判定できる。
+FALLEN_CONFIRM_STEPS = 30
 
 
 @dataclass(frozen=True)
@@ -17,6 +24,7 @@ class PhaseMachineState:
     running: bool = False
     settle_steps: int = 0
     eval_steps: int = 0
+    fallen_steps: int = 0
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,16 @@ def _enter(state: PhaseMachineState, phase: HarvestTaskPhase, *, running: bool |
     )
 
 
+def _confirm_fallen(state: PhaseMachineState) -> Transition:
+    """FALLENを連続tickで確認し、確認完了までは現phaseへ留まる (Issue #54)。"""
+    steps = state.fallen_steps + 1
+    if steps >= FALLEN_CONFIRM_STEPS:
+        return Transition(_enter(state, HarvestTaskPhase.FAILED))
+    return Transition(PhaseMachineState(
+        state.phase, state.running, state.settle_steps, state.eval_steps, steps
+    ))
+
+
 def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
     """現状態とeventから次状態とI/O shell向け要求を返す。"""
     if isinstance(event, ControlReceived):
@@ -108,6 +126,10 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
         return Transition(_enter(state, next_phase)) if next_phase is not None else Transition(state)
     if not isinstance(event, SnapshotTick):
         return Transition(state)
+    if event.tomato_status is not TomatoStatus.FALLEN and state.fallen_steps:
+        state = PhaseMachineState(
+            state.phase, state.running, state.settle_steps, state.eval_steps, 0
+        )
     if state.phase is HarvestTaskPhase.AT_GRASP:
         steps = state.settle_steps + 1
         if steps >= GRASP_SETTLE_STEPS:
@@ -133,17 +155,17 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
         if event.tomato_status is TomatoStatus.DETACHED:
             return Transition(_enter(state, HarvestTaskPhase.MOVING_TO_PLACE))
         if event.tomato_status is TomatoStatus.FALLEN:
-            return Transition(_enter(state, HarvestTaskPhase.FAILED))
+            return _confirm_fallen(state)
     if state.phase is HarvestTaskPhase.MOVING_TO_PLACE:
         if event.tomato_status is TomatoStatus.FALLEN:
-            return Transition(_enter(state, HarvestTaskPhase.FAILED))
+            return _confirm_fallen(state)
         if event.place_reached:
             return Transition(_enter(state, HarvestTaskPhase.RELEASING))
     if state.phase is HarvestTaskPhase.RELEASING:
         if event.tomato_status is TomatoStatus.PLACED:
             return Transition(_enter(state, HarvestTaskPhase.PLACED))
         if event.tomato_status is TomatoStatus.FALLEN:
-            return Transition(_enter(state, HarvestTaskPhase.FAILED))
+            return _confirm_fallen(state)
     if state.phase is HarvestTaskPhase.PLACED:
         return Transition(_enter(state, HarvestTaskPhase.RETURNING_HOME))
     if state.phase is HarvestTaskPhase.RETURNING_HOME and event.robot_home:

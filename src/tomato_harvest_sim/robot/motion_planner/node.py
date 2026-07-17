@@ -24,6 +24,14 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     should_plan_home_on_entry,
 )
 
+# ABORT/STALL/SCENE_CHANGE trigger の再評価を /trajectory_status の受信のみに
+# 依存させない (Issue #53)。servo_execution_adapter は deadline abort後に
+# lifecycle target を clear し、以後の control tick で status を一切
+# publish しなくなるため、_on_trajectory_status 起点の評価だけでは
+# minimum_interval に一度でも阻まれた abort が二度と再評価されず、
+# 復旧不能なデッドロックになる。この周期timerが取りこぼしを拾い直す。
+_REPLAN_TRIGGER_POLL_INTERVAL_SEC = 0.3
+
 
 def main() -> None:
     import json
@@ -75,6 +83,9 @@ def main() -> None:
             self.create_subscription(JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10)
             self.create_subscription(String, TRAJECTORY_STATUS_TOPIC, self._on_trajectory_status, 10)
             self.create_subscription(String, SCENE_SNAPSHOT_TOPIC, self._on_snapshot, 10)
+            self.create_timer(
+                _REPLAN_TRIGGER_POLL_INTERVAL_SEC, self._evaluate_replan_trigger
+            )
 
         def _on_phase(self, msg: String) -> None:
             try:

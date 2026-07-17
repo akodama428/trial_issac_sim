@@ -21,7 +21,7 @@ timeout --signal=INT "${E2E_TIMEOUT_SEC}" \
   --rebuild \
   --headless \
   --headless-steps "${HEADLESS_STEPS}" \
-  --grasp-mode "${CI_GRASP_MODE:-success}" \
+  --grasp-mode "${CI_GRASP_MODE:-physics}" \
   --auto-start \
   --controller-log "${CONTROLLER_LOG}" \
   --robot-log "${ROBOT_LOG}" \

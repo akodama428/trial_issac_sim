@@ -47,6 +47,8 @@ _FULL_PAYLOAD = {
         "tomato_solver": {
             "position_iterations": 16,
             "velocity_iterations": 4,
+            "angular_damping": 2.0,
+            "disable_sleep": True,
         },
         "finger_drive": {
             "stiffness": 3000.0,
@@ -90,6 +92,24 @@ class PhysicsTuningFromPayloadTest(unittest.TestCase):
         self.assertAlmostEqual(config.tomato_torsional_patch_radius_m, 0.004)
         self.assertEqual(config.tomato_solver_position_iterations, 16)
         self.assertEqual(config.tomato_solver_velocity_iterations, 4)
+        self.assertAlmostEqual(config.tomato_angular_damping, 2.0)
+        self.assertTrue(config.tomato_disable_sleep)
+
+    def test_missing_disable_sleep_defaults_to_false(self) -> None:
+        """tomato_solver.disable_sleep未指定なら既定のsleep挙動を維持する。"""
+        physics = dict(_FULL_PAYLOAD["physics"])
+        physics["tomato_solver"] = {"position_iterations": 16, "velocity_iterations": 4}
+        config = physics_tuning_from_payload({"physics": physics})
+
+        self.assertFalse(config.tomato_disable_sleep)
+
+    def test_missing_angular_damping_defaults_to_disabled(self) -> None:
+        """tomato_solver.angular_damping未指定なら0.0（適用しない）。"""
+        physics = dict(_FULL_PAYLOAD["physics"])
+        physics["tomato_solver"] = {"position_iterations": 16, "velocity_iterations": 4}
+        config = physics_tuning_from_payload({"physics": physics})
+
+        self.assertEqual(config.tomato_angular_damping, 0.0)
 
     def test_finger_drive_is_loaded(self) -> None:
         """Step 2: finger drive の力制限パラメータが読み込まれる。"""
@@ -145,6 +165,7 @@ class LoadPhysicsTuningConfigTest(unittest.TestCase):
         self.assertTrue(config.enabled)
         self.assertGreater(config.tomato_material.static_friction, 0.0)
         self.assertGreater(config.tomato_torsional_patch_radius_m, 0.0)
+        self.assertGreater(config.tomato_angular_damping, 0.0)
 
 
 if __name__ == "__main__":

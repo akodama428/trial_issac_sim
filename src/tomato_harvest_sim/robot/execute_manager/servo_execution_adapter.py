@@ -1,6 +1,6 @@
 """MoveIt Servoと既存motion command契約を接続する実行adapter。"""
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import os
 from tomato_harvest_sim.msg.contracts import (
@@ -257,6 +257,105 @@ def servo_target_from_command(
     )
 
 
+DIRECT_BRIDGE_MINIMUM_SEC = 0.3
+DIRECT_BRIDGE_VELOCITY_MARGIN = 1.5
+# Servoは受信コマンド途絶後もhalt/holdをJTCへ短時間ストリームする。dispatchが
+# その残ストリームに上書きされないよう、JTC topicの静穏をこの時間だけ確認する。
+DIRECT_DISPATCH_QUIESCENT_SEC = 0.3
+
+
+def can_dispatch_direct_trajectory(
+    *,
+    now_sec: float,
+    last_jtc_message_sec: float | None,
+    quiescent_sec: float = DIRECT_DISPATCH_QUIESCENT_SEC,
+) -> bool:
+    """Servoの残ストリームと競合せずJTCへ軌道をdispatchできるか判定する。
+
+    直接軌道とServoストリームは同じJTC topicを共有する。pose tracking/hold
+    phaseの直後はServoがhold軌道を流し続けており、dispatch直後に到着した
+    残メッセージが軌道を置換してJTC指令が凍結する (E2E実測)。最後のJTC
+    メッセージからquiescent_sec経過するまでdispatchを保留する。
+    """
+    if last_jtc_message_sec is None:
+        return True
+    return now_sec - last_jtc_message_sec >= quiescent_sec
+
+
+def retime_target_from_state(
+    target: ServoTarget,
+    current_state: JointStateSnapshot,
+    *,
+    max_velocity_rad_s: float = SERVO_MAX_VELOCITY_RAD_S,
+) -> ServoTarget | None:
+    """計画軌道の先頭へ現在関節状態からの橋渡し区間を付けてretimeする。
+
+    full-chain計画の後続区間 (pull/place等) は前区間の計画上の終端構成から
+    始まるが、pose tracking実行後の実構成はそこからずれる (実測0.78rad)。
+    JTC topic interfaceは軌道を現在状態からの補間で実行するため、初点が
+    実状態から離れた軌道をそのまま渡すと追従不能なステップ指令になる。
+    現在位置をt=0の初点として前置し、ズレ量に応じた橋渡し時間だけ
+    後続点の時刻とdeadlineを後ろへずらす。
+
+    Returns:
+        retime済みの新しいtarget。実状態に対象関節が欠けている場合None。
+    """
+    current_by_name = dict(zip(
+        current_state.joint_names, current_state.positions_rad
+    ))
+    if any(name not in current_by_name for name in target.joint_names):
+        return None
+    current_positions = tuple(
+        current_by_name[name] for name in target.joint_names
+    )
+    first_point = target.trajectory_points[0]
+    start_error_rad = max(
+        (
+            abs(planned - actual)
+            for planned, actual in zip(
+                first_point.positions_rad, current_positions, strict=True
+            )
+        ),
+        default=0.0,
+    )
+    bridge_sec = max(
+        DIRECT_BRIDGE_MINIMUM_SEC,
+        start_error_rad / max_velocity_rad_s * DIRECT_BRIDGE_VELOCITY_MARGIN,
+    )
+    bridged_points = (
+        JointTrajectoryPoint(
+            positions_rad=current_positions,
+            time_from_start_sec=0.0,
+            velocities_rad_s=tuple(0.0 for _ in target.joint_names),
+        ),
+        *(
+            replace(point, time_from_start_sec=point.time_from_start_sec + bridge_sec)
+            for point in target.trajectory_points
+        ),
+    )
+    return replace(
+        target,
+        trajectory_points=bridged_points,
+        planned_duration_sec=target.planned_duration_sec + bridge_sec,
+        deadline_sec=target.deadline_sec + bridge_sec,
+    )
+
+
+def should_execute_direct_trajectory(target: ServoTarget) -> bool:
+    """Servoを介さずJTCへ計画軌道を直接渡して実行するかを判定する (Issue #55)。
+
+    ServoのJointJog経路は速度指令をopen-loopで内部積分するため、追従遅れ中に
+    飽和速度指令が続くと内部状態が実機から乖離し、JTCへの位置指令が関節限界
+    まで暴走する (moving_to_placeでq_jtc=+2.794 vs q_actual=-0.50を実測)。
+    pose tracking (TF直接追従) が不要なtargetは、時間パラメータ化済みの計画
+    軌道をJTCへそのまま渡し、JTC自身の実測状態からの閉ループ補間で実行する。
+
+    Returns:
+        pose tracking goalを持たないtargetの場合True。
+    """
+    return target.pose_tracking_goal is None
+
+
 def trajectory_reference_at(target: ServoTarget, elapsed_sec: float) -> TrajectoryReference:
     """軌道時刻を区分線形補間し、位置・速度参照を返す。"""
     points = target.trajectory_points
@@ -409,6 +508,7 @@ def main() -> None:
     from sensor_msgs.msg import JointState
     from std_msgs.msg import Int8, String
     from trajectory_msgs.msg import JointTrajectory as RosJointTrajectory
+    from trajectory_msgs.msg import JointTrajectoryPoint as RosJointTrajectoryPoint
     from tf2_ros import Buffer, TransformException, TransformListener
 
     from tomato_harvest_sim.msg.serialization import motion_command_from_json
@@ -442,13 +542,19 @@ def main() -> None:
             self._servo_status: int | None = None
             self._last_abort_sec: float | None = None
             self._last_jtc_observation_sec: float | None = None
+            self._last_jtc_message_sec: float | None = None
             self._last_jtc_positions: dict[str, float] = {}
             self._last_hardware_positions: dict[str, float] = {}
             self._last_hardware_velocities: dict[str, float] = {}
             self._last_tracking_observation_sec: float | None = None
             self._tracking_sequence_id = 0
+            self._direct_trajectory_sent = False
+            self._direct_dispatched_at_sec: float | None = None
             self._jog_pub = self.create_publisher(
                 JointJog, SERVO_JOINT_COMMAND_TOPIC, 10
+            )
+            self._jtc_pub = self.create_publisher(
+                RosJointTrajectory, JTC_COMMAND_TOPIC, 10
             )
             self._pose_pub = self.create_publisher(
                 PoseStamped, SERVO_POSE_COMMAND_TOPIC, 10
@@ -540,6 +646,8 @@ def main() -> None:
                 self._publish_status("aborted", abort_reason="missing_trajectory")
                 return
             self._lifecycle.start(target, started_at_sec)
+            self._direct_trajectory_sent = False
+            self._direct_dispatched_at_sec = None
             self._stall_detector.reset()
             self._last_abort_sec = None
             self._last_tracking_observation_sec = None
@@ -567,6 +675,9 @@ def main() -> None:
 
         def _on_jtc_command(self, msg: RosJointTrajectory) -> None:
             """ServoがJTCへ出した位置列をabort前後の切り分け用に記録する。"""
+            # 直接dispatchの静穏判定用に、throttleより前で全メッセージの
+            # 到着時刻を記録する (Issue #55)。
+            self._last_jtc_message_sec = time.monotonic()
             if self._joint_state is None or not msg.points or not msg.joint_names:
                 return
             now_sec = time.monotonic()
@@ -623,10 +734,7 @@ def main() -> None:
             self._last_tf_success_sec = None
 
         def _control_step(self) -> None:
-            if (
-                self._active_command_type != self._desired_command_type
-                or self._lifecycle.target is None
-            ):
+            if self._lifecycle.target is None:
                 return
             now_sec = time.monotonic()
             target = self._lifecycle.target
@@ -642,6 +750,13 @@ def main() -> None:
                 self._publish_status("aborted", abort_reason="servo_target_timeout")
                 self._last_abort_sec = now_sec
                 self._lifecycle.clear()
+                return
+            # pose tracking不要のtargetはServoの内部積分を経由せずJTCへ直接
+            # 実行する (Issue #55)。Servo mode切替の完了も待たない。
+            if should_execute_direct_trajectory(target):
+                self._control_direct_trajectory(now_sec, target)
+                return
+            if self._active_command_type != self._desired_command_type:
                 return
             if (
                 target.pose_tracking_goal is not None
@@ -708,6 +823,117 @@ def main() -> None:
             self._publish_status("succeeded", max_error_rad=decision.max_error_rad)
             self._publish_gripper(self._gripper_gate.terminal_reached(target.gripper_closed))
             self._lifecycle.clear()
+
+        def _control_direct_trajectory(
+            self, now_sec: float, target: ServoTarget
+        ) -> None:
+            """計画済みjoint軌道をJTCへ直接渡し、実測で完了・停滞を監視する。
+
+            JTCは実測状態から自前の閉ループ補間で軌道を実行するため、Servoの
+            open-loop積分による指令暴走 (Issue #55) が構造的に起きない。
+            adapterの責務は軌道の一度きりのdispatchと、時間同期referenceに
+            対する実測誤差の観測・成功判定・停滞検出へ縮小する。
+            """
+            if self._joint_state is None:
+                return
+            if not self._direct_trajectory_sent:
+                # Servoの残ストリーム (pose tracking/hold直後) がdispatchを
+                # 上書きしないよう、JTC topicの静穏を待つ。
+                if not can_dispatch_direct_trajectory(
+                    now_sec=now_sec,
+                    last_jtc_message_sec=self._last_jtc_message_sec,
+                ):
+                    return
+                # 計画初点と実状態のズレ (pose tracking実行後は0.78rad程度) を
+                # 橋渡し区間で吸収し、JTCへ現在状態から始まる軌道を渡す。
+                retimed = retime_target_from_state(target, self._joint_state)
+                if retimed is None:
+                    self._publish_status(
+                        "aborted", abort_reason="incomplete_joint_state"
+                    )
+                    self._lifecycle.clear()
+                    return
+                bridge_sec = (
+                    retimed.planned_duration_sec - target.planned_duration_sec
+                )
+                target = retimed
+                self._lifecycle.target = retimed
+                self._jtc_pub.publish(self._ros_trajectory_from_target(target))
+                self._direct_trajectory_sent = True
+                self._direct_dispatched_at_sec = now_sec
+                self.get_logger().info(metric_line(
+                    "direct_trajectory_dispatched",
+                    phase=target.phase,
+                    points=len(target.trajectory_points),
+                    planned_duration_sec=round(target.planned_duration_sec, 3),
+                    bridge_sec=round(bridge_sec, 3),
+                ))
+            # JTCが軌道を実行し始めるのはdispatch時点なので、監視referenceの
+            # 時計もdispatch起点のwall-clockで進める。
+            elapsed_sec = now_sec - (self._direct_dispatched_at_sec or now_sec)
+            reference = trajectory_reference_at(target, elapsed_sec)
+            decision = decide_time_synchronized_joint_jog(
+                target, self._joint_state, reference
+            )
+            if decision is None:
+                self._publish_status("aborted", abort_reason="incomplete_joint_state")
+                self._lifecycle.clear()
+                return
+            measured_velocities = tuple(
+                self._joint_velocities[name]
+                for name in target.joint_names
+                if name in self._joint_velocities
+            )
+            if len(measured_velocities) != len(target.joint_names):
+                measured_velocities = ()
+            stalled = self._stall_detector.update(
+                now_sec=now_sec,
+                progress_scale=decision.progress_scale,
+                velocities_rad_s=measured_velocities,
+            )
+            self._observe_joint_tracking(
+                now_sec, target, reference, decision, stalled
+            )
+            self._publish_status(
+                "running",
+                max_error_rad=decision.max_error_rad,
+                progress_scale=decision.progress_scale,
+                stall_elapsed_sec=self._stall_detector.elapsed_sec,
+                stalled=stalled,
+            )
+            if not self._lifecycle.record_reached(decision.reached):
+                return
+            self.get_logger().info(metric_line(
+                "servo_target_succeeded", phase=target.phase,
+                max_error_rad=decision.max_error_rad,
+                latency_ms=round(
+                    (now_sec - (self._lifecycle.started_at_sec or now_sec)) * 1000.0,
+                    3,
+                ),
+            ))
+            self._publish_status("succeeded", max_error_rad=decision.max_error_rad)
+            self._publish_gripper(self._gripper_gate.terminal_reached(target.gripper_closed))
+            self._lifecycle.clear()
+
+        def _ros_trajectory_from_target(self, target: ServoTarget) -> RosJointTrajectory:
+            """targetの計画軌道をJTC topic interface向けROS messageへ変換する。
+
+            header.stampはゼロのまま残し、JTCに受信時点から実行させる。
+            """
+            message = RosJointTrajectory()
+            message.joint_names = list(target.joint_names)
+            for point in target.trajectory_points:
+                ros_point = RosJointTrajectoryPoint()
+                ros_point.positions = list(point.positions_rad)
+                if point.velocities_rad_s is not None:
+                    ros_point.velocities = list(point.velocities_rad_s)
+                seconds = max(0.0, point.time_from_start_sec)
+                ros_point.time_from_start.sec = int(seconds)
+                ros_point.time_from_start.nanosec = int(
+                    (seconds - int(seconds)) * 1e9
+                )
+                message.points.append(ros_point)
+            return message
 
         def _observe_joint_tracking(
             self,
