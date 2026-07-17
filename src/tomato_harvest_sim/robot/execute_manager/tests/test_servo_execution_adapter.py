@@ -25,7 +25,10 @@ from tomato_harvest_sim.robot.execute_manager.servo_execution_adapter import (
     execution_status_payload,
     gripper_state_for_tracking,
     progress_scale,
+    can_dispatch_direct_trajectory,
+    retime_target_from_state,
     servo_target_from_command,
+    should_execute_direct_trajectory,
     trajectory_reference_at,
 )
 
@@ -261,6 +264,93 @@ def test_execution_status_adds_progress_and_stall_fields_compatibly() -> None:
         "stall_elapsed_sec": 0.5,
         "stalled": True,
     }
+
+
+def test_trajectory_target_without_pose_goal_executes_directly_on_jtc() -> None:
+    """pose tracking不要のtargetはServoを介さずJTCへ計画軌道を直接実行する (Issue #55)。
+
+    ServoのJointJog経路は速度指令をopen-loopで内部積分するため、追従遅れ中に
+    飽和速度が続くとJTC指令が関節限界まで暴走する (moving_to_placeのjoint1
+    大振りの実測根本原因、q_jtc=+2.794 vs q_actual=-0.50)。
+    """
+    target = servo_target_from_command(_command(), started_at_sec=10.0)
+
+    assert target is not None
+    assert target.pose_tracking_goal is None
+    assert should_execute_direct_trajectory(target)
+
+
+def test_pose_tracking_target_stays_on_servo_path() -> None:
+    """TF直接追従が必要なphase (grasp接近など) は現行のServo経路を維持する。"""
+    target = servo_target_from_command(
+        _command(phase=PhaseId.MOVING_TO_GRASP), started_at_sec=10.0
+    )
+
+    assert target is not None
+    assert target.pose_tracking_goal is not None
+    assert not should_execute_direct_trajectory(target)
+
+
+def test_direct_dispatch_waits_for_servo_stream_quiescence() -> None:
+    """Servoの残ストリームが直接軌道を上書きしないよう、JTC topicの静穏を待つ。
+
+    pose tracking/holdのphaseではServoがJTCへhold軌道をストリームし続ける。
+    その直後にdispatchすると、Servoの残メッセージが我々の軌道を置換して
+    JTC指令が凍結する (E2E実測: q_jtc=0.7516で凍結、pull不実行)。
+    """
+    assert not can_dispatch_direct_trajectory(
+        now_sec=100.0, last_jtc_message_sec=99.9
+    )
+    assert can_dispatch_direct_trajectory(
+        now_sec=100.0, last_jtc_message_sec=99.5
+    )
+    assert can_dispatch_direct_trajectory(
+        now_sec=100.0, last_jtc_message_sec=None
+    )
+
+
+def test_retime_bridges_start_mismatch_from_current_state() -> None:
+    """計画初点と実関節状態のズレを橋渡し区間で吸収する (Issue #55)。
+
+    full-chain計画の後続区間はpose tracking実行後の実構成と初点がずれる
+    (実測0.78rad)。JTCへは「現在状態から始まる軌道」を渡す必要がある。
+    """
+    target = servo_target_from_command(_command(), started_at_sec=10.0)
+    assert target is not None
+    current = JointStateSnapshot(("j1", "j2"), (0.0, 0.4))  # 初点(0.8,-0.4)から0.8radズレ
+
+    retimed = retime_target_from_state(target, current)
+
+    first = retimed.trajectory_points[0]
+    assert first.positions_rad == (0.0, 0.4)
+    assert first.time_from_start_sec == 0.0
+    bridge_sec = retimed.trajectory_points[1].time_from_start_sec - 2.0
+    assert bridge_sec >= 0.8 / SERVO_MAX_VELOCITY_RAD_S
+    assert retimed.trajectory_points[1].positions_rad == (0.8, -0.4)
+    assert retimed.planned_duration_sec == pytest.approx(2.0 + bridge_sec)
+    assert retimed.deadline_sec == pytest.approx(target.deadline_sec + bridge_sec)
+
+
+def test_retime_keeps_matched_start_with_minimum_bridge() -> None:
+    """初点が実状態と一致していても最小の橋渡し時間で滑らかに接続する。"""
+    target = servo_target_from_command(_command(), started_at_sec=10.0)
+    assert target is not None
+    current = JointStateSnapshot(("j1", "j2"), (0.8, -0.4))
+
+    retimed = retime_target_from_state(target, current)
+
+    bridge_sec = retimed.trajectory_points[1].time_from_start_sec - 2.0
+    assert 0.0 < bridge_sec <= 0.5
+
+
+def test_retime_requires_full_joint_state() -> None:
+    """実状態に対象関節が欠けている場合はNoneを返し呼び出し側でabortさせる。"""
+    target = servo_target_from_command(_command(), started_at_sec=10.0)
+    assert target is not None
+
+    assert retime_target_from_state(
+        target, JointStateSnapshot(("j1",), (0.0,))
+    ) is None
 
 
 def test_grasp_target_uses_terminal_pose_tracking_goal() -> None:
