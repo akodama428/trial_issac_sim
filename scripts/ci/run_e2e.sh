@@ -33,7 +33,7 @@ docker run --rm \
   -e FRANKA_ROS2_WS=/tmp/tomato-harvest-ci-franka-ws \
   -e CI_HEADLESS_STEPS="${CI_HEADLESS_STEPS:-900}" \
   -e CI_E2E_TIMEOUT_SEC="${CI_E2E_TIMEOUT_SEC:-2400}" \
-  -e CI_GRASP_MODE="${CI_GRASP_MODE:-success}" \
+  -e CI_GRASP_MODE="${CI_GRASP_MODE:-physics}" \
   -e TOMATO_HARVEST_PLANNING_DIAGNOSTIC_DIR=/tmp/tomato-harvest-ci-artifacts/planning-diagnostics \
   -e TOMATO_HARVEST_INITIAL_POSE_ID="${TOMATO_HARVEST_INITIAL_POSE_ID:-default}" \
   -e TOMATO_HARVEST_DEBUG_PHYSICS_GRASP="${TOMATO_HARVEST_DEBUG_PHYSICS_GRASP:-}" \

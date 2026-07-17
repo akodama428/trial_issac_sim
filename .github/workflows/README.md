@@ -118,3 +118,4 @@ flowchart TD
 - E2Eコンテナ内のROS 2プロセスは`ROS_DOMAIN_ID=99`へ固定し、domain 0を使う手動実行と分離する。ホスト上でdomain 99を使う別プロセスとの混線までは防げない。
 - E2E の成否判定がログの文言(`Headless simulator node setup completed.` など)に密結合しており、アプリ側のログメッセージ変更で CI が壊れる
 - `CI_CACHE_ROOT` が `/tmp` 配下のため、ランナー再起動で消える前提(消えても動くが初回は遅い)
+- E2Eの既定grasp modeは`physics`とし、実接触・摩擦保持・物理release経路を受け入れ評価する。必要な比較試験だけ`CI_GRASP_MODE`で明示的に上書きする。

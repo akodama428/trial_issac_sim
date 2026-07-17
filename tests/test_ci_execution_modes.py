@@ -48,3 +48,11 @@ def test_e2e_container_isolated_on_ros_domain_99() -> None:
     source = RUN_E2E.read_text(encoding="utf-8")
 
     assert "-e ROS_DOMAIN_ID=99" in source
+
+
+def test_ci_e2e_defaults_to_physics_grasp_mode() -> None:
+    launcher_source = RUN_E2E.read_text(encoding="utf-8")
+    container_source = IN_CONTAINER_E2E.read_text(encoding="utf-8")
+
+    assert 'CI_GRASP_MODE="${CI_GRASP_MODE:-physics}"' in launcher_source
+    assert '--grasp-mode "${CI_GRASP_MODE:-physics}"' in container_source
