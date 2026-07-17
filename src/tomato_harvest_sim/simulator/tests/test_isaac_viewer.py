@@ -16,6 +16,11 @@ from tomato_harvest_sim.simulator.scene_plan import build_review_scene_plan
 
 
 class IsaacViewerConfigTest(unittest.TestCase):
+    def test_contact_rich_scene_uses_120_hz_physics(self) -> None:
+        from tomato_harvest_sim.simulator.isaac_viewer import PHYSICS_STEPS_PER_SECOND
+
+        self.assertEqual(PHYSICS_STEPS_PER_SECOND, 120)
+
     def test_parse_args_defaults_to_fixed_camera_gui_mode(self) -> None:
         args = parse_args([])
 
@@ -23,6 +28,11 @@ class IsaacViewerConfigTest(unittest.TestCase):
         self.assertEqual(args.headless_steps, 64)
         self.assertEqual(args.camera_view, "fixed")
         self.assertEqual(args.grasp_mode, "success")
+
+    def test_parse_args_accepts_physics_grasp_mode(self) -> None:
+        args = parse_args(["--grasp-mode", "physics"])
+
+        self.assertEqual(args.grasp_mode, "physics")
 
     def test_build_appframework_argv_includes_viewport_extensions(self) -> None:
         argv = build_appframework_argv(headless=False)

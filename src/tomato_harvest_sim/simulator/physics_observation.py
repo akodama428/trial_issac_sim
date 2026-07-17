@@ -27,6 +27,34 @@ class FingerContactImpulses:
         )
 
 
+@dataclass(frozen=True)
+class FingerContactForces:
+    """1 physics step の力積から換算した finger 別平均接触力 [N]。"""
+
+    left_n: float
+    right_n: float
+
+
+def contact_forces_from_impulses(
+    impulses: FingerContactImpulses, *, dt_sec: float
+) -> FingerContactForces:
+    """力積をphysics step幅で割り、判定に使う平均力へ単位変換する。
+
+    Args:
+        impulses: finger別接触力積 [N·s]。
+        dt_sec: 物理ステップ幅 [s]。
+
+    Returns:
+        finger別平均接触力 [N]。不正なstep幅ではfail-closedで0を返す。
+    """
+    if dt_sec <= 0.0:
+        return FingerContactForces(left_n=0.0, right_n=0.0)
+    return FingerContactForces(
+        left_n=impulses.left_ns / dt_sec,
+        right_n=impulses.right_ns / dt_sec,
+    )
+
+
 def summarize_finger_contact_impulses(
     contact_headers: Iterable[object],
     contact_data: Sequence[object],
@@ -52,12 +80,14 @@ def summarize_finger_contact_impulses(
     right_total = 0.0
     for header in contact_headers:
         finger = finger_of_pair(header.actor0, header.actor1)
+        if finger is None and hasattr(header, "collider0") and hasattr(header, "collider1"):
+            finger = finger_of_pair(header.collider0, header.collider1)
         if finger is None:
             continue
-        offset = int(header.contact_data_offset)
-        count = int(header.num_contact_data)
+        offset = max(0, int(header.contact_data_offset))
+        end = min(len(contact_data), offset + max(0, int(header.num_contact_data)))
         magnitude = 0.0
-        for index in range(offset, offset + count):
+        for index in range(offset, end):
             impulse = contact_data[index].impulse
             magnitude += (
                 float(impulse.x) ** 2 + float(impulse.y) ** 2 + float(impulse.z) ** 2
@@ -71,15 +101,20 @@ def summarize_finger_contact_impulses(
 
 def format_observation_line(
     *,
+    sequence_id: int,
     timestamp_sec: float,
     tomato_status: str,
     gripper_closed: bool,
     grasp_joint_active: bool,
     impulses: FingerContactImpulses,
+    forces: FingerContactForces,
     tomato_speed_m_s: float,
     hand_distance_m: float,
     stem_distance_m: float,
     stem_tension_n: float,
+    finger_gap_m: float = 0.0,
+    finger_midpoint_z_m: float = 0.0,
+    tomato_center_z_m: float = 0.0,
 ) -> str:
     """1 物理ステップ分の観測値を、プロットスクリプトが機械解析できる1行に整形する。
 
@@ -88,16 +123,23 @@ def format_observation_line(
     """
     return (
         "[PhysicsObs] "
+        f"seq={sequence_id} "
         f"t={timestamp_sec:.3f} "
         f"status={tomato_status} "
         f"grip={int(gripper_closed)} "
         f"joint={int(grasp_joint_active)} "
         f"impL={impulses.left_ns:.6f} "
         f"impR={impulses.right_ns:.6f} "
+        f"forceL={forces.left_n:.4f} "
+        f"forceR={forces.right_n:.4f} "
         f"v={tomato_speed_m_s:.5f} "
         f"hand_d={hand_distance_m:.4f} "
         f"stem_d={stem_distance_m:.4f} "
-        f"stemF={stem_tension_n:.4f}"
+        f"stemF={stem_tension_n:.4f} "
+        f"gap={finger_gap_m:.4f} "
+        f"finger_z={finger_midpoint_z_m:.4f} "
+        f"tomato_z={tomato_center_z_m:.4f} "
+        f"grasp_dz={finger_midpoint_z_m - tomato_center_z_m:.4f}"
     )
 
 

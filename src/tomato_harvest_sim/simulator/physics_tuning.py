@@ -77,6 +77,79 @@ def apply_physics_tuning(
             f"tomato solver iterations: pos={config.tomato_solver_position_iterations} "
             f"vel={config.tomato_solver_velocity_iterations}"
         )
+
+    for finger_path in finger_link_prim_paths:
+        if _apply_tomato_solver_iterations(stage, finger_path, config):
+            applied.append(
+                f"finger solver iterations: {finger_path} "
+                f"pos={config.tomato_solver_position_iterations} "
+                f"vel={config.tomato_solver_velocity_iterations}"
+            )
+
+    applied.extend(
+        _apply_finger_drive_limits(stage, finger_link_prim_paths, config)
+    )
+    return applied
+
+
+def _finger_joint_prim_paths(finger_link_prim_paths: tuple[str, ...]) -> tuple[str, ...]:
+    """finger link パスから finger joint prim パスを導出する。
+
+    franka.usd の構造では finger joint は panda_hand 配下にある:
+      /World/FrankaPanda/panda_hand/panda_finger_joint1（左）/ joint2（右）
+    """
+    joints: list[str] = []
+    for link_path in finger_link_prim_paths:
+        if "panda_leftfinger" in link_path:
+            joints.append(
+                link_path.replace("panda_leftfinger", "panda_hand/panda_finger_joint1")
+            )
+        elif "panda_rightfinger" in link_path:
+            joints.append(
+                link_path.replace("panda_rightfinger", "panda_hand/panda_finger_joint2")
+            )
+    return tuple(joints)
+
+
+def _apply_finger_drive_limits(
+    stage: object,
+    finger_link_prim_paths: tuple[str, ...],
+    config: PhysicsTuningConfig,
+) -> list[str]:
+    """finger prismatic joint の drive を力制限付きバネへ設定する（Step 2）。
+
+    HWI からの位置目標はそのまま drive の targetPosition として機能し、
+    押付け力は maxForce で飽和する（UsdPhysics.DriveAPI の仕様、計画 §9.1-R4）。
+    実アセットでは joint1 のみ drive を持ち joint2 は mimic 従動のため、
+    drive が無い joint に mimic API があればそのまま尊重し、無ければ drive を新設する。
+    max_force_n=0 は「適用しない」を意味する。
+    """
+    if config.finger_drive_max_force_n <= 0.0:
+        return []
+    from pxr import PhysxSchema, UsdPhysics
+
+    applied: list[str] = []
+    for joint_path in _finger_joint_prim_paths(finger_link_prim_paths):
+        prim = stage.GetPrimAtPath(joint_path)
+        if not prim.IsValid():
+            applied.append(f"finger drive skipped (prim not found): {joint_path}")
+            continue
+        has_drive = prim.HasAPI(UsdPhysics.DriveAPI, "linear")
+        has_mimic = prim.HasAPI(PhysxSchema.PhysxMimicJointAPI)
+        if not has_drive and has_mimic:
+            applied.append(f"finger drive skipped (mimic joint): {joint_path}")
+            continue
+        drive = UsdPhysics.DriveAPI.Apply(prim, "linear")
+        drive.CreateStiffnessAttr().Set(config.finger_drive_stiffness)
+        drive.CreateDampingAttr().Set(config.finger_drive_damping)
+        drive.CreateMaxForceAttr().Set(config.finger_drive_max_force_n)
+        applied.append(
+            f"finger drive set: {joint_path} "
+            f"(stiffness={config.finger_drive_stiffness}, "
+            f"damping={config.finger_drive_damping}, "
+            f"maxForce={config.finger_drive_max_force_n}N, "
+            f"pre_existing_drive={int(has_drive)}, mimic={int(has_mimic)})"
+        )
     return applied
 
 

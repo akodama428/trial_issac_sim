@@ -45,6 +45,7 @@ class ObservationSeries:
     hand_distance: list[float] = field(default_factory=list)
     stem_distance: list[float] = field(default_factory=list)
     stem_tension: list[float] = field(default_factory=list)
+    finger_gap: list[float] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,8 @@ def parse_observation_log(path: Path) -> ObservationSeries:
             series.hand_distance.append(float(fields["hand_d"]))
             series.stem_distance.append(float(fields["stem_d"]))
             series.stem_tension.append(float(fields["stemF"]))
+            # gap は Step 2 で追加（旧ログには存在しない）
+            series.finger_gap.append(float(fields.get("gap", "0")))
     return series
 
 
@@ -211,7 +214,19 @@ def render_plots(series: ObservationSeries, transitions: list[PhaseTransition],
     ax.grid(alpha=0.3)
     distance_png = _saved(fig, "distances")
 
-    # 4. フェーズ滞在時間
+    # 4. finger ギャップ（Step 2: 力制限による収束確認。旧ログでは全ゼロ）
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    ax.plot(rel_time, series.finger_gap, label="finger link gap [m]", linewidth=0.9)
+    ax.axhline(0.02, color="tab:red", linestyle="--", linewidth=0.8,
+               label="tomato diameter 0.02 m (ref)")
+    ax.set_xlabel("time [s]")
+    ax.set_ylabel("gap [m]")
+    ax.set_title(f"{prefix}: finger gap")
+    ax.legend()
+    ax.grid(alpha=0.3)
+    gap_png = _saved(fig, "finger_gap")
+
+    # 5. フェーズ滞在時間
     durations = phase_durations_sec(transitions)
     fig, ax = plt.subplots(figsize=(8, max(2.5, 0.4 * len(durations))))
     if durations:
@@ -239,10 +254,12 @@ def render_plots(series: ObservationSeries, transitions: list[PhaseTransition],
             {"phase": name, "sec": seconds} for name, seconds in durations
         ],
         "reached_complete": reached_complete(transitions),
+        "min_finger_gap_m": min(series.finger_gap, default=0.0),
         "images": {
             "contact_impulse": contact_png,
             "tomato_motion": motion_png,
             "distances": distance_png,
+            "finger_gap": gap_png,
             "phases": phases_png,
         },
     }

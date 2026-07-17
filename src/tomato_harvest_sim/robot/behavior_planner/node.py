@@ -23,11 +23,6 @@ from tomato_harvest_sim.msg.contracts import HarvestTaskPhase, TomatoStatus
 # 定数
 # -----------------------------------------------------------------------
 _POSITION_TOLERANCE_M = 0.05   # 5cm: 移動フェーズ完了判定距離
-_GRASP_SETTLE_STEPS = 30       # AT_GRASP → GRASP_EVALUATION までの待機ステップ数（物理安定化待ち）
-_GRASP_EVAL_TIMEOUT = 300      # GRASP_EVALUATION のタイムアウトステップ数（約 12 秒 @ 25 Hz）
-_GRASP_DIAGNOSTIC_INTERVAL_STEPS = 10
-
-
 def _pose_error_m(a: object, b: object) -> float:
     dx = a.x - b.x
     dy = a.y - b.y
@@ -115,6 +110,10 @@ def main() -> None:
         target_estimate_from_json,
     )
     from tomato_harvest_sim.robot.behavior_planner.grasp_diagnostics import metric_payload
+    from tomato_harvest_sim.robot.behavior_planner.phase_machine import (
+        ControlReceived, ExecutionAborted, ExecutionSucceeded, PhaseMachineState,
+        PlanAdopted, SnapshotTick, TargetEstimateReceived, Transition, advance,
+    )
 
     rclpy.init()
 
@@ -122,15 +121,11 @@ def main() -> None:
         def __init__(self) -> None:
             super().__init__("behavior_planner_node")
 
-            self._phase = HarvestTaskPhase.IDLE
-            self._running = False
+            self._machine = PhaseMachineState()
+            self._phase = self._machine.phase
             self._last_snapshot = None
             self._last_plan = None
             self._execution_status: str = "idle"
-
-            # AT_GRASP settle / GRASP_EVALUATION timeout カウンター
-            self._grasp_settle_count: int = 0
-            self._grasp_eval_count: int = 0
 
             self._pub = self.create_publisher(String, PHASE_TOPIC, 10)
 
@@ -149,18 +144,9 @@ def main() -> None:
                 cmd = ControlCommand(msg.data.strip())
             except ValueError:
                 return
-            if cmd is ControlCommand.START:
-                self._running = True
-                self._set_phase(HarvestTaskPhase.DETECTING)
-            elif cmd is ControlCommand.STOP:
-                self._running = False
-                self._set_phase(HarvestTaskPhase.STOPPED)
-            elif cmd is ControlCommand.RESET:
-                self._running = False
+            if cmd is ControlCommand.RESET:
                 self._last_plan = None
-                self._grasp_settle_count = 0
-                self._grasp_eval_count = 0
-                self._set_phase(HarvestTaskPhase.IDLE)
+            self._apply_transition(advance(self._machine, ControlReceived(cmd)))
 
         def _on_snapshot(self, msg: String) -> None:
             try:
@@ -176,7 +162,7 @@ def main() -> None:
                 target_estimate_from_json(msg.data)  # validate
             except Exception:
                 return
-            self._set_phase(HarvestTaskPhase.TARGET_FOUND)
+            self._apply_transition(advance(self._machine, TargetEstimateReceived()))
 
         def _on_plan(self, msg: String) -> None:
             try:
@@ -185,10 +171,7 @@ def main() -> None:
                 self.get_logger().error(f"Failed to parse harvest_motion_plan: {exc}")
                 return
             # TARGET_FOUND → MOVING_TO_PREGRASP (計画が届いた瞬間に遷移)
-            if self._phase is HarvestTaskPhase.TARGET_FOUND and self._running:
-                self._grasp_settle_count = 0
-                self._grasp_eval_count = 0
-                self._set_phase(HarvestTaskPhase.MOVING_TO_PREGRASP)
+            self._apply_transition(advance(self._machine, PlanAdopted()))
 
         def _on_execution_status(self, msg: String) -> None:
             self._execution_status = execution_status_value(msg.data)
@@ -203,19 +186,7 @@ def main() -> None:
 
         def _on_trajectory_succeeded(self) -> None:
             """軌道実行成功 → 移動フェーズを次フェーズへ進める。"""
-            if not self._running:
-                return
-            if self._phase is HarvestTaskPhase.MOVING_TO_PREGRASP:
-                self._set_phase(HarvestTaskPhase.MOVING_TO_GRASP)
-            elif self._phase is HarvestTaskPhase.MOVING_TO_GRASP:
-                self._grasp_settle_count = 0
-                self._set_phase(HarvestTaskPhase.AT_GRASP)
-            elif self._phase is HarvestTaskPhase.DETACHING:
-                self._set_phase(HarvestTaskPhase.MOVING_TO_PLACE)
-            elif self._phase is HarvestTaskPhase.MOVING_TO_PLACE:
-                self._set_phase(HarvestTaskPhase.PLACED)
-            elif self._phase is HarvestTaskPhase.RETURNING_HOME:
-                self._set_phase(HarvestTaskPhase.COMPLETE)
+            self._apply_transition(advance(self._machine, ExecutionSucceeded()))
 
         def _on_trajectory_aborted(self) -> None:
             """軌道実行中断 → フェーズは維持し、再計画の完了を待つ。
@@ -225,79 +196,25 @@ def main() -> None:
             motion_command_node が古い plan で即座にコマンドを再生成し、
             実行系の "aborted" と往復する高速ループになるため何もしない。
             """
-            if not self._running:
-                return
-            _moving = {
-                HarvestTaskPhase.MOVING_TO_PREGRASP,
-                HarvestTaskPhase.MOVING_TO_GRASP,
-                HarvestTaskPhase.DETACHING,
-                HarvestTaskPhase.MOVING_TO_PLACE,
-                HarvestTaskPhase.RETURNING_HOME,
-            }
-            if self._phase in _moving:
-                self.get_logger().warning(
-                    f"trajectory aborted at phase={self._phase.value} — waiting for replan"
-                )
+            self._apply_transition(advance(self._machine, ExecutionAborted()))
 
         # ------------------------------------------------------------------
         # Scene-snapshot-driven step (AT_GRASP / GRASP_EVALUATION / PLACED)
         # ------------------------------------------------------------------
 
         def _step(self) -> None:
-            if not self._running or self._last_snapshot is None:
+            if not self._machine.running or self._last_snapshot is None:
                 return
             snapshot = self._last_snapshot
-
-            if self._phase is HarvestTaskPhase.AT_GRASP:
-                self._grasp_settle_count += 1
-                if self._grasp_settle_count == 1:
-                    self._emit_grasp_diagnostic("entry")
-                if self._grasp_settle_count >= _GRASP_SETTLE_STEPS:
-                    self._grasp_eval_count = 0
-                    self._set_phase(HarvestTaskPhase.GRASP_EVALUATION)
-
-            elif self._phase is HarvestTaskPhase.GRASP_EVALUATION:
-                self._grasp_eval_count += 1
-                terminal = snapshot.tomato_status in {TomatoStatus.HELD, TomatoStatus.FALLEN}
-                if self._grasp_eval_count == 1 or terminal or self._grasp_eval_count % _GRASP_DIAGNOSTIC_INTERVAL_STEPS == 0:
-                    self._emit_grasp_diagnostic("terminal" if terminal else "periodic")
-                if snapshot.tomato_status is TomatoStatus.HELD:
-                    self._grasp_settle_count = 0
-                    self._grasp_eval_count = 0
-                    self._set_phase(HarvestTaskPhase.DETACHING)
-                elif snapshot.tomato_status is TomatoStatus.FALLEN:
-                    self._grasp_settle_count = 0
-                    self._grasp_eval_count = 0
-                    self._set_phase(HarvestTaskPhase.FAILED)
-                elif self._grasp_eval_count >= _GRASP_EVAL_TIMEOUT:
-                    self.get_logger().warning("GRASP_EVALUATION timeout")
-                    self._grasp_settle_count = 0
-                    self._grasp_eval_count = 0
-                    self._set_phase(HarvestTaskPhase.FAILED)
-
-            elif self._phase is HarvestTaskPhase.DETACHING:
-                next_phase = detaching_outcome(snapshot.tomato_status)
-                if next_phase is not None:
-                    self._set_phase(next_phase)
-
-            elif self._phase is HarvestTaskPhase.MOVING_TO_PLACE:
-                next_phase = moving_to_place_outcome(
-                    snapshot.tomato_status,
-                    snapshot.robot_tool_pose,
-                    self._last_plan.place_pose if self._last_plan is not None else None,
-                )
-                if next_phase is not None:
-                    self._set_phase(next_phase)
-
-            elif self._phase is HarvestTaskPhase.PLACED:
-                if snapshot.tomato_status is TomatoStatus.PLACED:
-                    self._set_phase(HarvestTaskPhase.RETURNING_HOME)
-                elif snapshot.tomato_status is TomatoStatus.FALLEN:
-                    self._set_phase(HarvestTaskPhase.FAILED)
-
-            elif self._phase is HarvestTaskPhase.RETURNING_HOME:
-                if snapshot.robot_home:
-                    self._set_phase(HarvestTaskPhase.COMPLETE)
+            place_reached = moving_to_place_outcome(
+                snapshot.tomato_status,
+                snapshot.robot_tool_pose,
+                self._last_plan.place_pose if self._last_plan is not None else None,
+            ) is HarvestTaskPhase.PLACED
+            self._apply_transition(advance(
+                self._machine,
+                SnapshotTick(snapshot.tomato_status, place_reached, snapshot.robot_home),
+            ))
 
         # ------------------------------------------------------------------
         # Helpers
@@ -318,6 +235,18 @@ def main() -> None:
                 self.get_logger().info(f"Phase: {self._phase.value} → {phase.value}")
             self._phase = phase
             self._publish_phase()
+
+        def _apply_transition(self, transition: Transition) -> None:
+            previous = self._machine.phase
+            if transition.diagnostic is not None:
+                self._emit_grasp_diagnostic(transition.diagnostic)
+            self._machine = transition.state
+            self._phase = transition.state.phase
+            if transition.warning is not None:
+                self.get_logger().warning(transition.warning)
+            if previous is not self._phase:
+                self.get_logger().info(f"Phase: {previous.value} → {self._phase.value}")
+                self._publish_phase()
 
         def _publish_phase(self) -> None:
             out = String()

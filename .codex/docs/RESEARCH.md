@@ -10,6 +10,103 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Step 3-6 GRASP状態機械リファクタリング（2026-07-17）
+
+### 確認済みの事実
+
+- Python公式の`dataclasses` failed-value semanticsでは、`frozen=True`により生成された`__setattr__`/`__delattr__`が更新を拒否する。完全な不変性ではないが、状態遷移を新しい値の返却として表す用途に適合する。
+- Python公式の`StrEnum`は`Enum`であると同時に文字列として扱え、`str()`はmember値を返す。JSON契約に定義済みの実行意図を追加する用途に適合する。
+- ROS 2 Jazzy公式`rclpy`ではsubscription、timer、service等のcallbackがexecutorの実行単位である。そのためcallbackはROS I/Oを受け、ROS非依存の遷移関数へ値を渡し、返値をpublish/logするshellとして構成できる。
+
+### 設計への反映（推論）
+
+- `PhaseMachineState`とevent/resultをfrozen dataclassで表し、`advance`が次状態を返すことで、ROS callbackとGRASP遷移ロジックを分離する。
+- `MotionKind`は`StrEnum`で定義し、旧JSONの欠落fieldはdeserialize時の既定値で受理する。phase IDから実行意図を推測しない。
+- node callbackはparse、pure transition呼び出し、publish/logに限定し、timer/counterの更新は状態機械だけが所有する。
+
+### 一次情報
+
+- Python `dataclasses`: https://docs.python.org/3/library/dataclasses.html
+- Python `enum.StrEnum`: https://docs.python.org/3/library/enum.html#enum.StrEnum
+- ROS 2 Jazzy `rclpy` Execution and Callbacks: https://docs.ros.org/en/jazzy/p/rclpy/api/execution_and_callbacks.html
+
+## Step 3-5 グリッパ指令の確定と評価（2026-07-16）
+
+### 調査目的と条件
+
+- 目的: Step 3-4 E2EでPose Tracking通過後もgripperがopenのままになった原因を特定し、simと実機に共通する指令ライフサイクルを決める。
+- 対象: Franka公式`franka_ros2` humble branch、ROS 2 `control_msgs`、Isaac Sim 6.0.1公式資料、現行repositoryとGPU E2Eログ。
+- Web調査日は2026-07-16。確認済みの事実と設計推論を分離した。
+
+### 確認済みの事実
+
+- Franka公式`franka_gripper_node`は`move`、`grasp`、MoveIt用`gripper_action`を提供する。`grasp`はwidth、speed、forceを受け、実finger間距離がepsilon範囲内に入った場合に成功する。
+- ROS 2公式`control_msgs/GripperCommand` resultはposition、effort、stalled、reached_goalを返す。指令発行と物理到達は別イベントである。
+- Isaac Sim 6.0.1公式Articulation Controllerはjoint name/indexとposition commandを対応させて適用する。同じjointをpositionとeffortなど複数方式で同時制御できない。
+- 現行sim経路は`servo_execution_adapter -> /tomato_harvest/gripper_closed -> IsaacSimHardwareInterface -> finger position target -> Isaac articulation`である。
+- Step 3-4ログでは`hold_at_grasp`と`hold_grasp_eval`が開始してPose Trackingは成功したが、全PhysicsObsで`grip=0`、finger gap 0.0800 mだった。
+- 直接原因は、Pose Tracking開始時にcloseを安全のためopenへ遅延する一方、成功時に元のclose指令を確定publishしていなかったことである。両hold commandも内部`PhaseId.MOVING_TO_GRASP`を使うため同じ遅延規則が再適用された。
+
+### 現時点の推奨方針（設計推論）
+
+- phase plannerが決めたgripper指令をadapterが再解釈しない。`MOVING_TO_GRASP`は上流がopen、`AT_GRASP`以降は上流がcloseを指定するため、各command開始時にその値を適用し、Pose成功時に冪等に再確定する。
+- adapterは指令タイミングだけを所有し、simのfinger target変換はHardwareInterface、実機のwidth/speed/force実行と到達判定はFranka gripper action adapterへ分離する。
+- 今回は既存boolean契約を最小修正し、E2Eでclose後のfinger gap減少、`gripper_closed=true`、両指接触、`HELD`を確認した。pull中もcloseは維持されたが、実接触保持が崩れて`FALLEN`となったため、次の課題はgripper指令ではなく摩擦保持とpull動作である。
+- 将来の実機対応ではboolean topicをFranka/MoveIt gripper actionへ置換し、action resultの`reached_goal`と実測widthをgrasp評価へ渡す。
+
+### 未解決の確認事項
+
+- simのposition target方式を、実機相当のwidth/speed/force action契約へ昇格する時期。
+- tomatoとの接触後にfingerが目標0 mへ到達しない正常な把持を、gap、force、stalled相当値のどの組合せで成功判定するか。
+- 現行physics grasp joint生成を実接触だけで成立させられるか、geometry補助を残すか。
+
+### 一次情報
+
+- Franka Robotics公式`franka_gripper`: https://github.com/frankarobotics/franka_ros2/blob/humble/franka_gripper/doc/index.rst
+- ROS 2 `control_msgs/GripperCommand`: https://github.com/ros-controls/control_msgs/blob/master/control_msgs/action/GripperCommand.action
+- Isaac Sim 6.0.1 Articulation Controller: https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
+
+## Step 3-4 実機互換TF配信責務（2026-07-16）
+
+### 調査目的と条件
+
+- 目的: `panda_link0 -> panda_link8`が配信されない直接原因を特定し、sim/実機で共通化できるTF配信責務を決める。
+- 対象: ROS 2 Jazzy、Isaac Sim 6.0、Franka Panda/Franka ROS 2の2026-07-16時点の公式情報、および現行repository実装。
+- 確認済み事実と設計推論を分離した。
+
+### 確認済みの事実
+
+- ROS 2公式`robot_state_publisher`はURDFと`/joint_states`を入力に、可動jointを`/tf`、fixed jointをtransient-localの`/tf_static`へ配信する。TF計算をhardware driverやapplication nodeが個別実装する必要はない。
+- ros2_control公式`joint_state_broadcaster`はhardware state interfaceから標準`/joint_states`を配信する。
+- Franka公式はrobot model生成元として`franka_description`を独立packageで提供している。
+- Isaac Sim 6.0公式にも`Isaac Read Joint State -> ROS2 Publish Joint State`と`Isaac Compute Transform Tree -> ROS2 Publish Transform Tree`があるが、これはsimulatorから直接TFを配信できる機能であり、実機共通の責務配置を要求するものではない。
+- 現行repositoryは`scripts/run_ros2_components.sh`から`robot_state_publisher`を既に起動し、`joint_state_broadcaster`も`/joint_states`を配信している。
+- 現行`franka_ros2_control.urdf`は`panda_link0`から`panda_link7`、`panda_hand`を持つが、`panda_link8`を定義していない。このため`robot_state_publisher`が正常でも`panda_link8`はTF treeに現れない。
+- Step 3-3 fallbackが使うのはSceneSnapshotの関節角ではなく`robot_tool_pose`であり、58.4 mm offsetからcurrent `panda_link8` poseを導出している。
+
+### 現時点の推奨方針（設計推論）
+
+- TF配信の所有者は`franka_ros2_control`のbringupとし、hardware sourceだけをsim/実機で差し替える。
+- `joint_state_broadcaster -> /joint_states -> robot_state_publisher -> /tf,/tf_static`を唯一のrobot kinematic TF経路にする。
+- robot modelはMoveIt、ros2_control、robot_state_publisherで同じcanonical descriptionを使い、`panda_link8`とtool/hand fixed jointsを含める。
+- Isaac Simからのdirect TF publishは二重authorityを避けるため既定では無効にする。SceneSnapshot fallbackは移行期間の診断・縮退経路に限定する。
+- `robot_state_publisher`はcontroller plugin内部へ入れず、launch/bringupで独立nodeとして構成する。これによりhardware I/O、joint state公開、kinematic TF生成の単一責務を保つ。
+
+### 未解決の確認事項
+
+- 採用中のPanda modelと公式`franka_description` releaseのlink8/hand/tool frame名・fixed transformの完全一致。
+- Isaac Sim USD articulation joint名とcanonical URDF joint名の対応、およびfinger mimicの扱い。
+- 実機Frankaで使う`franka_ros2`/`franka_description`のROS 2 Jazzy対応版をどのrevisionで固定するか。
+- base/world固定TFをrobot bringupとcell/environment bringupのどちらが所有するか。robot内部TFとは別の判断が必要。
+
+### 一次情報
+
+- ROS 2 robot_state_publisher: https://docs.ros.org/en/ros2_packages/rolling/api/robot_state_publisher/index.html
+- ros2_control Jazzy JointStateBroadcaster: https://control.ros.org/jazzy/doc/api/classjoint__state__broadcaster_1_1JointStateBroadcaster.html
+- Franka公式description: https://github.com/frankarobotics/franka_description
+- Franka公式ROS 2 integration: https://github.com/frankarobotics/franka_ros2
+- Isaac Sim 6.0 ROS 2 OmniGraph migration: https://docs.isaacsim.omniverse.nvidia.com/latest/migration_guides/isaac_sim_6_0/ros2_omnigraph_migration.html
+
 ## Issue #46-4 MoveIt Servo速度調整（2026-07-14）
 
 - MoveIt Servo公式仕様では、`command_in_type: speed_units`のJointJog速度はrad/sとして扱われ、`scale.joint`はunitless入力の場合だけ適用される。このため今回の調整対象はadapterの比例gainと速度clampであり、`scale.joint`の変更ではない。

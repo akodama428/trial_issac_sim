@@ -14,6 +14,7 @@ DOCKERFILE = ROOT / "docker/Dockerfile"
 def test_servo_output_is_connected_to_jtc() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
 
+    assert config["robot_link_command_frame"] == "panda_link8"
     assert config["command_out_type"] == "trajectory_msgs/JointTrajectory"
     assert config["command_out_topic"] == (
         "/joint_trajectory_controller/joint_trajectory"

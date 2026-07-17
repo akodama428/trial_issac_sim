@@ -1,0 +1,117 @@
+{
+  "prefix": "run13",
+  "observation_samples": 2104,
+  "duration_sec": 20.895999999716878,
+  "max_impulse_left_ns": 0.0,
+  "max_impulse_right_ns": 0.336472,
+  "max_stem_tension_n": 2.901,
+  "max_tomato_speed_m_s": 1.30164,
+  "phase_transitions": [
+    {
+      "time": 1783687416.9541845,
+      "from": "idle",
+      "to": "detecting"
+    },
+    {
+      "time": 1783687454.0268857,
+      "from": "detecting",
+      "to": "target_found"
+    },
+    {
+      "time": 1783687454.152911,
+      "from": "target_found",
+      "to": "moving_to_pregrasp"
+    },
+    {
+      "time": 1783687460.2578459,
+      "from": "moving_to_pregrasp",
+      "to": "moving_to_grasp"
+    },
+    {
+      "time": 1783687461.9106042,
+      "from": "moving_to_grasp",
+      "to": "at_grasp"
+    },
+    {
+      "time": 1783687462.2677681,
+      "from": "at_grasp",
+      "to": "grasp_evaluation"
+    },
+    {
+      "time": 1783687462.2790203,
+      "from": "grasp_evaluation",
+      "to": "detaching"
+    },
+    {
+      "time": 1783687462.462683,
+      "from": "detaching",
+      "to": "moving_to_place"
+    },
+    {
+      "time": 1783687464.7976747,
+      "from": "moving_to_place",
+      "to": "placed"
+    },
+    {
+      "time": 1783687464.8219738,
+      "from": "placed",
+      "to": "returning_home"
+    },
+    {
+      "time": 1783687474.9241927,
+      "from": "returning_home",
+      "to": "complete"
+    }
+  ],
+  "phase_durations_sec": [
+    {
+      "phase": "detecting",
+      "sec": 37.07270121574402
+    },
+    {
+      "phase": "target_found",
+      "sec": 0.12602519989013672
+    },
+    {
+      "phase": "moving_to_pregrasp",
+      "sec": 6.104934930801392
+    },
+    {
+      "phase": "moving_to_grasp",
+      "sec": 1.6527583599090576
+    },
+    {
+      "phase": "at_grasp",
+      "sec": 0.3571639060974121
+    },
+    {
+      "phase": "grasp_evaluation",
+      "sec": 0.011252164840698242
+    },
+    {
+      "phase": "detaching",
+      "sec": 0.18366265296936035
+    },
+    {
+      "phase": "moving_to_place",
+      "sec": 2.334991693496704
+    },
+    {
+      "phase": "placed",
+      "sec": 0.024299144744873047
+    },
+    {
+      "phase": "returning_home",
+      "sec": 10.102218866348267
+    }
+  ],
+  "reached_complete": true,
+  "min_finger_gap_m": 0.0,
+  "images": {
+    "contact_impulse": "docs/reports/img/run13_contact_impulse.png",
+    "tomato_motion": "docs/reports/img/run13_tomato_motion.png",
+    "distances": "docs/reports/img/run13_distances.png",
+    "finger_gap": "docs/reports/img/run13_finger_gap.png",
+    "phases": "docs/reports/img/run13_phases.png"
+  }
+}

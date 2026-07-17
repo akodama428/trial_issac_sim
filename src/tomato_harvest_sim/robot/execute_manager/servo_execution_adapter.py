@@ -1,12 +1,22 @@
 """MoveIt Servoと既存motion command契約を接続する実行adapter。"""
 from __future__ import annotations
-
 from dataclasses import dataclass
 import json
-
 from tomato_harvest_sim.msg.contracts import (
     JointStateSnapshot,
     MotionCommand,
+    Pose3D,
+)
+from tomato_harvest_sim.robot.execute_manager.terminal_pose_tracking import (
+    PoseTrackingDecision,
+    decide_pose_tracking as decide_terminal_pose_tracking,
+    moveit_link_pose,
+    pose_from_transform,
+    quaternion_from_pose,
+)
+from tomato_harvest_sim.robot.execute_manager.pose_tracking_observability import (
+    pose_tracking_metric_fields,
+    tf_lookup_failure_metric_fields,
 )
 
 
@@ -14,17 +24,19 @@ SERVO_JOINT_COMMAND_TOPIC = "/tomato_harvest/moveit_servo/delta_joint_cmds"
 SERVO_SWITCH_COMMAND_TYPE_SERVICE = "/servo_node/switch_command_type"
 GRIPPER_CLOSED_TOPIC = "/tomato_harvest/gripper_closed"
 SERVO_CONTROL_RATE_HZ = 50.0
-# Issue #46-4 tuned profile.  The 0.8 rad/s cap stays below Panda's slowest
-# nominal joint velocity limit (joint 2: 1.0 rad/s); MoveIt Servo still applies
-# the URDF's position-dependent joint limits and output smoothing.
+# Issue #46-4: Pandaの最小公称上限未満とし、URDF limitとsmoothingも維持する。
 SERVO_JOINT_GAIN = 3.0
 SERVO_MAX_VELOCITY_RAD_S = 0.8
-# 0.05 rad left about 16 mm of Cartesian grasp error in the E2E scene and
-# caused the physics grasp gate to fail.  Complete only after a tighter joint
-# endpoint convergence suitable for the existing grasp acceptance window.
+# 旧0.05 radでは約16 mmの終端誤差が残ったため、把持窓に合わせて厳格化する。
 SERVO_GOAL_TOLERANCE_RAD = 0.01
 SERVO_STABLE_SAMPLES = 3
 SERVO_TIMEOUT_MARGIN_SEC = 5.0
+SERVO_POSE_COMMAND_TOPIC = "/tomato_harvest/moveit_servo/pose_target_cmds"
+SERVO_STATUS_TOPIC = "/tomato_harvest/moveit_servo/status"
+SERVO_PLANNING_FRAME = "panda_link0"
+SERVO_END_EFFECTOR_FRAME = "panda_link8"
+SERVO_POSE_POSITION_TOLERANCE_M = 0.0051
+SERVO_POSE_ORIENTATION_TOLERANCE_RAD = 0.03
 
 
 @dataclass(frozen=True)
@@ -37,6 +49,7 @@ class ServoTarget:
     positions_rad: tuple[float, ...]
     deadline_sec: float
     gripper_closed: bool | None
+    pose_tracking_goal: Pose3D | None
 
 
 @dataclass(frozen=True)
@@ -47,6 +60,67 @@ class JointJogDecision:
     velocities_rad_s: tuple[float, ...]
     max_error_rad: float
     reached: bool
+
+
+class GripperGate:
+    """gripper intentのpublish要否とcommand間dedupeを単一所有する。"""
+
+    def __init__(self) -> None:
+        self._last_closed: bool | None = None
+
+    def command_started(self, closed: bool | None) -> bool | None:
+        return self._decide(closed)
+
+    def terminal_reached(self, closed: bool | None) -> bool | None:
+        return self._decide(closed)
+
+    def _decide(self, closed: bool | None) -> bool | None:
+        if closed is None or closed == self._last_closed:
+            return None
+        self._last_closed = closed
+        return closed
+
+
+class CommandLifecycle:
+    """command受理から終端確定までの実行状態を所有する。"""
+
+    def __init__(self) -> None:
+        self.target: ServoTarget | None = None
+        self.started_at_sec: float | None = None
+        self.stable_samples = 0
+
+    def start(self, target: ServoTarget, started_at_sec: float) -> None:
+        self.target = target
+        self.started_at_sec = started_at_sec
+        self.stable_samples = 0
+
+    def record_reached(self, reached: bool) -> bool:
+        self.stable_samples = self.stable_samples + 1 if reached else 0
+        return self.stable_samples >= SERVO_STABLE_SAMPLES
+
+    def clear(self) -> None:
+        self.target = None
+        self.started_at_sec = None
+        self.stable_samples = 0
+
+
+def decide_pose_tracking(
+    target: ServoTarget,
+    current_pose: Pose3D,
+    *,
+    position_tolerance_m: float = SERVO_POSE_POSITION_TOLERANCE_M,
+    orientation_tolerance_rad: float = SERVO_POSE_ORIENTATION_TOLERANCE_RAD,
+) -> PoseTrackingDecision | None:
+    """現在EEF poseが終端目標の6D許容範囲内か判定する。"""
+    goal = target.pose_tracking_goal
+    if goal is None:
+        return None
+    return decide_terminal_pose_tracking(
+        goal,
+        current_pose,
+        position_tolerance_m=position_tolerance_m,
+        orientation_tolerance_rad=orientation_tolerance_rad,
+    )
 
 
 def servo_target_from_command(
@@ -75,7 +149,17 @@ def servo_target_from_command(
         positions_rad=endpoint.positions_rad,
         deadline_sec=started_at_sec + planned_duration_sec + timeout_margin_sec,
         gripper_closed=command.gripper_closed,
+        pose_tracking_goal=(
+            moveit_link_pose(phase_plan.phase_goal_pose)
+            if command.terminal_pose_tracking and phase_plan.phase_goal_pose is not None
+            else None
+        ),
     )
+
+
+def gripper_state_for_tracking(target: ServoTarget) -> bool | None:
+    """plannerが決めたgripper指令を開始時と成功時に適用する。"""
+    return target.gripper_closed
 
 
 def decide_joint_jog(
@@ -137,10 +221,12 @@ def main() -> None:
 
     import rclpy
     from control_msgs.msg import JointJog
+    from geometry_msgs.msg import PoseStamped
     from moveit_msgs.srv import ServoCommandType
     from rclpy.node import Node
     from sensor_msgs.msg import JointState
-    from std_msgs.msg import String
+    from std_msgs.msg import Int8, String
+    from tf2_ros import Buffer, TransformException, TransformListener
 
     from tomato_harvest_sim.msg.serialization import motion_command_from_json
     from tomato_harvest_sim.msg.topics import (
@@ -157,15 +243,26 @@ def main() -> None:
 
         def __init__(self) -> None:
             super().__init__("servo_execution_adapter")
-            self._target: ServoTarget | None = None
+            self._lifecycle = CommandLifecycle()
             self._joint_state: JointStateSnapshot | None = None
-            self._stable_samples = 0
-            self._target_started_sec: float | None = None
-            self._command_type_ready = False
-            self._last_gripper_closed: bool | None = None
+            self._desired_command_type = ServoCommandType.Request.JOINT_JOG
+            self._active_command_type: int | None = None
+            self._switch_request_pending = False
+            self._gripper_gate = GripperGate()
+            self._pose_sequence_id = 0
+            self._pose_published_count = 0
+            self._tf_success_count = 0
+            self._tf_failure_count = 0
+            self._last_tf_success_sec: float | None = None
+            self._servo_status: int | None = None
             self._jog_pub = self.create_publisher(
                 JointJog, SERVO_JOINT_COMMAND_TOPIC, 10
             )
+            self._pose_pub = self.create_publisher(
+                PoseStamped, SERVO_POSE_COMMAND_TOPIC, 10
+            )
+            self._tf_buffer = Buffer()
+            self._tf_listener = TransformListener(self._tf_buffer, self)
             self._status_pub = self.create_publisher(
                 String, EXECUTION_STATUS_TOPIC, 10
             )
@@ -178,6 +275,9 @@ def main() -> None:
             self.create_subscription(
                 JointState, JOINT_STATES_TOPIC, self._on_joint_state, 10
             )
+            self.create_subscription(
+                Int8, SERVO_STATUS_TOPIC, self._on_servo_status, 10
+            )
             self._switch_client = self.create_client(
                 ServoCommandType, SERVO_SWITCH_COMMAND_TYPE_SERVICE
             )
@@ -186,23 +286,37 @@ def main() -> None:
             self._publish_status("idle")
 
         def _ensure_joint_jog_mode(self) -> None:
-            if self._command_type_ready or not self._switch_client.service_is_ready():
+            if (
+                self._active_command_type == self._desired_command_type
+                or self._switch_request_pending
+                or not self._switch_client.service_is_ready()
+            ):
                 return
             request = ServoCommandType.Request()
-            request.command_type = ServoCommandType.Request.JOINT_JOG
+            request.command_type = self._desired_command_type
+            requested_command_type = self._desired_command_type
+            self._switch_request_pending = True
             future = self._switch_client.call_async(request)
-            future.add_done_callback(self._on_command_type_response)
+            future.add_done_callback(
+                lambda completed: self._on_command_type_response(
+                    completed, requested_command_type
+                )
+            )
 
-        def _on_command_type_response(self, future: object) -> None:
+        def _on_command_type_response(
+            self, future: object, requested_command_type: int
+        ) -> None:
+            self._switch_request_pending = False
             try:
                 response = future.result()  # type: ignore[attr-defined]
-                self._command_type_ready = bool(response.success)
+                if bool(response.success):
+                    self._active_command_type = requested_command_type
             except Exception as exc:  # ROS future boundary
                 self.get_logger().warning(f"Servo command type switch failed: {exc}")
                 return
-            if self._command_type_ready:
+            if self._active_command_type == requested_command_type:
                 self.get_logger().info(metric_line(
-                    "servo_joint_jog_mode_ready"
+                    "servo_command_mode_ready", command_type=self._active_command_type,
                 ))
 
         def _on_command(self, msg: String) -> None:
@@ -216,10 +330,14 @@ def main() -> None:
             if target is None:
                 self._publish_status("aborted", abort_reason="missing_trajectory")
                 return
-            self._target = target
-            self._target_started_sec = started_at_sec
-            self._stable_samples = 0
-            self._publish_gripper(target.gripper_closed)
+            self._lifecycle.start(target, started_at_sec)
+            self._desired_command_type = (
+                ServoCommandType.Request.POSE
+                if target.pose_tracking_goal is not None
+                else ServoCommandType.Request.JOINT_JOG
+            )
+            self._reset_pose_tracking_observation()
+            self._publish_gripper(self._gripper_gate.command_started(target.gripper_closed))
             self._publish_status("running")
             self.get_logger().info(metric_line(
                 "servo_target_started", phase=target.phase,
@@ -232,22 +350,45 @@ def main() -> None:
                 tuple(float(position) for position in msg.position),
             )
 
+        def _on_servo_status(self, msg: Int8) -> None:
+            self._servo_status = int(msg.data)
+
+        def _reset_pose_tracking_observation(self) -> None:
+            self._pose_sequence_id = 0
+            self._pose_published_count = 0
+            self._tf_success_count = 0
+            self._tf_failure_count = 0
+            self._last_tf_success_sec = None
+
         def _control_step(self) -> None:
             if (
-                not self._command_type_ready
-                or self._target is None
-                or self._joint_state is None
+                self._active_command_type != self._desired_command_type
+                or self._lifecycle.target is None
             ):
                 return
             now_sec = time.monotonic()
-            if now_sec > self._target.deadline_sec:
+            target = self._lifecycle.target
+            if now_sec > target.deadline_sec:
+                if target.pose_tracking_goal is not None:
+                    self.get_logger().info(metric_line(
+                        "servo_pose_tracking_timeout",
+                        published_count=self._pose_published_count,
+                        servo_status=self._servo_status,
+                        tf_failure_count=self._tf_failure_count,
+                        tf_success_count=self._tf_success_count,
+                    ))
                 self._publish_status("aborted", abort_reason="servo_target_timeout")
-                self._target = None
+                self._lifecycle.clear()
                 return
-            decision = decide_joint_jog(self._target, self._joint_state)
+            if target.pose_tracking_goal is not None:
+                self._control_pose_tracking(now_sec)
+                return
+            if self._joint_state is None:
+                return
+            decision = decide_joint_jog(target, self._joint_state)
             if decision is None:
                 self._publish_status("aborted", abort_reason="incomplete_joint_state")
-                self._target = None
+                self._lifecycle.clear()
                 return
             jog = JointJog()
             jog.header.stamp = self.get_clock().now().to_msg()
@@ -255,28 +396,109 @@ def main() -> None:
             jog.velocities = list(decision.velocities_rad_s)
             self._jog_pub.publish(jog)
             self._publish_status("running", max_error_rad=decision.max_error_rad)
-            self._stable_samples = (
-                self._stable_samples + 1 if decision.reached else 0
-            )
-            if self._stable_samples < SERVO_STABLE_SAMPLES:
+            if not self._lifecycle.record_reached(decision.reached):
                 return
             self.get_logger().info(metric_line(
-                "servo_target_succeeded", phase=self._target.phase,
+                "servo_target_succeeded", phase=target.phase,
                 max_error_rad=decision.max_error_rad,
                 latency_ms=round(
-                    (now_sec - (self._target_started_sec or now_sec)) * 1000.0,
+                    (now_sec - (self._lifecycle.started_at_sec or now_sec)) * 1000.0,
                     3,
                 ),
             ))
             self._publish_status("succeeded", max_error_rad=decision.max_error_rad)
-            self._target = None
-            self._target_started_sec = None
-            self._stable_samples = 0
+            self._publish_gripper(self._gripper_gate.terminal_reached(target.gripper_closed))
+            self._lifecycle.clear()
+
+        def _control_pose_tracking(self, now_sec: float) -> None:
+            """MOVING_TO_GRASP終端をServo pose commandで閉ループ追従する。"""
+            target = self._lifecycle.target
+            if target is None or target.pose_tracking_goal is None:
+                return
+            goal = target.pose_tracking_goal
+            self._pose_sequence_id += 1
+            command = PoseStamped()
+            command.header.stamp = self.get_clock().now().to_msg()
+            command.header.frame_id = SERVO_PLANNING_FRAME
+            command.pose.position.x = goal.x
+            command.pose.position.y = goal.y
+            command.pose.position.z = goal.z
+            qx, qy, qz, qw = quaternion_from_pose(goal)
+            command.pose.orientation.x = qx
+            command.pose.orientation.y = qy
+            command.pose.orientation.z = qz
+            command.pose.orientation.w = qw
+            self._pose_pub.publish(command)
+            self._pose_published_count += 1
+            try:
+                transform = self._tf_buffer.lookup_transform(
+                    SERVO_PLANNING_FRAME, SERVO_END_EFFECTOR_FRAME, rclpy.time.Time()
+                )
+            except TransformException as exc:
+                self._tf_failure_count += 1
+                last_success_age_sec = (
+                    round(now_sec - self._last_tf_success_sec, 6)
+                    if self._last_tf_success_sec is not None else None
+                )
+                self.get_logger().info(metric_line(
+                    "servo_pose_tracking_sample",
+                    **tf_lookup_failure_metric_fields(
+                        sequence_id=self._pose_sequence_id,
+                        published_count=self._pose_published_count,
+                        planning_frame=SERVO_PLANNING_FRAME,
+                        end_effector_frame=SERVO_END_EFFECTOR_FRAME,
+                        error=str(exc),
+                        servo_status=self._servo_status,
+                        tf_success_count=self._tf_success_count,
+                        tf_failure_count=self._tf_failure_count,
+                        last_success_age_sec=last_success_age_sec,
+                    ),
+                ))
+                return
+            self._tf_success_count += 1
+            self._last_tf_success_sec = now_sec
+            current_pose = pose_from_transform(transform)
+            decision = decide_pose_tracking(target, current_pose)
+            if decision is None:
+                return
+            self._publish_status("running")
+            next_stable_samples = self._lifecycle.stable_samples + 1 if decision.reached else 0
+            self.get_logger().info(metric_line(
+                "servo_pose_tracking_sample",
+                **pose_tracking_metric_fields(
+                    sequence_id=self._pose_sequence_id,
+                    published_count=self._pose_published_count,
+                    planning_frame=SERVO_PLANNING_FRAME,
+                    end_effector_frame=SERVO_END_EFFECTOR_FRAME,
+                    pose_source="tf",
+                    target=goal,
+                    current=current_pose,
+                    position_error_m=decision.position_error_m,
+                    orientation_error_rad=decision.orientation_error_rad,
+                    reached=decision.reached,
+                    stable_samples=next_stable_samples,
+                    servo_status=self._servo_status,
+                    tf_success_count=self._tf_success_count,
+                    tf_failure_count=self._tf_failure_count,
+                ),
+            ))
+            if not self._lifecycle.record_reached(decision.reached):
+                return
+            self.get_logger().info(metric_line(
+                "servo_pose_target_succeeded", phase=target.phase,
+                position_error_m=decision.position_error_m,
+                orientation_error_rad=decision.orientation_error_rad,
+                latency_ms=round(
+                    (now_sec - (self._lifecycle.started_at_sec or now_sec)) * 1000.0, 3
+                ),
+            ))
+            self._publish_gripper(self._gripper_gate.terminal_reached(target.gripper_closed))
+            self._publish_status("succeeded")
+            self._lifecycle.clear()
 
         def _publish_gripper(self, closed: bool | None) -> None:
-            if closed is None or closed == self._last_gripper_closed:
+            if closed is None:
                 return
-            self._last_gripper_closed = closed
             msg = String()
             msg.data = "true" if closed else "false"
             self._gripper_pub.publish(msg)

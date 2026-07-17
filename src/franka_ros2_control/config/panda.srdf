@@ -7,13 +7,21 @@
   <!-- World-to-base virtual joint (fixed: robot is bolted to the floor) -->
   <virtual_joint name="virtual_joint" type="fixed" parent_frame="world" child_link="panda_link0"/>
 
-  <!-- 7-DOF arm chain ending at panda_hand -->
+  <!-- 7-DOF arm chain ending at the Servo control link -->
   <group name="panda_arm">
-    <chain base_link="panda_link0" tip_link="panda_hand"/>
+    <chain base_link="panda_link0" tip_link="panda_link8"/>
   </group>
 
-  <!-- End effector attached to panda_link7 -->
-  <end_effector name="panda_hand" parent_link="panda_link7" group="panda_arm"/>
+  <group name="hand">
+    <joint name="panda_finger_joint1"/>
+    <joint name="panda_finger_joint2"/>
+  </group>
+
+  <end_effector
+    name="panda_hand"
+    parent_link="panda_link8"
+    group="hand"
+    parent_group="panda_arm"/>
 
   <!-- Named configuration: Franka "ready" pose -->
   <group_state name="ready" group="panda_arm">
@@ -29,6 +37,8 @@
   <!-- Disable self-collision between adjacent and known-safe link pairs -->
   <disable_collisions link1="panda_hand" link2="panda_link6" reason="Adjacent"/>
   <disable_collisions link1="panda_hand" link2="panda_link7" reason="Adjacent"/>
+  <disable_collisions link1="panda_link7" link2="panda_link8" reason="Adjacent"/>
+  <disable_collisions link1="panda_link8" link2="panda_hand" reason="Adjacent"/>
   <disable_collisions link1="panda_hand" link2="panda_leftfinger" reason="Adjacent"/>
   <disable_collisions link1="panda_hand" link2="panda_rightfinger" reason="Adjacent"/>
   <disable_collisions link1="panda_leftfinger" link2="panda_rightfinger" reason="Never"/>

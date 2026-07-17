@@ -69,6 +69,17 @@ class TestMsgContracts(unittest.TestCase):
         self.assertEqual(restored.command_name, cmd.command_name)
         self.assertEqual(restored.gripper_closed, cmd.gripper_closed)
 
+    def test_old_motion_command_json_defaults_execution_intent(self) -> None:
+        from tomato_harvest_sim.msg.contracts import MotionKind
+        from tomato_harvest_sim.msg.serialization import motion_command_from_json
+
+        restored = motion_command_from_json(
+            '{"command_name":"legacy","planner_name":"legacy",'
+            '"target_pose":null,"gripper_closed":null,"phase_motion_plan":null}'
+        )
+        self.assertIs(restored.motion_kind, MotionKind.FOLLOW_TRAJECTORY)
+        self.assertFalse(restored.terminal_pose_tracking)
+
     def test_serialization_roundtrip_target_estimate(self) -> None:
         from tomato_harvest_sim.msg.contracts import Pose3D, TargetEstimate
         from tomato_harvest_sim.msg.serialization import target_estimate_to_json, target_estimate_from_json

@@ -7,6 +7,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
+IN_CONTAINER_E2E = ROOT / "scripts/ci/in_container_e2e.sh"
 
 
 def _jobs() -> dict[str, object]:
@@ -34,3 +35,9 @@ def test_ci_workflow_contains_no_legacy_mode_or_injections() -> None:
     assert "legacy-local-e2e" not in source
     assert "TOMATO_HARVEST_SERVO_MODE" not in source
     assert "TOMATO_HARVEST_INJECT_LOCAL_PLAN_PHASES" not in source
+
+
+def test_e2e_rebuilds_ros_components_before_launch() -> None:
+    source = IN_CONTAINER_E2E.read_text(encoding="utf-8")
+
+    assert "--rebuild" in source

@@ -39,7 +39,8 @@ def _safety_observation_urdf(kinematic_urdf: str) -> str:
     sphere_radii = {
         "panda_link0": 0.09, "panda_link1": 0.075, "panda_link2": 0.075,
         "panda_link3": 0.07, "panda_link4": 0.07, "panda_link5": 0.065,
-        "panda_link6": 0.06, "panda_link7": 0.055, "panda_hand": 0.07,
+        "panda_link6": 0.06, "panda_link7": 0.055, "panda_link8": 0.055,
+        "panda_hand": 0.07,
     }
     for link in root.findall("link"):
         radius = sphere_radii.get(link.attrib.get("name", ""))

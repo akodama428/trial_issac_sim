@@ -65,6 +65,14 @@ class PhysicsTuningConfig:
     tomato_min_torsional_patch_radius_m: float
     tomato_solver_position_iterations: int
     tomato_solver_velocity_iterations: int
+    # Step 2: finger drive の力制限。max_force_n=0 は「drive へ適用しない」を意味する。
+    finger_drive_stiffness: float
+    finger_drive_damping: float
+    finger_drive_max_force_n: float
+    friction_grasp_required_steps: int
+    friction_grasp_minimum_force_n: float
+    friction_grasp_maximum_relative_speed_m_s: float
+    friction_grasp_maximum_slip_m: float
 
 
 _DISABLED_MATERIAL = PhysicsMaterialConfig(
@@ -84,6 +92,13 @@ _DISABLED_TUNING = PhysicsTuningConfig(
     tomato_min_torsional_patch_radius_m=0.0,
     tomato_solver_position_iterations=0,
     tomato_solver_velocity_iterations=0,
+    finger_drive_stiffness=0.0,
+    finger_drive_damping=0.0,
+    finger_drive_max_force_n=0.0,
+    friction_grasp_required_steps=3,
+    friction_grasp_minimum_force_n=1.0,
+    friction_grasp_maximum_relative_speed_m_s=0.02,
+    friction_grasp_maximum_slip_m=0.005,
 )
 
 
@@ -121,6 +136,12 @@ def physics_tuning_from_payload(payload: dict[str, object]) -> PhysicsTuningConf
 
     collision = physics["tomato_collision"]
     solver = physics["tomato_solver"]
+    finger_drive = physics.get("finger_drive", {})
+    if not isinstance(finger_drive, dict):
+        finger_drive = {}
+    friction_grasp = physics.get("friction_grasp", {})
+    if not isinstance(friction_grasp, dict):
+        friction_grasp = {}
     return PhysicsTuningConfig(
         enabled=enabled,
         tomato_material=_material_from_dict(physics["tomato_material"]),
@@ -134,6 +155,13 @@ def physics_tuning_from_payload(payload: dict[str, object]) -> PhysicsTuningConf
         tomato_min_torsional_patch_radius_m=float(collision["min_torsional_patch_radius_m"]),
         tomato_solver_position_iterations=int(solver["position_iterations"]),
         tomato_solver_velocity_iterations=int(solver["velocity_iterations"]),
+        finger_drive_stiffness=float(finger_drive.get("stiffness", 0.0)),
+        finger_drive_damping=float(finger_drive.get("damping", 0.0)),
+        finger_drive_max_force_n=float(finger_drive.get("max_force_n", 0.0)),
+        friction_grasp_required_steps=int(friction_grasp.get("required_steps", 3)),
+        friction_grasp_minimum_force_n=float(friction_grasp.get("minimum_force_n", 1.0)),
+        friction_grasp_maximum_relative_speed_m_s=float(friction_grasp.get("maximum_relative_speed_m_s", 0.02)),
+        friction_grasp_maximum_slip_m=float(friction_grasp.get("maximum_slip_m", 0.005)),
     )
 
 

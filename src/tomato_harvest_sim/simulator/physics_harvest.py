@@ -11,11 +11,13 @@ from tomato_harvest_sim.simulator.scene_config import (
     load_physics_tuning_config,
 )
 from tomato_harvest_sim.simulator.physics_observation import (
+    contact_forces_from_impulses,
     FingerContactImpulses,
     estimate_stem_tension_n,
     format_observation_line,
     summarize_finger_contact_impulses,
 )
+from tomato_harvest_sim.simulator.grasp_strategy import FrictionGraspConfig, FrictionGraspStrategy, GraspDecision
 
 
 @dataclass(frozen=True)
@@ -30,7 +32,8 @@ class PhysicsHarvestScenePaths:
 
 
 class IsaacPhysicsHarvestBridge:
-    STEM_BREAK_FORCE_N = 50.0
+    # 実トマト離層の0.58〜2.46 Nに動的余裕を加える。
+    STEM_BREAK_FORCE_N = 7.5
     STEM_BREAK_TORQUE_NM = 50.0
     TOMATO_MASS_KG = 0.03
     DETACH_DISTANCE_M = 0.02
@@ -48,7 +51,7 @@ class IsaacPhysicsHarvestBridge:
     FINGER_GAP_MAX_M = 0.065
     TOMATO_COLLISION_PRIM_SUFFIX = "/Geometry"
     # 観測ログ専用の物理ステップ幅の仮定値。判定には使用しない。
-    OBSERVATION_PHYSICS_DT_SEC = 1.0 / 60.0
+    OBSERVATION_PHYSICS_DT_SEC = 1.0 / 120.0
 
     def __init__(
         self,
@@ -72,11 +75,24 @@ class IsaacPhysicsHarvestBridge:
         self._detach_reported = False
         self._contact_subscription = None
         self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
+        self._physics_sequence_id = 0
         self._previous_tomato_velocity = (0.0, 0.0, 0.0)
         self._debug_enabled = os.environ.get(
             "TOMATO_HARVEST_DEBUG_PHYSICS_GRASP",
             "",
         ).strip() not in {"", "0", "false", "False"}
+        self._grasp_mode = "success"
+        self._friction_strategy = FrictionGraspStrategy(FrictionGraspConfig(
+            self._physics_tuning.friction_grasp_required_steps,
+            self._physics_tuning.friction_grasp_minimum_force_n,
+            self._physics_tuning.friction_grasp_maximum_relative_speed_m_s,
+            self._physics_tuning.friction_grasp_maximum_slip_m,
+        ))
+
+    def set_grasp_mode(self, grasp_mode: str) -> None:
+        if grasp_mode not in {"success", "physics"}:
+            raise ValueError(f"unsupported physics grasp mode: {grasp_mode}")
+        self._grasp_mode = grasp_mode
 
     def prepare_scene(self) -> None:
         self._enable_static_collision(self._scene_paths.ground_prim_path)
@@ -121,17 +137,21 @@ class IsaacPhysicsHarvestBridge:
             self._debug_log(f"[PhysicsTuning] {line}")
 
     def begin_physics_step(self) -> None:
+        self._physics_sequence_id += 1
         self._pending_finger_contacts = set()
         self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
 
     def finalize_physics_step(self, controller: object) -> None:
         snapshot = controller.current_scene_snapshot()
+        forces = contact_forces_from_impulses(
+            self._pending_contact_impulses, dt_sec=self.OBSERVATION_PHYSICS_DT_SEC
+        )
         self._promote_pending_contacts(gripper_closed=snapshot.gripper_closed)
         controller.sync_grasp_diagnostics(
             left_contact="left" in self._active_finger_contacts,
             right_contact="right" in self._active_finger_contacts,
-            left_force_n=self._pending_contact_impulses.left_ns / self.OBSERVATION_PHYSICS_DT_SEC,
-            right_force_n=self._pending_contact_impulses.right_ns / self.OBSERVATION_PHYSICS_DT_SEC,
+            left_force_n=forces.left_n,
+            right_force_n=forces.right_n,
         )
         self._debug_log(
             "[PhysicsHarvest] finalize "
@@ -152,14 +172,18 @@ class IsaacPhysicsHarvestBridge:
                 return
 
         tomato_pose = self._world_pose(self._scene_paths.tomato_prim_path)
-        if self._should_restore_attached_tomato_pose(snapshot=snapshot, tomato_pose=tomato_pose):
+        if self._grasp_mode == "success" and self._should_restore_attached_tomato_pose(snapshot=snapshot, tomato_pose=tomato_pose):
             self._debug_log("[PhysicsHarvest] restoring unstable attached tomato pose before grasp evaluation.")
             tomato_pose = snapshot.tomato_pose
             self._set_world_pose(self._scene_paths.tomato_prim_path, tomato_pose)
             self._zero_rigid_body_velocity(self._scene_paths.tomato_prim_path)
         controller.sync_tomato_physics(tomato_pose)
         self._log_observation(snapshot=snapshot, tomato_pose=tomato_pose)
-        self._augment_contacts_from_grasp_geometry(tomato_pose=tomato_pose, gripper_closed=snapshot.gripper_closed)
+        if self._grasp_mode == "success":
+            self._augment_contacts_from_grasp_geometry(tomato_pose=tomato_pose, gripper_closed=snapshot.gripper_closed)
+        else:
+            self._finalize_friction_grasp(controller, snapshot, tomato_pose)
+            return
 
         if (
             snapshot.gripper_closed
@@ -206,6 +230,33 @@ class IsaacPhysicsHarvestBridge:
                     reason="released_outside_place_target_physx",
                 )
 
+    def _finalize_friction_grasp(self, controller: object, snapshot: object, tomato_pose: Pose3D) -> None:
+        """人工拘束を使わず、接触観測だけでHELD・滑落・releaseを同期する。"""
+        decision = self._friction_strategy.observe(
+            bool(snapshot.gripper_closed),
+            self._pending_contact_impulses.left_ns / self.OBSERVATION_PHYSICS_DT_SEC,
+            self._pending_contact_impulses.right_ns / self.OBSERVATION_PHYSICS_DT_SEC,
+            self._world_pose(self._scene_paths.hand_mount_prim_path),
+            tomato_pose,
+            self.OBSERVATION_PHYSICS_DT_SEC,
+        )
+        if decision is GraspDecision.HELD:
+            controller.sync_tomato_physics(tomato_pose, attached=True, status=TomatoStatus.HELD,
+                                           reason="friction_grasp_observed")
+        elif decision is GraspDecision.LOST:
+            controller.sync_tomato_physics(tomato_pose, attached=False, status=TomatoStatus.FALLEN,
+                                           reason="friction_grasp_slipped")
+        elif decision is GraspDecision.RELEASED:
+            status = TomatoStatus.PLACED if self._distance(snapshot.robot_tool_pose, snapshot.tray_pose) <= self.PLACE_DISTANCE_M else TomatoStatus.FALLEN
+            controller.sync_tomato_physics(tomato_pose, attached=False, status=status,
+                                           reason="friction_grasp_released")
+        if snapshot.tomato_status is TomatoStatus.HELD and not self._detach_reported:
+            stem_distance = self._distance(self._world_pose(self._scene_paths.stem_anchor_prim_path), tomato_pose)
+            if stem_distance >= self.DETACH_DISTANCE_M:
+                self._detach_reported = True
+                controller.sync_tomato_physics(tomato_pose, attached=False, status=TomatoStatus.DETACHED,
+                                               reason="tomato_detached_from_stem_friction")
+
     def reset_scene(self, controller: object) -> None:
         self._active_finger_contacts = set()
         self._pending_finger_contacts = set()
@@ -213,6 +264,7 @@ class IsaacPhysicsHarvestBridge:
         self._recent_finger_contacts = set()
         self._recent_contact_grace_steps_remaining = 0
         self._detach_reported = False
+        self._friction_strategy.reset()
         self._remove_grasp_joint()
         self._set_world_pose(self._scene_paths.stem_anchor_prim_path, self._initial_tomato_pose)
         self._set_world_pose(self._scene_paths.tomato_prim_path, self._initial_tomato_pose)
@@ -253,8 +305,7 @@ class IsaacPhysicsHarvestBridge:
             if finger_name is not None:
                 active_contacts.add(finger_name)
         self._accumulate_pending_contacts(active_contacts)
-        if self._debug_enabled:
-            self._accumulate_contact_impulses(contact_headers, contact_data)
+        self._accumulate_contact_impulses(contact_headers, contact_data)
 
     def _accumulate_contact_impulses(self, contact_headers: object, contact_data: object) -> None:
         """観測用に finger 別接触力積を集計する（判定へは介入しない）。"""
@@ -305,6 +356,13 @@ class IsaacPhysicsHarvestBridge:
         speed = (velocity[0] ** 2 + velocity[1] ** 2 + velocity[2] ** 2) ** 0.5
         hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
         stem_pose = self._world_pose(self._scene_paths.stem_anchor_prim_path)
+        left_finger_pose = self._world_pose(self._left_finger_prim_path())
+        right_finger_pose = self._world_pose(self._right_finger_prim_path())
+        finger_gap = self._distance(left_finger_pose, right_finger_pose)
+        finger_midpoint_z = (
+            self._inferred_finger_contact_pose(left_finger_pose).z
+            + self._inferred_finger_contact_pose(right_finger_pose).z
+        ) * 0.5
         stem_tension = estimate_stem_tension_n(
             mass_kg=self.TOMATO_MASS_KG,
             velocity_m_s=velocity,
@@ -314,15 +372,23 @@ class IsaacPhysicsHarvestBridge:
         self._previous_tomato_velocity = velocity
         print(
             format_observation_line(
+                sequence_id=self._physics_sequence_id,
                 timestamp_sec=time.monotonic(),
                 tomato_status=snapshot.tomato_status.value,
                 gripper_closed=bool(snapshot.gripper_closed),
                 grasp_joint_active=self._grasp_joint_active,
                 impulses=self._pending_contact_impulses,
+                forces=contact_forces_from_impulses(
+                    self._pending_contact_impulses,
+                    dt_sec=self.OBSERVATION_PHYSICS_DT_SEC,
+                ),
                 tomato_speed_m_s=speed,
                 hand_distance_m=self._distance(hand_pose, tomato_pose),
                 stem_distance_m=self._distance(stem_pose, tomato_pose),
                 stem_tension_n=stem_tension,
+                finger_gap_m=finger_gap,
+                finger_midpoint_z_m=finger_midpoint_z,
+                tomato_center_z_m=tomato_pose.z,
             ),
             flush=True,
         )

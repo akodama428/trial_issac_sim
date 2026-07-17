@@ -16,6 +16,7 @@ from tomato_harvest_sim.simulator.scene_plan import ReviewScenePlan, build_revie
 ISAAC_SIM_ROOT = Path(os.environ.get("ISAAC_SIM_ROOT", "/isaac-sim"))
 ISAAC_SIM_EXPERIENCE = ISAAC_SIM_ROOT / "apps" / "isaacsim.exp.base.python.kit"
 OFFICIAL_FRANKA_ASSET_RELATIVE_PATH = "Isaac/Robots/FrankaRobotics/FrankaPanda/franka.usd"
+PHYSICS_STEPS_PER_SECOND = 120
 
 
 # ヘッドレス実行の早期終了対象。収穫サイクルがこれ以上進まない終端フェーズのみ。
@@ -72,7 +73,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--grasp-mode",
-        choices=("success", "failure"),
+        choices=("success", "failure", "physics"),
         default="success",
         help="Choose the stable grasp or failed grasp demo path.",
     )
@@ -182,8 +183,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         plan = build_review_scene_plan()
         print("SimulationApp initialized.", flush=True)
-        use_physx_harvest = args.grasp_mode == "success"
+        use_physx_harvest = args.grasp_mode in {"success", "physics"}
         artifacts = _build_scene(plan, use_physx_harvest=use_physx_harvest)
+        if artifacts.physics_bridge is not None:
+            artifacts.physics_bridge.set_grasp_mode(args.grasp_mode)
         _start_timeline_playback()
         _pump_updates(simulation_app.update, frame_count=4)
         _wait_for_first_frame(simulation_app=simulation_app, max_frames=240)
@@ -320,7 +323,9 @@ def _add_physics_scene(stage: object) -> None:
     physics_scene.CreateGravityDirectionAttr(Gf.Vec3f(0.0, 0.0, -1.0))
     physics_scene.CreateGravityMagnitudeAttr(9.81)
     physx_scene = PhysxSchema.PhysxSceneAPI.Apply(physics_scene.GetPrim())
+    physx_scene.CreateTimeStepsPerSecondAttr(PHYSICS_STEPS_PER_SECOND)
     physx_scene.CreateEnableCCDAttr(True)
+    physx_scene.CreateSolverTypeAttr().Set("TGS")
 
 
 def build_official_franka_asset_path(assets_root: str) -> str:

@@ -60,6 +60,13 @@ class PhaseId(StrEnum):
     RETURNING_HOME = "returning_home"
 
 
+class MotionKind(StrEnum):
+    """実行器がphase IDを推測せずに選択できるarm動作の意図。"""
+
+    FOLLOW_TRAJECTORY = "follow_trajectory"
+    HOLD = "hold"
+
+
 class PlanProducerKind(StrEnum):
     """planを生成したproducerの種別。"""
 
@@ -246,6 +253,8 @@ class MotionCommand:
     target_pose: Pose3D | None = None
     gripper_closed: bool | None = None
     phase_motion_plan: PhaseMotionPlan | None = None
+    motion_kind: MotionKind = MotionKind.FOLLOW_TRAJECTORY
+    terminal_pose_tracking: bool = False
 
 
 @dataclass(frozen=True)
