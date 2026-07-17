@@ -6,6 +6,9 @@ from enum import StrEnum
 
 from tomato_harvest_sim.msg.contracts import HarvestTaskPhase
 from tomato_harvest_sim.robot.motion_planner.state_aggregation import PlannerState
+from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
+    SUFFIX_REPLAN_PHASES,
+)
 
 
 class ReplanTrigger(StrEnum):
@@ -13,6 +16,7 @@ class ReplanTrigger(StrEnum):
     ABORT = "abort"
     SCENE_CHANGE = "scene_change"
     TRACKING_ERROR = "tracking_error"
+    STALL = "stall"
 
 
 @dataclass(frozen=True)
@@ -30,6 +34,7 @@ class ReplanPolicy:
 class TriggerMemory:
     last_replan_at_sec: float | None = None
     handled_abort_generation: int = 0
+    handled_stall_generation: int = 0
     handled_scene_generation: int = 0
 
 
@@ -60,6 +65,8 @@ def evaluate_replan_trigger(
 
     if state.abort_generation > memory.handled_abort_generation:
         return TriggerDecision(True, ReplanTrigger.ABORT, "triggered_abort")
+    if state.stall_generation > memory.handled_stall_generation:
+        return TriggerDecision(True, ReplanTrigger.STALL, "triggered_stall")
     if state.scene_generation > memory.handled_scene_generation:
         return TriggerDecision(True, ReplanTrigger.SCENE_CHANGE, "triggered_scene_change")
     if (
@@ -81,6 +88,9 @@ def memory_after_trigger(
         handled_abort_generation=max(
             memory.handled_abort_generation, state.abort_generation
         ),
+        handled_stall_generation=max(
+            memory.handled_stall_generation, state.stall_generation
+        ),
         handled_scene_generation=max(
             memory.handled_scene_generation, state.scene_generation
         ),
@@ -97,7 +107,10 @@ def trigger_starts_planner(
     scene change は観測専用とする。実行中の軌道追従補正は MoveIt Servo が
     担うため (Issue #46)、planner 側で cancel-and-replace を起こさない。
     """
-    return trigger is ReplanTrigger.ABORT
+    return (
+        trigger is ReplanTrigger.ABORT
+        or trigger is ReplanTrigger.STALL and phase in SUFFIX_REPLAN_PHASES
+    )
 
 
 def should_plan_on_snapshot_arrival(

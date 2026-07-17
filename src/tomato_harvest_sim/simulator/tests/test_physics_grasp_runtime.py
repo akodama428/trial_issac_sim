@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import unittest
 
 from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
@@ -7,6 +8,15 @@ from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBrid
 
 
 class PhysicsGraspRuntimeTest(unittest.TestCase):
+    def test_usd_angular_velocity_is_converted_from_degrees_to_radians(self) -> None:
+        converted = IsaacPhysicsHarvestBridge._degrees_to_radians_per_second(
+            (180.0, -90.0, 0.0)
+        )
+
+        self.assertAlmostEqual(converted[0], math.pi)
+        self.assertAlmostEqual(converted[1], -math.pi / 2.0)
+        self.assertEqual(converted[2], 0.0)
+
     def test_stem_break_force_uses_real_tomato_range_with_margin(self) -> None:
         self.assertEqual(IsaacPhysicsHarvestBridge.STEM_BREAK_FORCE_N, 7.5)
 

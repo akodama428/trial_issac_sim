@@ -37,6 +37,7 @@ class HarvestTaskPhase(StrEnum):
     DETACHING = "detaching"
     DETACHED = "detached"
     MOVING_TO_PLACE = "moving_to_place"
+    RELEASING = "releasing"
     PLACED = "placed"
     RETURNING_HOME = "returning_home"
     COMPLETE = "complete"
@@ -121,6 +122,7 @@ class SceneSnapshot:
     right_finger_contact: bool = False
     left_finger_force_n: float | None = None
     right_finger_force_n: float | None = None
+    gripper_commanded_closed: bool | None = None
 
 
 @dataclass(frozen=True)

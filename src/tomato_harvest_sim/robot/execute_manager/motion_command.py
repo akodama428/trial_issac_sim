@@ -39,6 +39,7 @@ PHASE_COMMAND_TABLE = {
     HarvestTaskPhase.GRASP_EVALUATION: PhaseCommandSpec("hold_grasp_eval", PhaseId.MOVING_TO_GRASP, MotionKind.HOLD, True, True, "grasp_pose", None),
     HarvestTaskPhase.DETACHING: PhaseCommandSpec("pull_to_detach", PhaseId.PULL_TO_DETACH, MotionKind.FOLLOW_TRAJECTORY, False, True, "pull_pose", "pull_joint_trajectory"),
     HarvestTaskPhase.MOVING_TO_PLACE: PhaseCommandSpec("move_to_place", PhaseId.MOVING_TO_PLACE, MotionKind.FOLLOW_TRAJECTORY, False, True, "place_pose", "place_joint_trajectory"),
+    HarvestTaskPhase.RELEASING: PhaseCommandSpec("release_in_tray", PhaseId.MOVING_TO_PLACE, MotionKind.HOLD, False, False, "place_pose", None),
     HarvestTaskPhase.PLACED: PhaseCommandSpec("hold_placed", PhaseId.MOVING_TO_PLACE, MotionKind.HOLD, False, False, "place_pose", None),
     HarvestTaskPhase.RETURNING_HOME: PhaseCommandSpec("move_home", PhaseId.RETURNING_HOME, MotionKind.FOLLOW_TRAJECTORY, False, False, None, "home_joint_trajectory"),
 }

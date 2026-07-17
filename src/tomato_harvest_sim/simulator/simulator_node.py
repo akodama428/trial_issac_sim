@@ -103,10 +103,10 @@ class SimulatorNode(Node):
             self._pending_control = None
 
         if self._pending_gripper_command is True:
-            self._scene_runtime.close_gripper()
+            self._scene_runtime.apply_gripper_command(True)
             self._pending_gripper_command = None
         elif self._pending_gripper_command is False:
-            self._scene_runtime.open_gripper()
+            self._scene_runtime.apply_gripper_command(False)
             self._pending_gripper_command = None
 
         snapshot = self._scene_runtime.snapshot()

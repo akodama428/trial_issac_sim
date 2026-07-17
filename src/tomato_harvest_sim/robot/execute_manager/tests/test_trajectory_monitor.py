@@ -87,6 +87,20 @@ class TestTrajectoryStatusPayload(unittest.TestCase):
         self.assertAlmostEqual(payload["limiting_joint_desired_rad"], -0.5)
         self.assertAlmostEqual(payload["limiting_joint_actual_rad"], -0.375)
 
+    def test_progress_scale_and_stall_are_forwarded_to_planner(self) -> None:
+        raw = json.dumps({
+            "status": "running",
+            "scale": 0.0,
+            "stall_elapsed_sec": 0.5,
+            "stalled": True,
+        })
+
+        payload = json.loads(trajectory_status_payload(raw))
+
+        self.assertEqual(payload["scale"], 0.0)
+        self.assertEqual(payload["stall_elapsed_sec"], 0.5)
+        self.assertIs(payload["stalled"], True)
+
     def test_unknown_fields_are_not_forwarded(self) -> None:
         """診断以外の未知fieldは下流契約へ流さない。"""
         raw = json.dumps({"status": "aborted", "unexpected": "x"})

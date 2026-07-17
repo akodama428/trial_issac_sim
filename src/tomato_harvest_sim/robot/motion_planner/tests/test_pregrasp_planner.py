@@ -14,3 +14,4 @@ def test_default_grasp_height_compensates_measured_finger_center_offset() -> Non
     )
 
     assert plan.grasp_pose.z == 0.588
+    assert plan.place_pose.z == 0.60

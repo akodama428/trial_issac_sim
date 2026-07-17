@@ -45,6 +45,14 @@ def test_servo_launch_is_the_only_execution_mode() -> None:
     assert 'package="moveit_servo"' in launch_source
 
 
+def test_move_group_uses_end_effector_collision_model() -> None:
+    launch_source = LAUNCH.read_text(encoding="utf-8")
+
+    assert "def _planning_collision_urdf" in launch_source
+    assert '{"robot_description": _planning_collision_urdf(urdf_content)}' in launch_source
+    assert 'ET.SubElement(collision, "origin", {"xyz": "0 0 -0.03"})' in launch_source
+
+
 def test_runner_starts_only_servo_execution_adapter() -> None:
     runner = (ROOT / "scripts/run_ros2_components.sh").read_text(encoding="utf-8")
 

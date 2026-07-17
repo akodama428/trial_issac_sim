@@ -42,11 +42,11 @@ class MovingToPlaceOutcomeTest(unittest.TestCase):
         self.place_pose = Pose3D(0.35, -0.35, 0.57, 180.0, 0.0, 0.0)
 
     def test_tool_within_tolerance_advances_to_placed(self) -> None:
-        """ツールが place_pose の許容距離内に入ったら PLACED へ進む。"""
+        """ツールが place_pose の許容距離内に入ったら RELEASING へ進む。"""
         tool = Pose3D(0.35, -0.34, 0.57, 180.0, 0.0, 0.0)  # 1cm 誤差
         self.assertIs(
             self.outcome(TomatoStatus.DETACHED, tool, self.place_pose),
-            HarvestTaskPhase.PLACED,
+            HarvestTaskPhase.RELEASING,
         )
 
     def test_tool_far_keeps_waiting(self) -> None:

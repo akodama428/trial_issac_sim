@@ -49,6 +49,18 @@ def test_friction_grasp_reports_lost_when_relative_displacement_exceeds_five_mm(
     assert decision is GraspDecision.LOST
 
 
+def test_friction_grasp_does_not_treat_rigid_hand_rotation_as_slip() -> None:
+    strategy = FrictionGraspStrategy(FrictionGraspConfig(1, 1.0, 1.0, 0.005))
+    hand = Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    tomato = Pose3D(0.1, 0.0, 0.0, 0.0, 0.0, 0.0)
+    assert strategy.observe(True, 2.0, 2.0, hand, tomato, 1 / 60) is GraspDecision.HELD
+
+    rotated_hand = Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 90.0)
+    rotated_tomato = Pose3D(0.0, 0.1, 0.0, 0.0, 0.0, 0.0)
+
+    assert strategy.observe(True, 2.0, 2.0, rotated_hand, rotated_tomato, 1 / 60) is GraspDecision.NONE
+
+
 def test_friction_grasp_reports_released_when_gripper_opens() -> None:
     strategy = FrictionGraspStrategy(FrictionGraspConfig(1, 1.0, 0.02, 0.005))
     assert strategy.observe(True, 2.0, 2.0, _pose(0.64), _pose(0.54), 1 / 60) is GraspDecision.HELD

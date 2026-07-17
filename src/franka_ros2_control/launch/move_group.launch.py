@@ -33,8 +33,8 @@ def _load_yaml(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def _safety_observation_urdf(kinematic_urdf: str) -> str:
-    """安全観測node専用の保守的なprimitive collision modelを付与する。"""
+def _collision_urdf(kinematic_urdf: str) -> str:
+    """Servo実行時監視用の保守的なprimitive collision modelを付与する。"""
     root = ET.fromstring(kinematic_urdf)
     sphere_radii = {
         "panda_link0": 0.09, "panda_link1": 0.075, "panda_link2": 0.075,
@@ -48,6 +48,32 @@ def _safety_observation_urdf(kinematic_urdf: str) -> str:
             geometry = ET.SubElement(ET.SubElement(link, "collision"), "geometry")
             ET.SubElement(geometry, "sphere", {"radius": str(radius)})
         elif link.attrib.get("name") in {"panda_leftfinger", "panda_rightfinger"}:
+            collision = ET.SubElement(link, "collision")
+            ET.SubElement(collision, "origin", {"xyz": "0 0 0.025"})
+            geometry = ET.SubElement(collision, "geometry")
+            ET.SubElement(geometry, "box", {"size": "0.018 0.018 0.05"})
+    return ET.tostring(root, encoding="unicode")
+
+
+def _planning_collision_urdf(kinematic_urdf: str) -> str:
+    """tray干渉検査に必要な手先linkだけへprimitive collisionを付与する。"""
+    root = ET.fromstring(kinematic_urdf)
+    # link8中心はgrasp時にstemへ重なるため、計画用モデルはtray干渉の主体である
+    # link7/hand/fingerへ限定する。Servo監視用モデルではlink8球を維持する。
+    sphere_radii = {"panda_link7": 0.055}
+    for link in root.findall("link"):
+        name = link.attrib.get("name", "")
+        if name in sphere_radii:
+            geometry = ET.SubElement(ET.SubElement(link, "collision"), "geometry")
+            ET.SubElement(geometry, "sphere", {"radius": str(sphere_radii[name])})
+        elif name == "panda_hand":
+            collision = ET.SubElement(link, "collision")
+            # panda_hand frameは掌上面にあり、bodyはfingerと反対側へ伸びる。
+            # 原点中心boxではgrasp時のstemを掌の偽形状で塞ぐため下側へ配置する。
+            ET.SubElement(collision, "origin", {"xyz": "0 0 -0.03"})
+            geometry = ET.SubElement(collision, "geometry")
+            ET.SubElement(geometry, "box", {"size": "0.08 0.08 0.06"})
+        elif name in {"panda_leftfinger", "panda_rightfinger"}:
             collision = ET.SubElement(link, "collision")
             ET.SubElement(collision, "origin", {"xyz": "0 0 0.025"})
             geometry = ET.SubElement(collision, "geometry")
@@ -71,7 +97,7 @@ def generate_launch_description() -> LaunchDescription:
         name="move_group",
         output="screen",
         parameters=[
-            {"robot_description": urdf_content},
+            {"robot_description": _planning_collision_urdf(urdf_content)},
             {"robot_description_semantic": srdf_content},
             {"robot_description_kinematics": kinematics},
             # Planning pipeline: OMPL
@@ -93,25 +119,9 @@ def generate_launch_description() -> LaunchDescription:
         ],
     )
 
-    safety_observation_node = Node(
-        package="franka_ros2_control",
-        executable="local_safety_observation_node",
-        name="local_safety_observation_node",
-        output="screen",
-        parameters=[
-            {"robot_description": _safety_observation_urdf(urdf_content)},
-            {"robot_description_semantic": srdf_content},
-            {"robot_description_kinematics": kinematics},
-            {"move_group_name": "panda_arm"},
-            {"tip_link_name": "panda_hand"},
-            {"publish_rate_hz": 20.0},
-            {"use_sim_time": False},
-        ],
-    )
-
     servo_common_parameters = [
             {"moveit_servo": servo},
-            {"robot_description": _safety_observation_urdf(urdf_content)},
+            {"robot_description": _collision_urdf(urdf_content)},
             {"robot_description_semantic": srdf_content},
             {"robot_description_kinematics": kinematics},
             {"use_sim_time": False},
@@ -125,6 +135,5 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription([
         move_group_node,
-        safety_observation_node,
         servo_node,
     ])
