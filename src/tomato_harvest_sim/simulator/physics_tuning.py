@@ -81,6 +81,9 @@ def apply_physics_tuning(
     if _apply_tomato_angular_damping(stage, tomato_prim_path, config):
         applied.append(f"tomato angular damping: {config.tomato_angular_damping}")
 
+    if _apply_tomato_sleep_disable(stage, tomato_prim_path, config):
+        applied.append("tomato sleep disabled")
+
     for finger_path in finger_link_prim_paths:
         if _apply_tomato_solver_iterations(stage, finger_path, config):
             applied.append(
@@ -249,4 +252,27 @@ def _apply_tomato_angular_damping(
         return False
     rigid_body_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
     rigid_body_api.CreateAngularDampingAttr().Set(config.tomato_angular_damping)
+    return True
+
+
+def _apply_tomato_sleep_disable(
+    stage: object, tomato_prim_path: str, config: PhysicsTuningConfig
+) -> bool:
+    """トマト剛体のPhysX sleepを無効化する。
+
+    微小球はsleep閾値へすぐ達し、sleep中は`physics:angularVelocity`等の
+    velocity属性が眠る直前の値で凍結する。settling判定はこの凍結した読み値
+    (閾値0.5rad/sをわずかに超えた値で固定) を評価し続けてtimeoutするため、
+    sleepThreshold=0でsleepを無効化して実速度を観測可能にする
+    (step3-9レポート §13.2で予見した「角速度readout stale」の正体)。
+    """
+    if not config.tomato_disable_sleep:
+        return False
+    from pxr import PhysxSchema
+
+    prim = stage.GetPrimAtPath(tomato_prim_path)
+    if not prim.IsValid():
+        return False
+    rigid_body_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
+    rigid_body_api.CreateSleepThresholdAttr().Set(0.0)
     return True

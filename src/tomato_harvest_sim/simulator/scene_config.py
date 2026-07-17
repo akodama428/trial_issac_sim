@@ -120,6 +120,9 @@ class PhysicsTuningConfig:
     # release後の残留回転を減衰させる剛体角速度ダンピング（0 は「適用しない」）。
     # 背景: docs/reports/physics_levelup/step3-9_ci_release_flakiness_root_cause_analysis.md §12.4.2
     tomato_angular_damping: float
+    # 微小球はsleep閾値へすぐ達し、sleep中はphysics:*Velocity属性が凍結して
+    # settling判定が「凍結した読み値 > 閾値」のままtimeoutする。Trueでsleepを無効化する。
+    tomato_disable_sleep: bool
     # Step 2: finger drive の力制限。max_force_n=0 は「drive へ適用しない」を意味する。
     finger_drive_stiffness: float
     finger_drive_damping: float
@@ -148,6 +151,7 @@ _DISABLED_TUNING = PhysicsTuningConfig(
     tomato_solver_position_iterations=0,
     tomato_solver_velocity_iterations=0,
     tomato_angular_damping=0.0,
+    tomato_disable_sleep=False,
     finger_drive_stiffness=0.0,
     finger_drive_damping=0.0,
     finger_drive_max_force_n=0.0,
@@ -212,6 +216,7 @@ def physics_tuning_from_payload(payload: dict[str, object]) -> PhysicsTuningConf
         tomato_solver_position_iterations=int(solver["position_iterations"]),
         tomato_solver_velocity_iterations=int(solver["velocity_iterations"]),
         tomato_angular_damping=float(solver.get("angular_damping", 0.0)),
+        tomato_disable_sleep=bool(solver.get("disable_sleep", False)),
         finger_drive_stiffness=float(finger_drive.get("stiffness", 0.0)),
         finger_drive_damping=float(finger_drive.get("damping", 0.0)),
         finger_drive_max_force_n=float(finger_drive.get("max_force_n", 0.0)),

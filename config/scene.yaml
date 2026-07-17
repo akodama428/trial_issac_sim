@@ -117,6 +117,7 @@ physics:
     position_iterations: 32         # 単一ロボットのcontact-rich把持精度を増強
     velocity_iterations: 4
     angular_damping: 2.0            # release後の残留回転を減衰（step3-9 §12.4.2の角速度timeout対策）
+    disable_sleep: true             # sleep中はvelocity属性が凍結しsettling判定が通らない（step3-11 §5）
   finger_drive:                     # Step 2: 位置目標はそのまま、押付け力だけを制限
     stiffness: 3000.0               # USD 既定 400 では 2cm 偏差で 8N しか出ず飽和が見えないため増強
     damping: 120.0
