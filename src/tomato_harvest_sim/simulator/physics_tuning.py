@@ -78,6 +78,9 @@ def apply_physics_tuning(
             f"vel={config.tomato_solver_velocity_iterations}"
         )
 
+    if _apply_tomato_angular_damping(stage, tomato_prim_path, config):
+        applied.append(f"tomato angular damping: {config.tomato_angular_damping}")
+
     for finger_path in finger_link_prim_paths:
         if _apply_tomato_solver_iterations(stage, finger_path, config):
             applied.append(
@@ -224,4 +227,26 @@ def _apply_tomato_solver_iterations(
     rigid_body_api.CreateSolverVelocityIterationCountAttr().Set(
         config.tomato_solver_velocity_iterations
     )
+    return True
+
+
+def _apply_tomato_angular_damping(
+    stage: object, tomato_prim_path: str, config: PhysicsTuningConfig
+) -> bool:
+    """release後にtray内で残留回転し続ける現象を抑えるため角速度減衰を設定する。
+
+    settling判定（PlacementEvaluator）は接触impulseの有無に関わらず角速度そのものを
+    毎stepチェックするため、接触ベースのねじり摩擦（torsional patch）が入力されない
+    瞬間があっても効く剛体レベルのdampingを採用する
+    （docs/reports/physics_levelup/step3-9_ci_release_flakiness_root_cause_analysis.md §12.4.2）。
+    """
+    if config.tomato_angular_damping <= 0.0:
+        return False
+    from pxr import PhysxSchema
+
+    prim = stage.GetPrimAtPath(tomato_prim_path)
+    if not prim.IsValid():
+        return False
+    rigid_body_api = PhysxSchema.PhysxRigidBodyAPI.Apply(prim)
+    rigid_body_api.CreateAngularDampingAttr().Set(config.tomato_angular_damping)
     return True
