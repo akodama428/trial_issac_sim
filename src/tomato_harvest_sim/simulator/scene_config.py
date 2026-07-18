@@ -72,7 +72,6 @@ class ContainmentConfig:
 @dataclass(frozen=True)
 class SettlingConfig:
     max_linear_speed_m_s: float
-    max_angular_speed_rad_s: float
     required_consecutive_steps: int
     release_timeout_sec: float
     settle_timeout_sec: float
@@ -303,7 +302,6 @@ def placement_config_from_payload(payload: dict[str, object]) -> PlacementConfig
         ),
         settling=SettlingConfig(
             max_linear_speed_m_s=float(settling["max_linear_speed_m_s"]),
-            max_angular_speed_rad_s=float(settling["max_angular_speed_rad_s"]),
             required_consecutive_steps=int(settling["required_consecutive_steps"]),
             release_timeout_sec=float(settling["release_timeout_sec"]),
             settle_timeout_sec=float(settling["settle_timeout_sec"]),
@@ -327,7 +325,6 @@ def _validate_placement_config(config: PlacementConfig) -> None:
         config.gripper_open.measured_closed_gap_threshold_m,
         config.gripper_open.timeout_sec,
         config.settling.max_linear_speed_m_s,
-        config.settling.max_angular_speed_rad_s,
         config.settling.release_timeout_sec,
         config.settling.settle_timeout_sec,
     )

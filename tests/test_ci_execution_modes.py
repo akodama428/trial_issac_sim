@@ -56,3 +56,19 @@ def test_ci_e2e_defaults_to_physics_grasp_mode() -> None:
 
     assert 'CI_GRASP_MODE="${CI_GRASP_MODE:-physics}"' in launcher_source
     assert '--grasp-mode "${CI_GRASP_MODE:-physics}"' in container_source
+
+
+def test_optional_e2e_rosbag_starts_before_robot_stack() -> None:
+    launcher_source = RUN_E2E.read_text(encoding="utf-8")
+    container_source = IN_CONTAINER_E2E.read_text(encoding="utf-8")
+
+    assert 'CI_RECORD_HOME_DIVERGENCE_BAG="${CI_RECORD_HOME_DIVERGENCE_BAG:-}"' in (
+        launcher_source
+    )
+    record_index = container_source.index("ros2 bag record")
+    stack_index = container_source.index("./scripts/run_ros2_components.sh")
+    assert record_index < stack_index
+    assert "/tomato_harvest/phase" in container_source
+    assert "/joint_trajectory_controller/joint_trajectory" in container_source
+    assert "/joint_trajectory_controller/controller_state" in container_source
+    assert 'kill -TERM "${BAG_PID}"' in container_source

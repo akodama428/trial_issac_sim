@@ -84,7 +84,6 @@ placement:
     escape_margin_m: 0.03
   settling:
     max_linear_speed_m_s: 0.03
-    max_angular_speed_rad_s: 0.5
     required_consecutive_steps: 12
     release_timeout_sec: 1.5
     settle_timeout_sec: 3.0

@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
 from tomato_harvest_sim.msg.contracts import (
@@ -43,6 +45,29 @@ PHASE_COMMAND_TABLE = {
     HarvestTaskPhase.PLACED: PhaseCommandSpec("hold_placed", PhaseId.MOVING_TO_PLACE, MotionKind.HOLD, False, False, "place_pose", None),
     HarvestTaskPhase.RETURNING_HOME: PhaseCommandSpec("move_home", PhaseId.RETURNING_HOME, MotionKind.FOLLOW_TRAJECTORY, False, False, None, "home_joint_trajectory"),
 }
+
+# Issue #59 A/B実験: 静止物体把持でTF直接追従(Servo pose tracking)が本当に必要かを
+# 検証するため、grasp系phaseのterminal_pose_trackingをdirect JTC実行へ切り替える対象。
+GRASP_SERVO_PHASES = frozenset({
+    HarvestTaskPhase.MOVING_TO_GRASP,
+    HarvestTaskPhase.AT_GRASP,
+    HarvestTaskPhase.GRASP_EVALUATION,
+})
+
+GRASP_DIRECT_JTC_ENV = "TOMATO_HARVEST_GRASP_DIRECT_JTC"
+
+
+def grasp_direct_jtc_enabled(environ: Mapping[str, str] | None = None) -> bool:
+    """grasp系phaseをdirect JTC実行へ切り替えるA/B実験フラグを環境変数から読む。
+
+    Args:
+        environ: 参照する環境変数マップ。Noneならos.environ。
+
+    Returns:
+        `TOMATO_HARVEST_GRASP_DIRECT_JTC` が "1"/"true"/"yes" のときTrue。
+    """
+    source = os.environ if environ is None else environ
+    return source.get(GRASP_DIRECT_JTC_ENV, "").strip().lower() in {"1", "true", "yes"}
 
 
 def _arm_only_trajectory(trajectory: JointTrajectory) -> JointTrajectory:
@@ -111,24 +136,39 @@ def build_motion_command(
     phase: HarvestTaskPhase,
     plan: HarvestMotionPlan,
     current_joints: JointStateSnapshot,
+    *,
+    grasp_direct_jtc: bool = False,
 ) -> MotionCommand:
     """フェーズ・計画・現在関節状態から MotionCommand を生成する。
 
     アーキテクチャ仕様のフェーズ別出力仕様に従い、joint_trajectory と
     gripper_closed を決定する。joint_trajectory は常に非 null。
+
+    Args:
+        phase: 現在のharvestフェーズ。
+        plan: 採択済みのmotion plan。
+        current_joints: 現在の関節状態。
+        grasp_direct_jtc: Trueならgrasp系phaseのpose trackingを無効化し
+            direct JTC実行へ切り替える (Issue #59 A/B実験のB条件)。
     """
-    return _arm_only_command(_build_phase_motion_command(phase, plan, current_joints))
+    return _arm_only_command(_build_phase_motion_command(
+        phase, plan, current_joints, grasp_direct_jtc=grasp_direct_jtc,
+    ))
 
 
 def _build_phase_motion_command(
     phase: HarvestTaskPhase,
     plan: HarvestMotionPlan,
     current_joints: JointStateSnapshot,
+    *,
+    grasp_direct_jtc: bool = False,
 ) -> MotionCommand:
     """宣言テーブルの実行意図からcommandを組み立てる。"""
     spec = PHASE_COMMAND_TABLE.get(phase)
     if spec is None:
         raise ValueError(f"build_motion_command: unsupported phase {phase!r}")
+    if grasp_direct_jtc and phase in GRASP_SERVO_PHASES:
+        spec = replace(spec, terminal_pose_tracking=False)
     if phase is HarvestTaskPhase.RETURNING_HOME:
         # abort復旧 (suffix replan) が刻んだ衝突考慮済みのhome区間trajectoryが
         # あれば優先する (Issue #32)。無ければ従来どおりhome定数への直行軌道を使う。
@@ -246,6 +286,10 @@ def main() -> None:
             self._phase: HarvestTaskPhase | None = None
             self._plan: HarvestMotionPlan | None = None
             self._joint_state: JointStateSnapshot | None = None
+            self._grasp_direct_jtc = grasp_direct_jtc_enabled()
+            self.get_logger().info(metric_line(
+                "grasp_direct_jtc_flag", enabled=self._grasp_direct_jtc,
+            ))
 
             self.create_subscription(String, PHASE_TOPIC, self._on_phase, 10)
             self.create_subscription(String, HARVEST_MOTION_PLAN_TOPIC, self._on_plan, 10)
@@ -302,7 +346,10 @@ def main() -> None:
             if self._phase is None or self._plan is None or self._joint_state is None:
                 return
             try:
-                cmd = build_motion_command(self._phase, self._plan, self._joint_state)
+                cmd = build_motion_command(
+                    self._phase, self._plan, self._joint_state,
+                    grasp_direct_jtc=self._grasp_direct_jtc,
+                )
             except ValueError:
                 return
             out = String()

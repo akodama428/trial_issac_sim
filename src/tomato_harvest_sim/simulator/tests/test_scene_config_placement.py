@@ -50,7 +50,6 @@ def test_invalid_tomato_and_tray_geometry_is_rejected() -> None:
             "containment": {"boundary_margin_m": 0.005, "escape_margin_m": 0.03},
             "settling": {
                 "max_linear_speed_m_s": 0.03,
-                "max_angular_speed_rad_s": 0.5,
                 "required_consecutive_steps": 3,
                 "release_timeout_sec": 1.5,
                 "settle_timeout_sec": 3.0,
