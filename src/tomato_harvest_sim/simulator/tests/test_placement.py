@@ -32,7 +32,6 @@ def _config():
             "containment": {"boundary_margin_m": 0.005, "escape_margin_m": 0.03},
             "settling": {
                 "max_linear_speed_m_s": 0.03,
-                "max_angular_speed_rad_s": 0.5,
                 "required_consecutive_steps": 3,
                 "release_timeout_sec": 1.5,
                 "settle_timeout_sec": 3.0,
@@ -45,12 +44,13 @@ def _observation(
     *,
     pose: Pose3D = Pose3D(0.35, -0.35, 0.466, 0.0, 0.0, 0.0),
     speed: float = 0.01,
+    angular_speed: float = 0.0,
     contact: bool = True,
 ) -> PlacementObservation:
     return PlacementObservation(
         tomato_pose=pose,
         linear_speed_m_s=speed,
-        angular_speed_rad_s=0.0,
+        angular_speed_rad_s=angular_speed,
         tomato_tray_contact=contact,
         dt_sec=1.0 / 120.0,
     )
@@ -124,6 +124,29 @@ def test_contact_evidence_is_latched_when_physx_stops_streaming_resting_contacts
     assert evaluator.observe(_observation()).decision is PlacementDecision.PENDING
     assert evaluator.observe(_observation(contact=False)).decision is PlacementDecision.PENDING
     assert evaluator.observe(_observation(contact=False)).decision is PlacementDecision.PLACED
+
+
+def test_settle_ignores_residual_tomato_spin() -> None:
+    """トレイ内で位置静止した球の残留スピンは設置成否と無関係なので待たない。"""
+    evaluator = PlacementEvaluator(
+        PlacementGeometry(
+            tray_pose=Pose3D(0.35, -0.35, 0.45, 0.0, 0.0, 0.0),
+            config=_config(),
+        ),
+        _config().settling,
+    )
+    evaluator.release_started()
+
+    assert evaluator.observe(
+        _observation(angular_speed=2.4)
+    ).decision is PlacementDecision.PENDING
+    assert evaluator.observe(
+        _observation(angular_speed=2.4)
+    ).decision is PlacementDecision.PENDING
+    result = evaluator.observe(_observation(angular_speed=2.4))
+
+    assert result.decision is PlacementDecision.PLACED
+    assert result.reason == "settled_in_tray"
 
 
 def test_high_speed_resets_settle_counter() -> None:

@@ -119,11 +119,12 @@ class PlacementEvaluator:
         if observation.tomato_tray_contact:
             self._contact_seen = True
 
+        # 球体トマトの残留スピンは設置成否と無関係で、待つとstep予算を浪費する
+        # (issue #59 step3-12 §4.3)。静定は位置速度と接触・包含のみで判定する。
         stable = (
             self._contact_seen
             and containment.contained
             and observation.linear_speed_m_s <= self._config.max_linear_speed_m_s
-            and observation.angular_speed_rad_s <= self._config.max_angular_speed_rad_s
         )
         self._settle_steps = self._settle_steps + 1 if stable else 0
         if self._settle_steps >= self._config.required_consecutive_steps:

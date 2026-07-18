@@ -16,11 +16,13 @@ def build_motion_command(
     phase: "HarvestTaskPhase",
     plan: "HarvestMotionPlan",
     current_joints: "JointStateSnapshot",
+    *,
+    grasp_direct_jtc: bool = False,
 ) -> "MotionCommand":
     from tomato_harvest_sim.robot.execute_manager.motion_command import (
         build_motion_command as impl,
     )
-    return impl(phase, plan, current_joints)
+    return impl(phase, plan, current_joints, grasp_direct_jtc=grasp_direct_jtc)
 
 
 def main_motion_command() -> None:

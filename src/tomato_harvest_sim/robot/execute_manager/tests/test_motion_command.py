@@ -107,6 +107,51 @@ class TestMotionCommandLogic(unittest.TestCase):
         cmd = self.build(HarvestTaskPhase.RETURNING_HOME, _make_plan(), _make_joint_state())
         self.assertFalse(cmd.gripper_closed)
 
+    def test_grasp_phases_use_pose_tracking_by_default(self) -> None:
+        for phase in (
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.AT_GRASP,
+            HarvestTaskPhase.GRASP_EVALUATION,
+        ):
+            cmd = self.build(phase, _make_plan(), _make_joint_state())
+            self.assertTrue(cmd.terminal_pose_tracking, phase)
+
+    def test_grasp_direct_jtc_disables_pose_tracking_for_grasp_phases(self) -> None:
+        for phase in (
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.AT_GRASP,
+            HarvestTaskPhase.GRASP_EVALUATION,
+        ):
+            cmd = self.build(
+                phase, _make_plan(), _make_joint_state(), grasp_direct_jtc=True,
+            )
+            self.assertFalse(cmd.terminal_pose_tracking, phase)
+
+    def test_grasp_direct_jtc_keeps_other_phases_unchanged(self) -> None:
+        for phase in (
+            HarvestTaskPhase.MOVING_TO_PREGRASP,
+            HarvestTaskPhase.DETACHING,
+            HarvestTaskPhase.MOVING_TO_PLACE,
+            HarvestTaskPhase.RELEASING,
+            HarvestTaskPhase.RETURNING_HOME,
+        ):
+            baseline = self.build(phase, _make_plan(), _make_joint_state())
+            cmd = self.build(
+                phase, _make_plan(), _make_joint_state(), grasp_direct_jtc=True,
+            )
+            self.assertEqual(
+                cmd.terminal_pose_tracking, baseline.terminal_pose_tracking, phase,
+            )
+
+    def test_grasp_direct_jtc_enabled_reads_environment_flag(self) -> None:
+        from tomato_harvest_sim.robot.execute_manager.motion_command import (
+            grasp_direct_jtc_enabled,
+        )
+        self.assertFalse(grasp_direct_jtc_enabled({}))
+        self.assertFalse(grasp_direct_jtc_enabled({"TOMATO_HARVEST_GRASP_DIRECT_JTC": ""}))
+        self.assertFalse(grasp_direct_jtc_enabled({"TOMATO_HARVEST_GRASP_DIRECT_JTC": "0"}))
+        self.assertTrue(grasp_direct_jtc_enabled({"TOMATO_HARVEST_GRASP_DIRECT_JTC": "1"}))
+
     def test_returning_home_start_point_excludes_finger_positions(self) -> None:
         cmd = self.build(
             HarvestTaskPhase.RETURNING_HOME,
