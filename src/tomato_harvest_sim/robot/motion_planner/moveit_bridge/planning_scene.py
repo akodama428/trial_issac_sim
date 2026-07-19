@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 
 from tomato_harvest_sim.msg.contracts import Pose3D, SceneSnapshot
@@ -11,6 +12,7 @@ from tomato_harvest_sim.robot.motion_planner.moveit_bridge.geometry import (
 )
 
 _PANDA_FINGER_LINKS = ("panda_leftfinger", "panda_rightfinger")
+_GRASP_CONTACT_OBJECT_IDS = ("target_tomato", "tomato_stem")
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,95 @@ def attached_tomato_touch_links(
     MoveItのstart-state collisionとして扱わないようにする。
     """
     return tuple(dict.fromkeys((end_effector_link, *_PANDA_FINGER_LINKS)))
+
+
+def grasp_target_collision_pairs(
+    end_effector_link: str,
+) -> tuple[tuple[str, str], ...]:
+    """GRASP到達時だけ許可するgripperと収穫対象の接触ペアを返す。
+
+    Args:
+        end_effector_link: MoveItで使用するhand link名。
+
+    Returns:
+        hand・左右fingerとtomato・stemの直積となる接触ペア。
+    """
+    gripper_links = attached_tomato_touch_links(end_effector_link)
+    return tuple(
+        (link_name, object_id)
+        for link_name in gripper_links
+        for object_id in _GRASP_CONTACT_OBJECT_IDS
+    )
+
+
+def expand_allowed_collision_matrix(
+    *,
+    entry_names: tuple[str, ...],
+    enabled_rows: tuple[tuple[bool, ...], ...],
+    allowed_pairs: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, ...], tuple[tuple[bool, ...], ...]]:
+    """既存ACMを維持しながら、指定した衝突ペアだけを許可する。
+
+    Args:
+        entry_names: 既存AllowedCollisionMatrixの名前順。
+        enabled_rows: `entry_names`と同順の正方対称行列。
+        allowed_pairs: 新たに許可する名前ペア。
+
+    Returns:
+        必要な名前を追加し、指定ペアを対称にTrueとした新しい行列。
+
+    Raises:
+        ValueError: 入力行列が正方行列でない場合。
+    """
+    size = len(entry_names)
+    if len(enabled_rows) != size or any(
+        len(row) != size for row in enabled_rows
+    ):
+        raise ValueError("AllowedCollisionMatrix must be square")
+
+    names = list(entry_names)
+    rows = [list(row) for row in enabled_rows]
+    for first, second in allowed_pairs:
+        for name in (first, second):
+            if name in names:
+                continue
+            names.append(name)
+            for row in rows:
+                row.append(False)
+            rows.append([False] * len(names))
+
+        first_index = names.index(first)
+        second_index = names.index(second)
+        rows[first_index][second_index] = True
+        rows[second_index][first_index] = True
+
+    return tuple(names), tuple(tuple(row) for row in rows)
+
+
+def _allowed_collision_matrix_with_grasp_contacts(
+    base_matrix: object,
+    *,
+    end_effector_link: str,
+) -> object:
+    """MoveIt messageの既存ACMへGRASP接触ペアを追加したコピーを返す。"""
+    from moveit_msgs.msg import AllowedCollisionEntry
+
+    matrix = deepcopy(base_matrix)
+    names, rows = expand_allowed_collision_matrix(
+        entry_names=tuple(str(name) for name in matrix.entry_names),
+        enabled_rows=tuple(
+            tuple(bool(value) for value in entry.enabled)
+            for entry in matrix.entry_values
+        ),
+        allowed_pairs=grasp_target_collision_pairs(end_effector_link),
+    )
+    matrix.entry_names = list(names)
+    matrix.entry_values = []
+    for row in rows:
+        entry = AllowedCollisionEntry()
+        entry.enabled = list(row)
+        matrix.entry_values.append(entry)
+    return matrix
 
 
 def tomato_planning_scene_ops(
@@ -81,6 +172,8 @@ class PlanningSceneManager:
     def __init__(self, config: MoveItPlannerConfig) -> None:
         self._config = config
         self._has_attached_tomato = False
+        self._grasp_contact_allowed = False
+        self._base_allowed_collision_matrix: object | None = None
 
     def apply(
         self,
@@ -89,11 +182,22 @@ class PlanningSceneManager:
         scene_snapshot: SceneSnapshot,
         base_frame_id: str,
         attach_tomato: bool,
+        allow_gripper_target_contact: bool,
     ) -> bool:
+        allowed_collision_matrix = self._collision_matrix_update(
+            clients=clients,
+            allow_gripper_target_contact=allow_gripper_target_contact,
+        )
+        if (
+            allow_gripper_target_contact != self._grasp_contact_allowed
+            and allowed_collision_matrix is None
+        ):
+            return False
         request = build_planning_scene_request(
             config=self._config,
             scene_snapshot=scene_snapshot,
             base_frame_id=base_frame_id,
+            allowed_collision_matrix=allowed_collision_matrix,
             tomato_ops=tomato_planning_scene_ops(
                 attach_tomato=attach_tomato,
                 planning_scene_has_attached_tomato=self._has_attached_tomato,
@@ -104,7 +208,32 @@ class PlanningSceneManager:
         ):
             return False
         self._has_attached_tomato = attach_tomato
+        self._grasp_contact_allowed = allow_gripper_target_contact
         return True
+
+    def _collision_matrix_update(
+        self,
+        *,
+        clients: object,
+        allow_gripper_target_contact: bool,
+    ) -> object | None:
+        """GRASP接触許可の状態が変わる場合だけ、差し替え用ACMを返す。"""
+        if allow_gripper_target_contact == self._grasp_contact_allowed:
+            return None
+        if self._base_allowed_collision_matrix is None:
+            self._base_allowed_collision_matrix = (
+                clients.get_allowed_collision_matrix(
+                    timeout_sec=self._config.planning_timeout_sec
+                )
+            )
+        if self._base_allowed_collision_matrix is None:
+            return None
+        if not allow_gripper_target_contact:
+            return deepcopy(self._base_allowed_collision_matrix)
+        return _allowed_collision_matrix_with_grasp_contacts(
+            self._base_allowed_collision_matrix,
+            end_effector_link=self._config.end_effector_link,
+        )
 
 
 def build_planning_scene_request(
@@ -113,6 +242,7 @@ def build_planning_scene_request(
     scene_snapshot: SceneSnapshot,
     base_frame_id: str,
     tomato_ops: TomatoPlanningSceneOps,
+    allowed_collision_matrix: object | None = None,
 ) -> object:
     from moveit_msgs.msg import (
         AttachedCollisionObject,
@@ -124,6 +254,8 @@ def build_planning_scene_request(
 
     scene = PlanningScene()
     scene.is_diff = True
+    if allowed_collision_matrix is not None:
+        scene.allowed_collision_matrix = allowed_collision_matrix
     scene.robot_state = RobotState()
     scene.robot_state.is_diff = True
     scene.world.collision_objects = [

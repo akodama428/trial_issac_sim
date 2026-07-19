@@ -84,6 +84,7 @@ class MoveItGoalPlanner:
         scene_snapshot: SceneSnapshot,
         planning_targets: tuple[PlanningTarget, ...],
         attach_tomato: bool,
+        allow_gripper_target_contact: bool = False,
         phase_label: str = "",
         fallback_joint_goal: JointStateSnapshot | None = None,
     ) -> JointTrajectory | None:
@@ -95,6 +96,7 @@ class MoveItGoalPlanner:
             scene_snapshot=scene_snapshot,
             base_frame_id=base_frame_id,
             attach_tomato=attach_tomato,
+            allow_gripper_target_contact=allow_gripper_target_contact,
         ):
             return None
         current = joint_state
@@ -382,12 +384,14 @@ class MoveItGoalPlanner:
         scene_snapshot: SceneSnapshot,
         base_frame_id: str,
         attach_tomato: bool,
+        allow_gripper_target_contact: bool,
     ) -> bool:
         return self._scene_manager.apply(
             clients=clients,
             scene_snapshot=scene_snapshot,
             base_frame_id=base_frame_id,
             attach_tomato=attach_tomato,
+            allow_gripper_target_contact=allow_gripper_target_contact,
         )
 
     def _plan_joint_goal(

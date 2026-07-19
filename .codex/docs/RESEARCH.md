@@ -10,6 +10,35 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Phase開始時計画のGRASP停止回復（2026-07-20）
+
+### 確認済みの事実
+
+- GUI再現ログでは`MOVING_TO_GRASP`進入時のMoveIt計画が3回ともerror code
+  99999で失敗し、その後は同phaseに留まったまま再計画されなかった。
+- move_groupは`Unable to sample any valid states for goal tree`を記録している。
+  grasp goalでは左右fingerがworld側の`target_tomato`および簡略化したstem形状へ
+  到達するが、現行PlanningSceneはこの意図的な接触を許可していない。
+- MoveIt公式Planning Scene資料では、Allowed Collision Matrix (ACM)はrobot部位と
+  world objectを含む指定ペアの衝突をcollision worldから無視させる機構である。
+- MoveIt公式Planning Scene ROS APIのPanda例でも、把持物をattachする際は
+  `panda_hand`と左右fingerを`touch_links`として指定している。
+
+### 設計への反映（推論）
+
+- world tomatoへの接触を全phaseで許可せず、`MOVING_TO_GRASP`計画時だけ
+  gripper linkとtarget tomato・stemのACMペアを許可する。
+- OMPLの確率的計画が一度のphase-entry試行群で全失敗しても永久停止しないよう、
+  phaseに対応するtrajectoryが未生成の間だけ、間隔を空けて最新joint stateから
+  phase計画を再試行する。trajectory採用後、またはphase遷移後は旧phaseの再試行を止める。
+
+### 一次情報
+
+- MoveIt Planning Scene / Allowed Collision Matrix:
+  https://moveit.picknik.ai/main/doc/examples/planning_scene/planning_scene_tutorial.html
+- MoveIt Planning Scene ROS API / attached object touch links:
+  https://moveit.picknik.ai/humble/doc/examples/planning_scene_ros_api/planning_scene_ros_api_tutorial.html
+
 ## Step 3-14 RETURNING_HOMEのtray回避（2026-07-19）
 
 ### 確認済みの事実

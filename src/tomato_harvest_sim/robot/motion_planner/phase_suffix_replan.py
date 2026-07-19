@@ -105,6 +105,66 @@ class PhasePlanUpdateDecision:
     max_trajectory_delta_rad: float | None = None
 
 
+@dataclass(frozen=True)
+class PhasePlanRetryMemory:
+    """直近のphase計画試行と、次に再試行できる時刻を保持する。"""
+
+    phase: HarvestTaskPhase | None = None
+    retry_after_sec: float = 0.0
+
+
+def memory_after_phase_plan_attempt(
+    *,
+    phase: HarvestTaskPhase,
+    now_sec: float,
+    retry_interval_sec: float,
+) -> PhasePlanRetryMemory:
+    """phase計画試行後の再試行時刻を記録する。
+
+    Args:
+        phase: 試行した移動phase。
+        now_sec: 試行完了時のmonotonic時刻。
+        retry_interval_sec: 次回試行までの最小間隔。
+
+    Returns:
+        更新後の再試行memory。
+    """
+    return PhasePlanRetryMemory(
+        phase=phase,
+        retry_after_sec=now_sec + max(0.0, retry_interval_sec),
+    )
+
+
+def should_retry_missing_phase_plan(
+    *,
+    phase: HarvestTaskPhase | None,
+    plan: HarvestMotionPlan | None,
+    memory: PhasePlanRetryMemory,
+    now_sec: float,
+) -> bool:
+    """現在phaseの実行軌道が欠落している場合だけ再計画を許可する。
+
+    Args:
+        phase: 現在のtask phase。
+        plan: 最新のpose/trajectory plan。
+        memory: 直近のphase計画試行記録。
+        now_sec: 判定時のmonotonic時刻。
+
+    Returns:
+        最新状態からphase計画を再試行すべき場合はTrue。
+    """
+    if phase not in PHASE_ENTRY_PLANNING_PHASES or plan is None:
+        return False
+    if (
+        plan.planned_from_phase is phase
+        and phase_trajectory(plan, phase) is not None
+    ):
+        return False
+    if memory.phase is not phase:
+        return True
+    return now_sec >= memory.retry_after_sec
+
+
 class PhasePlanningGate:
     """planner実行中の二重起動をthread-safeに抑止する。"""
 

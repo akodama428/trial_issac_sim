@@ -38,6 +38,7 @@ class Ros2MoveIt2Clients:
         from moveit_msgs.srv import (
             ApplyPlanningScene,
             GetMotionPlan,
+            GetPlanningScene,
             GetPositionIK,
             GetStateValidity,
         )
@@ -52,6 +53,9 @@ class Ros2MoveIt2Clients:
         )
         self._planning_scene_client = self._node.create_client(
             ApplyPlanningScene, planning_scene_service_name
+        )
+        self._get_planning_scene_client = self._node.create_client(
+            GetPlanningScene, "/get_planning_scene"
         )
         self._state_validity_client = self._node.create_client(
             GetStateValidity, state_validity_service_name
@@ -72,11 +76,40 @@ class Ros2MoveIt2Clients:
             timeout_sec=timeout_sec
         ):
             return False
+        if not self._planning_scene_client.wait_for_service(
+            timeout_sec=timeout_sec
+        ):
+            return False
         return bool(
-            self._planning_scene_client.wait_for_service(
+            self._get_planning_scene_client.wait_for_service(
                 timeout_sec=timeout_sec
             )
         )
+
+    def get_allowed_collision_matrix(
+        self, *, timeout_sec: float
+    ) -> object | None:
+        """現在のPlanningSceneから既存ACMを取得する。
+
+        Args:
+            timeout_sec: service応答待ちの上限秒。
+
+        Returns:
+            現在のAllowedCollisionMatrix。timeoutまたは空応答時はNone。
+        """
+        from moveit_msgs.msg import PlanningSceneComponents
+        from moveit_msgs.srv import GetPlanningScene
+
+        request = GetPlanningScene.Request()
+        request.components.components = (
+            PlanningSceneComponents.ALLOWED_COLLISION_MATRIX
+        )
+        future = self._get_planning_scene_client.call_async(request)
+        self._spin_until_done(future, timeout_sec)
+        response = future.result() if future.done() else None
+        if response is None:
+            return None
+        return response.scene.allowed_collision_matrix
 
     def apply_planning_scene(
         self, request: object, *, timeout_sec: float

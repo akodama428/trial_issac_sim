@@ -20,6 +20,7 @@ class PhasePlanningSpec:
     phase: HarvestTaskPhase
     target_sequences: tuple[tuple[PlanningTarget, ...], ...]
     attach_tomato: bool
+    allow_gripper_target_contact: bool
     failure_reason: str
     joint_fallback_success_reason: str | None = None
 
@@ -48,24 +49,28 @@ def phase_planning_specs(
             phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
             target_sequences=pregrasp_sequences,
             attach_tomato=False,
+            allow_gripper_target_contact=False,
             failure_reason="pregrasp_plan_failed",
         ),
         PhasePlanningSpec(
             phase=HarvestTaskPhase.MOVING_TO_GRASP,
             target_sequences=((plan.grasp_pose,),),
             attach_tomato=False,
+            allow_gripper_target_contact=True,
             failure_reason="grasp_plan_failed",
         ),
         PhasePlanningSpec(
             phase=HarvestTaskPhase.DETACHING,
             target_sequences=((plan.pull_pose,),),
             attach_tomato=True,
+            allow_gripper_target_contact=False,
             failure_reason="pull_plan_failed",
         ),
         PhasePlanningSpec(
             phase=HarvestTaskPhase.MOVING_TO_PLACE,
             target_sequences=(place_targets,),
             attach_tomato=True,
+            allow_gripper_target_contact=False,
             failure_reason="place_plan_failed",
             joint_fallback_success_reason="joint_goal_fallback",
         ),
@@ -73,6 +78,7 @@ def phase_planning_specs(
             phase=HarvestTaskPhase.RETURNING_HOME,
             target_sequences=((home_joint_state(),),),
             attach_tomato=False,
+            allow_gripper_target_contact=False,
             failure_reason="home_plan_failed",
         ),
     )

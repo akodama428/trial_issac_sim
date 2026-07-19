@@ -31,6 +31,8 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
 )
 from tomato_harvest_sim.robot.motion_planner.moveit_bridge.planning_scene import (
     attached_tomato_touch_links,
+    expand_allowed_collision_matrix,
+    grasp_target_collision_pairs,
 )
 
 
@@ -147,6 +149,45 @@ class MoveItPlannerBackendTest(unittest.TestCase):
             ("panda_hand", "panda_leftfinger", "panda_rightfinger"),
         )
 
+    def test_grasp_phase_allows_only_gripper_target_contact_pairs(self) -> None:
+        """GRASP目標で必要なtomato・stem接触だけをACMへ追加すること。"""
+        pairs = grasp_target_collision_pairs("panda_hand")
+
+        self.assertEqual(
+            pairs,
+            (
+                ("panda_hand", "target_tomato"),
+                ("panda_hand", "tomato_stem"),
+                ("panda_leftfinger", "target_tomato"),
+                ("panda_leftfinger", "tomato_stem"),
+                ("panda_rightfinger", "target_tomato"),
+                ("panda_rightfinger", "tomato_stem"),
+            ),
+        )
+
+    def test_grasp_collision_matrix_preserves_existing_entries(self) -> None:
+        """既存SRDFのACMを維持し、指定したgrasp接触だけを対称に許可すること。"""
+        names, rows = expand_allowed_collision_matrix(
+            entry_names=("panda_link0", "panda_link1"),
+            enabled_rows=((False, True), (True, False)),
+            allowed_pairs=(
+                ("panda_leftfinger", "target_tomato"),
+                ("panda_rightfinger", "target_tomato"),
+            ),
+        )
+        index = {name: offset for offset, name in enumerate(names)}
+
+        self.assertTrue(rows[index["panda_link0"]][index["panda_link1"]])
+        self.assertTrue(
+            rows[index["panda_leftfinger"]][index["target_tomato"]]
+        )
+        self.assertTrue(
+            rows[index["target_tomato"]][index["panda_rightfinger"]]
+        )
+        self.assertFalse(
+            rows[index["panda_link0"]][index["target_tomato"]]
+        )
+
     def test_moveit_target_pose_is_shifted_from_runtime_tool_pose(self) -> None:
         runtime_tool_pose = Pose3D(0.42, 0.0, 0.54, 180.0, 0.0, 0.0)
 
@@ -232,6 +273,16 @@ class MoveItPlannerBackendTest(unittest.TestCase):
             by_phase[HarvestTaskPhase.MOVING_TO_GRASP].target_sequences,
             ((pose_plan.grasp_pose,),),
         )
+        self.assertTrue(
+            by_phase[
+                HarvestTaskPhase.MOVING_TO_GRASP
+            ].allow_gripper_target_contact
+        )
+        self.assertTrue(all(
+            spec.phase is HarvestTaskPhase.MOVING_TO_GRASP
+            or not spec.allow_gripper_target_contact
+            for spec in specs
+        ))
         self.assertTrue(
             by_phase[HarvestTaskPhase.DETACHING].attach_tomato
         )

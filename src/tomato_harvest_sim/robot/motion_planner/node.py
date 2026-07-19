@@ -19,8 +19,11 @@ from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
 )
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     PHASE_ENTRY_PLANNING_PHASES,
+    PhasePlanRetryMemory,
     PhasePlanningGate,
     evaluate_phase_plan_update,
+    memory_after_phase_plan_attempt,
+    should_retry_missing_phase_plan,
     should_plan_phase_on_entry,
 )
 
@@ -31,6 +34,7 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
 # minimum_interval に一度でも阻まれた abort が二度と再評価されず、
 # 復旧不能なデッドロックになる。この周期timerが取りこぼしを拾い直す。
 _REPLAN_TRIGGER_POLL_INTERVAL_SEC = 0.3
+_PHASE_PLAN_RETRY_INTERVAL_SEC = 1.0
 _ROBOT_BASE_FRAME_ID = "panda_link0"
 
 
@@ -74,6 +78,7 @@ def main() -> None:
             self._state = PlannerStateAggregator()
             self._trigger_memory = TriggerMemory()
             self._phase_planning_gate = PhasePlanningGate()
+            self._phase_plan_retry_memory = PhasePlanRetryMemory()
             self._latest_plan = None
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
             self._producer_instance_id = uuid.uuid4().hex
@@ -152,6 +157,7 @@ def main() -> None:
             self._evaluate_replan_trigger()
 
         def _evaluate_replan_trigger(self) -> None:
+            self._retry_missing_phase_plan()
             state = self._state.snapshot()
             now_sec = time.monotonic()
             decision = evaluate_replan_trigger(
@@ -180,6 +186,18 @@ def main() -> None:
                 return
             self._try_phase_plan(trigger=decision.trigger.value)
 
+        def _retry_missing_phase_plan(self) -> None:
+            """phase-entry計画の全試行失敗後も、永久停止せず再計画する。"""
+            state = self._state.snapshot()
+            if not should_retry_missing_phase_plan(
+                phase=state.phase,
+                plan=self._latest_plan,
+                memory=self._phase_plan_retry_memory,
+                now_sec=time.monotonic(),
+            ):
+                return
+            self._try_phase_plan(trigger="phase_entry_retry")
+
         def _try_phase_plan(self, *, trigger: str) -> None:
             state = self._state.snapshot()
             if (
@@ -192,7 +210,7 @@ def main() -> None:
             phase = state.phase
             completion_event = (
                 "phase_plan_completed"
-                if trigger == "phase_entry"
+                if trigger.startswith("phase_entry")
                 else "suffix_replan_completed"
             )
             if not self._phase_planning_gate.try_begin():
@@ -236,6 +254,13 @@ def main() -> None:
                     return
                 self._publish_plan(candidate, trigger=trigger, phase=phase)
             finally:
+                self._phase_plan_retry_memory = (
+                    memory_after_phase_plan_attempt(
+                        phase=phase,
+                        now_sec=time.monotonic(),
+                        retry_interval_sec=_PHASE_PLAN_RETRY_INTERVAL_SEC,
+                    )
+                )
                 self._phase_planning_gate.finish()
 
         def _try_plan(self, *, trigger: str) -> None:

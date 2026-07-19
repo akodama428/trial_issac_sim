@@ -134,6 +134,9 @@ class Ros2MoveIt2PlannerBridge(MoveItGoalPlanner):
                 scene_snapshot=scene_snapshot,
                 planning_targets=targets,
                 attach_tomato=spec.attach_tomato,
+                allow_gripper_target_contact=(
+                    spec.allow_gripper_target_contact
+                ),
                 phase_label=spec.phase.value,
                 fallback_joint_goal=(
                     fallback_joint_goal

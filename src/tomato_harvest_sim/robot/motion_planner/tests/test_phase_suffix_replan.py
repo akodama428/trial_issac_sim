@@ -16,9 +16,12 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
     PHASE_ENTRY_PLANNING_PHASES,
     PHASE_TRAJECTORY_FIELD_BY_PHASE,
     SUFFIX_REPLAN_PHASES,
+    PhasePlanRetryMemory,
     PhasePlanningGate,
     evaluate_phase_plan_update,
+    memory_after_phase_plan_attempt,
     phase_trajectory,
+    should_retry_missing_phase_plan,
     should_plan_phase_on_entry,
     terminal_joint_state_of_phase,
 )
@@ -150,6 +153,66 @@ class PhaseEntryPlanningTest(unittest.TestCase):
         self.assertFalse(should_plan_phase_on_entry(
             HarvestTaskPhase.MOVING_TO_GRASP,
             HarvestTaskPhase.AT_GRASP,
+        ))
+
+
+class PhasePlanRetryTest(unittest.TestCase):
+    def test_missing_phase_trajectory_is_retried_after_interval(self) -> None:
+        phase = HarvestTaskPhase.MOVING_TO_GRASP
+        plan = replace(
+            _plan(phase=phase, endpoint=1.0),
+            grasp_joint_trajectory=None,
+            planned_from_phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
+        )
+        memory = memory_after_phase_plan_attempt(
+            phase=phase,
+            now_sec=10.0,
+            retry_interval_sec=1.0,
+        )
+
+        self.assertFalse(should_retry_missing_phase_plan(
+            phase=phase,
+            plan=plan,
+            memory=memory,
+            now_sec=10.9,
+        ))
+        self.assertTrue(should_retry_missing_phase_plan(
+            phase=phase,
+            plan=plan,
+            memory=memory,
+            now_sec=11.0,
+        ))
+
+    def test_adopted_phase_trajectory_stops_retry(self) -> None:
+        phase = HarvestTaskPhase.MOVING_TO_GRASP
+        plan = replace(_plan(phase=phase, endpoint=1.0), planned_from_phase=phase)
+
+        self.assertFalse(should_retry_missing_phase_plan(
+            phase=phase,
+            plan=plan,
+            memory=PhasePlanRetryMemory(),
+            now_sec=20.0,
+        ))
+
+    def test_phase_change_does_not_wait_for_previous_phase_interval(self) -> None:
+        previous = HarvestTaskPhase.MOVING_TO_PREGRASP
+        current = HarvestTaskPhase.MOVING_TO_GRASP
+        plan = replace(
+            _plan(phase=current, endpoint=1.0),
+            grasp_joint_trajectory=None,
+            planned_from_phase=previous,
+        )
+        memory = memory_after_phase_plan_attempt(
+            phase=previous,
+            now_sec=10.0,
+            retry_interval_sec=30.0,
+        )
+
+        self.assertTrue(should_retry_missing_phase_plan(
+            phase=current,
+            plan=plan,
+            memory=memory,
+            now_sec=10.1,
         ))
 
 
