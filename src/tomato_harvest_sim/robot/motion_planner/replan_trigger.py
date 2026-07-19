@@ -102,14 +102,14 @@ def trigger_starts_planner(
 ) -> bool:
     """planner を実際に起動してよい trigger を返す。
 
-    abort だけが全 phase で global replan を起動する (自由空間phaseでは
-    suffix replan、それ以外は full-chain replan)。tracking error / timer /
-    scene change は観測専用とする。実行中の軌道追従補正は MoveIt Servo が
-    担うため (Issue #46)、planner 側で cancel-and-replace を起こさない。
+    abort / stallは自由空間phaseの現在trajectoryだけを再計画する。
+    DETACHINGなどの接触支配phaseでは初期pose planを作り直しても実行trajectoryを
+    復旧できないためplannerを起動しない。tracking error / timer / scene changeは
+    観測専用とする。
     """
     return (
-        trigger is ReplanTrigger.ABORT
-        or trigger is ReplanTrigger.STALL and phase in SUFFIX_REPLAN_PHASES
+        phase in SUFFIX_REPLAN_PHASES
+        and trigger in {ReplanTrigger.ABORT, ReplanTrigger.STALL}
     )
 
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
@@ -52,6 +53,19 @@ def _make_plan(
     )
 
 
+def _make_plan_for_phase(
+    phase: HarvestTaskPhase,
+    plan: HarvestMotionPlan | None = None,
+) -> HarvestMotionPlan:
+    phase_plan = replace(plan or _make_plan(), planned_from_phase=phase)
+    if phase is HarvestTaskPhase.RETURNING_HOME:
+        phase_plan = replace(
+            phase_plan,
+            home_joint_trajectory=phase_plan.home_joint_trajectory or _make_trajectory(),
+        )
+    return phase_plan
+
+
 def _make_joint_state() -> JointStateSnapshot:
     return JointStateSnapshot(
         joint_names=("panda_joint1",),
@@ -76,11 +90,13 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.build = build_motion_command
 
     def test_moving_to_pregrasp_gripper_closed_true(self) -> None:
-        cmd = self.build(HarvestTaskPhase.MOVING_TO_PREGRASP, _make_plan(), _make_joint_state())
+        phase = HarvestTaskPhase.MOVING_TO_PREGRASP
+        cmd = self.build(phase, _make_plan_for_phase(phase), _make_joint_state())
         self.assertTrue(cmd.gripper_closed)
 
     def test_moving_to_grasp_gripper_closed_false(self) -> None:
-        cmd = self.build(HarvestTaskPhase.MOVING_TO_GRASP, _make_plan(), _make_joint_state())
+        phase = HarvestTaskPhase.MOVING_TO_GRASP
+        cmd = self.build(phase, _make_plan_for_phase(phase), _make_joint_state())
         self.assertFalse(cmd.gripper_closed)
 
     def test_at_grasp_gripper_closed_true(self) -> None:
@@ -92,11 +108,13 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.assertTrue(cmd.gripper_closed)
 
     def test_detaching_gripper_closed_true(self) -> None:
-        cmd = self.build(HarvestTaskPhase.DETACHING, _make_plan(), _make_joint_state())
+        phase = HarvestTaskPhase.DETACHING
+        cmd = self.build(phase, _make_plan_for_phase(phase), _make_joint_state())
         self.assertTrue(cmd.gripper_closed)
 
     def test_moving_to_place_gripper_closed_true(self) -> None:
-        cmd = self.build(HarvestTaskPhase.MOVING_TO_PLACE, _make_plan(), _make_joint_state())
+        phase = HarvestTaskPhase.MOVING_TO_PLACE
+        cmd = self.build(phase, _make_plan_for_phase(phase), _make_joint_state())
         self.assertTrue(cmd.gripper_closed)
 
     def test_placed_gripper_closed_false(self) -> None:
@@ -104,7 +122,8 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.assertFalse(cmd.gripper_closed)
 
     def test_returning_home_gripper_closed_false(self) -> None:
-        cmd = self.build(HarvestTaskPhase.RETURNING_HOME, _make_plan(), _make_joint_state())
+        phase = HarvestTaskPhase.RETURNING_HOME
+        cmd = self.build(phase, _make_plan_for_phase(phase), _make_joint_state())
         self.assertFalse(cmd.gripper_closed)
 
     def test_grasp_phases_use_pose_tracking_by_default(self) -> None:
@@ -113,7 +132,7 @@ class TestMotionCommandLogic(unittest.TestCase):
             HarvestTaskPhase.AT_GRASP,
             HarvestTaskPhase.GRASP_EVALUATION,
         ):
-            cmd = self.build(phase, _make_plan(), _make_joint_state())
+            cmd = self.build(phase, _make_plan_for_phase(phase), _make_joint_state())
             self.assertTrue(cmd.terminal_pose_tracking, phase)
 
     def test_grasp_direct_jtc_disables_pose_tracking_for_grasp_phases(self) -> None:
@@ -123,7 +142,8 @@ class TestMotionCommandLogic(unittest.TestCase):
             HarvestTaskPhase.GRASP_EVALUATION,
         ):
             cmd = self.build(
-                phase, _make_plan(), _make_joint_state(), grasp_direct_jtc=True,
+                phase, _make_plan_for_phase(phase), _make_joint_state(),
+                grasp_direct_jtc=True,
             )
             self.assertFalse(cmd.terminal_pose_tracking, phase)
 
@@ -135,9 +155,12 @@ class TestMotionCommandLogic(unittest.TestCase):
             HarvestTaskPhase.RELEASING,
             HarvestTaskPhase.RETURNING_HOME,
         ):
-            baseline = self.build(phase, _make_plan(), _make_joint_state())
+            baseline = self.build(
+                phase, _make_plan_for_phase(phase), _make_joint_state()
+            )
             cmd = self.build(
-                phase, _make_plan(), _make_joint_state(), grasp_direct_jtc=True,
+                phase, _make_plan_for_phase(phase), _make_joint_state(),
+                grasp_direct_jtc=True,
             )
             self.assertEqual(
                 cmd.terminal_pose_tracking, baseline.terminal_pose_tracking, phase,
@@ -152,16 +175,21 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.assertFalse(grasp_direct_jtc_enabled({"TOMATO_HARVEST_GRASP_DIRECT_JTC": "0"}))
         self.assertTrue(grasp_direct_jtc_enabled({"TOMATO_HARVEST_GRASP_DIRECT_JTC": "1"}))
 
-    def test_returning_home_start_point_excludes_finger_positions(self) -> None:
+    def test_returning_home_trajectory_excludes_finger_positions(self) -> None:
+        phase = HarvestTaskPhase.RETURNING_HOME
+        plan = replace(
+            _make_plan_for_phase(phase),
+            home_joint_trajectory=_make_arm_and_finger_trajectory(),
+        )
         cmd = self.build(
-            HarvestTaskPhase.RETURNING_HOME,
-            _make_plan(),
+            phase,
+            plan,
             _make_arm_and_finger_joint_state(),
         )
         traj = cmd.phase_motion_plan.joint_trajectory
 
-        self.assertEqual(len(traj.joint_names), 7)
-        self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2, 0.3, -1.0, 0.5, 1.2, 0.7))
+        self.assertEqual(traj.joint_names, ("panda_joint1", "panda_joint2"))
+        self.assertEqual(traj.points[0].positions_rad, (0.1, 0.2))
 
     def test_returning_home_prefers_planned_home_trajectory(self) -> None:
         """採用済みplanにhome区間trajectoryがあれば、直行軌道より優先する (Issue #32)。"""
@@ -174,7 +202,10 @@ class TestMotionCommandLogic(unittest.TestCase):
                 JointTrajectoryPoint(positions_rad=(0.0,), time_from_start_sec=2.0),
             ),
         )
-        plan = replace(_make_plan(), home_joint_trajectory=planned_home)
+        plan = replace(
+            _make_plan_for_phase(HarvestTaskPhase.RETURNING_HOME),
+            home_joint_trajectory=planned_home,
+        )
 
         cmd = self.build(HarvestTaskPhase.RETURNING_HOME, plan, _make_joint_state())
 
@@ -183,14 +214,13 @@ class TestMotionCommandLogic(unittest.TestCase):
         self.assertFalse(cmd.gripper_closed)
         self.assertEqual(cmd.phase_motion_plan.phase_id.value, "returning_home")
 
-    def test_returning_home_without_planned_trajectory_uses_direct_home_motion(self) -> None:
-        """home区間trajectoryが無い場合は従来どおり現在位置→home定数の直行軌道を使う。"""
-        cmd = self.build(HarvestTaskPhase.RETURNING_HOME, _make_plan(), _make_joint_state())
-
-        traj = cmd.phase_motion_plan.joint_trajectory
-        self.assertEqual(cmd.planner_name, "direct")
-        self.assertEqual(traj.points[0].positions_rad, (0.5,))
-        self.assertEqual(traj.points[-1].positions_rad, (0.0,))
+    def test_returning_home_without_phase_plan_is_not_executable(self) -> None:
+        with self.assertRaisesRegex(ValueError, "phase trajectory plan is not ready"):
+            self.build(
+                HarvestTaskPhase.RETURNING_HOME,
+                _make_plan(),
+                _make_joint_state(),
+            )
 
     def test_all_motion_phases_have_non_null_trajectory(self) -> None:
         motion_phases = [
@@ -205,9 +235,102 @@ class TestMotionCommandLogic(unittest.TestCase):
         ]
         for phase in motion_phases:
             with self.subTest(phase=phase):
-                cmd = self.build(phase, _make_plan(), _make_joint_state())
+                cmd = self.build(
+                    phase, _make_plan_for_phase(phase), _make_joint_state()
+                )
                 self.assertIsNotNone(cmd.phase_motion_plan)
                 self.assertIsNotNone(cmd.phase_motion_plan.joint_trajectory)
+
+    def test_execution_waits_for_current_phase_trajectory_plan(self) -> None:
+        from tomato_harvest_sim.robot.execute_manager.motion_command import (
+            phase_plan_is_ready_for_execution,
+        )
+
+        trajectory_field_by_phase = {
+            HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
+            HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
+            HarvestTaskPhase.DETACHING: "pull_joint_trajectory",
+            HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
+            HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
+        }
+        pose_only_plan = replace(
+            _make_plan(),
+            pregrasp_joint_trajectory=None,
+            grasp_joint_trajectory=None,
+            pull_joint_trajectory=None,
+            place_joint_trajectory=None,
+            home_joint_trajectory=None,
+        )
+        for phase, field in trajectory_field_by_phase.items():
+            with self.subTest(phase=phase):
+                self.assertFalse(
+                    phase_plan_is_ready_for_execution(phase, pose_only_plan)
+                )
+                phase_plan = replace(
+                    pose_only_plan,
+                    planned_from_phase=phase,
+                    **{field: _make_trajectory()},
+                )
+                self.assertTrue(
+                    phase_plan_is_ready_for_execution(phase, phase_plan)
+                )
+                self.assertFalse(
+                    phase_plan_is_ready_for_execution(
+                        phase,
+                        replace(
+                            phase_plan,
+                            planned_from_phase=HarvestTaskPhase.TARGET_FOUND,
+                        ),
+                    )
+                )
+
+    def test_hold_phase_does_not_require_new_trajectory_plan(self) -> None:
+        from tomato_harvest_sim.robot.execute_manager.motion_command import (
+            phase_plan_is_ready_for_execution,
+        )
+
+        pose_only_plan = replace(
+            _make_plan(),
+            pregrasp_joint_trajectory=None,
+            grasp_joint_trajectory=None,
+            pull_joint_trajectory=None,
+            place_joint_trajectory=None,
+            home_joint_trajectory=None,
+        )
+
+        self.assertTrue(
+            phase_plan_is_ready_for_execution(
+                HarvestTaskPhase.AT_GRASP,
+                pose_only_plan,
+            )
+        )
+
+    def test_phase_plan_arriving_before_phase_notification_is_deferred(self) -> None:
+        from tomato_harvest_sim.robot.execute_manager.motion_command import (
+            should_defer_phase_plan,
+        )
+
+        phase_plan = _make_plan_for_phase(HarvestTaskPhase.MOVING_TO_GRASP)
+
+        self.assertTrue(should_defer_phase_plan(
+            phase_plan,
+            rejection_reason="rejected_phase_mismatch",
+        ))
+        self.assertTrue(should_defer_phase_plan(
+            phase_plan,
+            rejection_reason="rejected_current_phase_unknown",
+        ))
+        self.assertFalse(should_defer_phase_plan(
+            phase_plan,
+            rejection_reason="rejected_stale_revision",
+        ))
+        self.assertFalse(should_defer_phase_plan(
+            replace(
+                phase_plan,
+                planned_from_phase=HarvestTaskPhase.AT_GRASP,
+            ),
+            rejection_reason="rejected_phase_mismatch",
+        ))
 
     def test_at_grasp_uses_stop_trajectory(self) -> None:
         joint_state = _make_joint_state()
@@ -246,8 +369,9 @@ class TestMotionCommandLogic(unittest.TestCase):
 
     def test_moving_to_pregrasp_uses_plan_trajectory(self) -> None:
         pregrasp_traj = _make_trajectory()
-        plan = _make_plan(pregrasp=pregrasp_traj)
-        cmd = self.build(HarvestTaskPhase.MOVING_TO_PREGRASP, plan, _make_joint_state())
+        phase = HarvestTaskPhase.MOVING_TO_PREGRASP
+        plan = _make_plan_for_phase(phase, _make_plan(pregrasp=pregrasp_traj))
+        cmd = self.build(phase, plan, _make_joint_state())
         self.assertIs(cmd.phase_motion_plan.joint_trajectory, pregrasp_traj)
 
     def test_every_planned_phase_excludes_finger_joints_at_command_boundary(self) -> None:
@@ -267,7 +391,11 @@ class TestMotionCommandLogic(unittest.TestCase):
 
         for phase in phases:
             with self.subTest(phase=phase):
-                command = self.build(phase, plan, _make_arm_and_finger_joint_state())
+                command = self.build(
+                    phase,
+                    _make_plan_for_phase(phase, plan),
+                    _make_arm_and_finger_joint_state(),
+                )
                 trajectory = command.phase_motion_plan.joint_trajectory
                 self.assertEqual(trajectory.joint_names, ("panda_joint1", "panda_joint2"))
                 self.assertEqual(trajectory.points[0].positions_rad, (0.1, 0.2))
@@ -275,20 +403,23 @@ class TestMotionCommandLogic(unittest.TestCase):
 
     def test_moving_to_grasp_uses_plan_trajectory(self) -> None:
         grasp_traj = _make_trajectory()
-        plan = _make_plan(grasp=grasp_traj)
-        cmd = self.build(HarvestTaskPhase.MOVING_TO_GRASP, plan, _make_joint_state())
+        phase = HarvestTaskPhase.MOVING_TO_GRASP
+        plan = _make_plan_for_phase(phase, _make_plan(grasp=grasp_traj))
+        cmd = self.build(phase, plan, _make_joint_state())
         self.assertIs(cmd.phase_motion_plan.joint_trajectory, grasp_traj)
 
     def test_detaching_uses_pull_trajectory(self) -> None:
         pull_traj = _make_trajectory()
-        plan = _make_plan(pull=pull_traj)
-        cmd = self.build(HarvestTaskPhase.DETACHING, plan, _make_joint_state())
+        phase = HarvestTaskPhase.DETACHING
+        plan = _make_plan_for_phase(phase, _make_plan(pull=pull_traj))
+        cmd = self.build(phase, plan, _make_joint_state())
         self.assertIs(cmd.phase_motion_plan.joint_trajectory, pull_traj)
 
     def test_moving_to_place_uses_plan_trajectory(self) -> None:
         place_traj = _make_trajectory()
-        plan = _make_plan(place=place_traj)
-        cmd = self.build(HarvestTaskPhase.MOVING_TO_PLACE, plan, _make_joint_state())
+        phase = HarvestTaskPhase.MOVING_TO_PLACE
+        plan = _make_plan_for_phase(phase, _make_plan(place=place_traj))
+        cmd = self.build(phase, plan, _make_joint_state())
         self.assertIs(cmd.phase_motion_plan.joint_trajectory, place_traj)
 
 

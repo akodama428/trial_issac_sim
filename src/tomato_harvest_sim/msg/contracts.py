@@ -224,13 +224,13 @@ class HarvestMotionPlan:
     grasp_waypoints: tuple[Pose3D, ...] = ()
     pull_waypoints: tuple[Pose3D, ...] = ()
     place_waypoints: tuple[Pose3D, ...] = ()
+    # 各JointTrajectoryは初期pose planではNoneで、対応する移動phaseの開始時に
+    # 最新joint stateから生成される。motion_commandは現在phase用trajectoryが
+    # 届くまで実行を開始しない。
     pregrasp_joint_trajectory: JointTrajectory | None = None
     grasp_joint_trajectory: JointTrajectory | None = None
     pull_joint_trajectory: JointTrajectory | None = None
     place_joint_trajectory: JointTrajectory | None = None
-    # home区間trajectory (Issue #32)。初期planではNoneで、returning_home中の
-    # abort復旧 (suffix replan) が現在状態→home構成の軌道を刻む。
-    # Noneの場合、motion_commandは従来どおり現在位置→home定数の直行軌道を使う。
     home_joint_trajectory: JointTrajectory | None = None
     planning_scene_object_ids: tuple[str, ...] = ()
     # Step 1 plan 契約メタデータ (Issue #9)。

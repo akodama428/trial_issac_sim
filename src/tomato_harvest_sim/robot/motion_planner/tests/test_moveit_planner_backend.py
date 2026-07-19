@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import os
 import unittest
+from dataclasses import replace
+from unittest.mock import Mock, patch
 
 from tomato_harvest_sim.msg.contracts import (
+    HarvestTaskPhase,
     JointStateSnapshot,
     JointTrajectory,
     JointTrajectoryPoint,
@@ -11,13 +13,15 @@ from tomato_harvest_sim.msg.contracts import (
     ScenePhase,
     SceneSnapshot,
     TargetEstimate,
-    TfTreeSnapshot,
     TomatoStatus,
 )
-from tomato_harvest_sim.robot.motion_planner import MoveIt2PlanningResult, MoveIt2ServiceBridgePlanner, build_planner
+from tomato_harvest_sim.msg.topics import home_joint_state
+from tomato_harvest_sim.robot.motion_planner import MoveIt2ServiceBridgePlanner, build_planner
 from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
+    Ros2MoveIt2PlannerBridge,
     _clamp_joint_state_to_bounds,
     _moveit_link_target_pose_from_runtime_tool_pose,
+    _phase_planning_specs,
     _trajectory_is_noop,
     _tomato_planning_scene_ops,
     arm_joint_goal_from_ik_solution,
@@ -75,92 +79,7 @@ def _joint_state() -> JointStateSnapshot:
     )
 
 
-def _tf_tree() -> TfTreeSnapshot:
-    return TfTreeSnapshot(
-        robot_base_frame_id="panda_link0",
-        camera_frame_id="fixed_camera_frame",
-        target_frame_id="target_tomato_frame",
-        robot_base_pose=Pose3D(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        camera_pose=Pose3D(3.0, -3.0, 2.0, 62.0, 0.0, 45.0),
-        target_pose=Pose3D(0.42, 0.0, 0.54, 0.0, 0.0, 0.0),
-    )
-
-
-class _AcceptingValidator:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, ...]] = []
-
-    def plan_phase_trajectories(
-        self,
-        *,
-        joint_state: JointStateSnapshot,
-        tf_tree: TfTreeSnapshot,
-        scene_snapshot: SceneSnapshot,
-        plan: object,
-    ) -> MoveIt2PlanningResult:
-        self.calls.append(joint_state.joint_names)
-        trajectory = JointTrajectory(
-            joint_names=joint_state.joint_names,
-            points=(
-                JointTrajectoryPoint(joint_state.positions_rad, 0.0),
-                JointTrajectoryPoint((0.1, -0.3, 0.05, -2.0, 0.1, 1.75, 0.85), 1.0),
-            ),
-        )
-        return MoveIt2PlanningResult(
-            success=True,
-            backend_name="moveit2_service_bridge",
-            reason="service_ok",
-            pregrasp_joint_trajectory=trajectory,
-            grasp_joint_trajectory=trajectory,
-            pull_joint_trajectory=trajectory,
-            place_joint_trajectory=trajectory,
-            planning_scene_object_ids=("tomato_branch", "place_tray"),
-        )
-
-
-class _RejectingValidator:
-    def plan_phase_trajectories(
-        self,
-        *,
-        joint_state: JointStateSnapshot,
-        tf_tree: TfTreeSnapshot,
-        scene_snapshot: SceneSnapshot,
-        plan: object,
-    ) -> MoveIt2PlanningResult:
-        return MoveIt2PlanningResult(
-            success=False,
-            backend_name="moveit2_service_bridge_fallback",
-            reason="service_unavailable",
-        )
-
-
-class _PartialValidator:
-    """pregrasp/grasp/pull は成功するが place は失敗するバリデータ。"""
-
-    def plan_phase_trajectories(
-        self,
-        *,
-        joint_state: JointStateSnapshot,
-        tf_tree: TfTreeSnapshot,
-        scene_snapshot: SceneSnapshot,
-        plan: object,
-    ) -> MoveIt2PlanningResult:
-        trajectory = JointTrajectory(
-            joint_names=joint_state.joint_names,
-            points=(
-                JointTrajectoryPoint(joint_state.positions_rad, 0.0),
-                JointTrajectoryPoint((0.1, -0.3, 0.05, -2.0, 0.1, 1.75, 0.85), 1.0),
-            ),
-        )
-        return MoveIt2PlanningResult(
-            success=False,
-            backend_name="moveit2_service_bridge_partial",
-            reason="pre_place_plan_failed",
-            pregrasp_joint_trajectory=trajectory,
-            grasp_joint_trajectory=trajectory,
-            pull_joint_trajectory=trajectory,
-            place_joint_trajectory=None,
-        )
+_BASE_FRAME_ID = "panda_link0"
 
 
 class MoveItPlannerBackendTest(unittest.TestCase):
@@ -219,55 +138,337 @@ class MoveItPlannerBackendTest(unittest.TestCase):
 
         self.assertTrue(planner._bridge._enforce_orientation_constraint)
 
-    def test_geometric_backend_can_be_forced(self) -> None:
-        previous = os.environ.get("TOMATO_HARVEST_PLANNER_BACKEND")
-        os.environ["TOMATO_HARVEST_PLANNER_BACKEND"] = "geometric"
-        try:
-            _, info = build_planner()
-        finally:
-            if previous is None:
-                os.environ.pop("TOMATO_HARVEST_PLANNER_BACKEND", None)
-            else:
-                os.environ["TOMATO_HARVEST_PLANNER_BACKEND"] = previous
+    def test_build_planner_returns_the_runtime_moveit_planner(self) -> None:
+        planner = build_planner()
 
-        self.assertEqual(info.name, "geometric_fallback")
-        self.assertFalse(info.moveit2_enabled)
+        self.assertIsInstance(planner, MoveIt2ServiceBridgePlanner)
 
-    def test_moveit2_service_bridge_marks_plan_when_service_validation_succeeds(self) -> None:
-        validator = _AcceptingValidator()
-        planner = MoveIt2ServiceBridgePlanner(bridge=validator)
+    def test_initial_plan_contains_only_pose_and_waypoints(self) -> None:
+        planner = MoveIt2ServiceBridgePlanner()
 
-        plan = planner.plan(_target_estimate(), _joint_state(), _tf_tree(), _scene_snapshot())
+        plan = planner.plan(_target_estimate(), _scene_snapshot())
 
-        self.assertEqual(plan.planner_name, "moveit2_service_bridge")
-        self.assertEqual(len(validator.calls), 1)
-        self.assertIsNotNone(plan.pregrasp_joint_trajectory)
-        self.assertEqual(plan.pregrasp_joint_trajectory.points[-1].positions_rad[0], 0.1)
-        self.assertEqual(plan.planning_scene_object_ids, ("tomato_branch", "place_tray"))
-
-    def test_moveit2_service_bridge_falls_back_when_service_validation_fails(self) -> None:
-        planner = MoveIt2ServiceBridgePlanner(bridge=_RejectingValidator())
-
-        plan = planner.plan(_target_estimate(), _joint_state(), _tf_tree(), _scene_snapshot())
-
-        self.assertEqual(plan.planner_name, "moveit2_service_bridge_fallback")
+        self.assertEqual(plan.planner_name, "harvest_pose_waypoint_planner")
+        self.assertIsNotNone(plan.pregrasp_pose)
+        self.assertTrue(plan.grasp_waypoints)
+        self.assertTrue(plan.pull_waypoints)
+        self.assertTrue(plan.place_waypoints)
         self.assertIsNone(plan.pregrasp_joint_trajectory)
-
-    def test_partial_result_preserves_pregrasp_grasp_pull_when_place_fails(self) -> None:
-        """place 計画失敗時、pregrasp/grasp/pull 軌道が保持されること。
-
-        pre_place_plan_failed の場合でもロボットが pregrasp まで動けるよう、
-        partial result が pregrasp_joint_trajectory を保持していることを検証する。
-        """
-        planner = MoveIt2ServiceBridgePlanner(bridge=_PartialValidator())
-
-        plan = planner.plan(_target_estimate(), _joint_state(), _tf_tree(), _scene_snapshot())
-
-        self.assertEqual(plan.planner_name, "moveit2_service_bridge_partial")
-        self.assertIsNotNone(plan.pregrasp_joint_trajectory)
-        self.assertIsNotNone(plan.grasp_joint_trajectory)
-        self.assertIsNotNone(plan.pull_joint_trajectory)
+        self.assertIsNone(plan.grasp_joint_trajectory)
+        self.assertIsNone(plan.pull_joint_trajectory)
         self.assertIsNone(plan.place_joint_trajectory)
+        self.assertIsNone(plan.home_joint_trajectory)
+
+    def test_standard_phase_specs_hold_targets_scene_mode_and_recovery_order(
+        self,
+    ) -> None:
+        """標準phaseの差分を設定表で表現し、PREGRASPだけ代替経路を持つこと。"""
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        home = home_joint_state()
+        far_from_home = JointStateSnapshot(
+            joint_names=home.joint_names,
+            positions_rad=(2.0, *home.positions_rad[1:]),
+        )
+
+        specs = _phase_planning_specs(
+            plan=pose_plan,
+            joint_state=far_from_home,
+            home_via_threshold_rad=1.2,
+        )
+        by_phase = {spec.phase: spec for spec in specs}
+
+        self.assertEqual(
+            tuple(by_phase),
+            (
+                HarvestTaskPhase.MOVING_TO_PREGRASP,
+                HarvestTaskPhase.MOVING_TO_GRASP,
+                HarvestTaskPhase.DETACHING,
+                HarvestTaskPhase.MOVING_TO_PLACE,
+                HarvestTaskPhase.RETURNING_HOME,
+            ),
+        )
+        self.assertEqual(
+            by_phase[HarvestTaskPhase.MOVING_TO_PREGRASP].target_sequences,
+            (
+                (home, pose_plan.pregrasp_pose),
+                (pose_plan.pregrasp_pose,),
+            ),
+        )
+        self.assertEqual(
+            by_phase[HarvestTaskPhase.MOVING_TO_GRASP].target_sequences,
+            ((pose_plan.grasp_pose,),),
+        )
+        self.assertTrue(
+            by_phase[HarvestTaskPhase.DETACHING].attach_tomato
+        )
+        self.assertEqual(
+            by_phase[HarvestTaskPhase.MOVING_TO_PLACE].target_sequences,
+            ((pose_plan.place_waypoints[0], pose_plan.place_pose),),
+        )
+        self.assertTrue(
+            by_phase[HarvestTaskPhase.MOVING_TO_PLACE].attach_tomato
+        )
+        self.assertEqual(
+            by_phase[HarvestTaskPhase.RETURNING_HOME].target_sequences,
+            ((home,),),
+        )
+
+    def test_place_uses_common_target_sequence_and_joint_fallback_attempt(
+        self,
+    ) -> None:
+        """PLACEも設定表の候補列を順に試し、fallback成功理由を維持すること。"""
+        class _ReadyClients:
+            def wait_for_services(self, *, timeout_sec: float) -> bool:
+                return True
+
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        prior_place_trajectory = JointTrajectory(
+            joint_names=_joint_state().joint_names,
+            points=(
+                JointTrajectoryPoint(_joint_state().positions_rad, 0.0),
+                JointTrajectoryPoint(
+                    (0.2, -0.2, 0.1, -1.9, 0.1, 1.6, 0.7),
+                    1.0,
+                ),
+            ),
+        )
+        pose_plan = replace(
+            pose_plan,
+            place_joint_trajectory=prior_place_trajectory,
+        )
+        fallback_trajectory = JointTrajectory(
+            joint_names=_joint_state().joint_names,
+            points=prior_place_trajectory.points,
+        )
+        bridge = Ros2MoveIt2PlannerBridge()
+        bridge._clients = _ReadyClients()
+        bridge._plan_phase = Mock(side_effect=(None, fallback_trajectory))
+        bridge._plan_joint_goal = Mock(return_value=fallback_trajectory)
+
+        with patch(
+            "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+            "phase_planner.moveit2_python_available",
+            return_value=True,
+        ):
+            result = bridge.plan_phase_trajectory(
+                phase=HarvestTaskPhase.MOVING_TO_PLACE,
+                joint_state=_joint_state(),
+                base_frame_id=_BASE_FRAME_ID,
+                scene_snapshot=_scene_snapshot(),
+                plan=pose_plan,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.reason, "joint_goal_fallback")
+        self.assertEqual(bridge._plan_phase.call_count, 2)
+        primary, fallback = bridge._plan_phase.call_args_list
+        self.assertEqual(
+            primary.kwargs["planning_targets"],
+            (pose_plan.place_waypoints[0], pose_plan.place_pose),
+        )
+        self.assertEqual(
+            fallback.kwargs["planning_targets"],
+            (
+                JointStateSnapshot(
+                    joint_names=prior_place_trajectory.joint_names,
+                    positions_rad=prior_place_trajectory.points[-1].positions_rad,
+                ),
+            ),
+        )
+
+    def test_detaching_is_planned_from_latest_joint_state_with_attached_tomato(
+        self,
+    ) -> None:
+        class _ReadyClients:
+            def wait_for_services(self, *, timeout_sec: float) -> bool:
+                return True
+
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        bridge = Ros2MoveIt2PlannerBridge()
+        bridge._clients = _ReadyClients()
+        trajectory = JointTrajectory(
+            joint_names=_joint_state().joint_names,
+            points=(
+                JointTrajectoryPoint(_joint_state().positions_rad, 0.0),
+                JointTrajectoryPoint(
+                    (0.1, -0.3, 0.05, -2.0, 0.1, 1.75, 0.85),
+                    1.0,
+                ),
+            ),
+        )
+        bridge._plan_phase = Mock(return_value=trajectory)
+
+        with patch(
+            "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+            "phase_planner.moveit2_python_available",
+            return_value=True,
+        ):
+            result = bridge.plan_phase_trajectory(
+                phase=HarvestTaskPhase.DETACHING,
+                joint_state=_joint_state(),
+                base_frame_id=_BASE_FRAME_ID,
+                scene_snapshot=_scene_snapshot(),
+                plan=pose_plan,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.joint_trajectory, trajectory)
+        call = bridge._plan_phase.call_args
+        self.assertEqual(call.kwargs["joint_state"], _joint_state())
+        self.assertEqual(call.kwargs["planning_targets"], (pose_plan.pull_pose,))
+        self.assertTrue(call.kwargs["attach_tomato"])
+
+    def test_phase_target_sequence_skips_ik_for_joint_goal(self) -> None:
+        """joint goalはIKを通さず、終端状態から次のpose goalを計画すること。"""
+        bridge = Ros2MoveIt2PlannerBridge()
+        start = _joint_state()
+        home = JointStateSnapshot(
+            joint_names=start.joint_names,
+            positions_rad=(0.1, -0.3, 0.1, -2.0, 0.1, 1.6, 0.7),
+        )
+        target_pose = Pose3D(0.42, 0.0, 0.58, 0.0, 0.0, 0.0)
+        home_trajectory = JointTrajectory(
+            joint_names=start.joint_names,
+            points=(
+                JointTrajectoryPoint(start.positions_rad, 0.0),
+                JointTrajectoryPoint(home.positions_rad, 1.0),
+            ),
+        )
+        pose_end = (0.2, -0.2, 0.15, -1.9, 0.15, 1.5, 0.6)
+        pose_trajectory = JointTrajectory(
+            joint_names=start.joint_names,
+            points=(
+                JointTrajectoryPoint(home.positions_rad, 0.0),
+                JointTrajectoryPoint(pose_end, 1.0),
+            ),
+        )
+        bridge._apply_phase_planning_scene = Mock(return_value=True)
+        bridge._plan_joint_goal = Mock(return_value=home_trajectory)
+        bridge._plan_seeded_ik_goal = Mock(return_value=pose_trajectory)
+
+        trajectory = bridge._plan_phase(
+            clients=Mock(),
+            joint_state=start,
+            base_frame_id=_BASE_FRAME_ID,
+            scene_snapshot=_scene_snapshot(),
+            planning_targets=(home, target_pose),
+            attach_tomato=False,
+            phase_label="moving_to_pregrasp",
+        )
+
+        self.assertIsNotNone(trajectory)
+        assert trajectory is not None
+        self.assertEqual(len(trajectory.points), 3)
+        self.assertEqual(trajectory.points[-1].positions_rad, pose_end)
+        bridge._apply_phase_planning_scene.assert_called_once()
+        bridge._plan_joint_goal.assert_called_once()
+        bridge._plan_seeded_ik_goal.assert_called_once()
+        self.assertEqual(
+            bridge._plan_seeded_ik_goal.call_args.kwargs["joint_state"],
+            home,
+        )
+
+    def test_pregrasp_via_home_failure_retries_direct_target_sequence(self) -> None:
+        """via-home失敗時は同じ共通plannerで直接pregraspを再試行すること。"""
+        class _ReadyClients:
+            def wait_for_services(self, *, timeout_sec: float) -> bool:
+                return True
+
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        bridge = Ros2MoveIt2PlannerBridge()
+        bridge._clients = _ReadyClients()
+        direct_trajectory = JointTrajectory(
+            joint_names=_joint_state().joint_names,
+            points=(
+                JointTrajectoryPoint(_joint_state().positions_rad, 0.0),
+                JointTrajectoryPoint(
+                    (0.1, -0.3, 0.05, -2.0, 0.1, 1.75, 0.85),
+                    1.0,
+                ),
+            ),
+        )
+        bridge._plan_phase = Mock(side_effect=(None, direct_trajectory))
+
+        with (
+            patch(
+                "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+                "phase_planner.moveit2_python_available",
+                return_value=True,
+            ),
+            patch(
+                "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+                "phase_policy.should_start_via_home",
+                return_value=True,
+            ),
+        ):
+            result = bridge.plan_phase_trajectory(
+                phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
+                joint_state=_joint_state(),
+                base_frame_id=_BASE_FRAME_ID,
+                scene_snapshot=_scene_snapshot(),
+                plan=pose_plan,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(bridge._plan_phase.call_count, 2)
+        first, second = bridge._plan_phase.call_args_list
+        self.assertEqual(
+            first.kwargs["planning_targets"],
+            (home_joint_state(), pose_plan.pregrasp_pose),
+        )
+        self.assertEqual(
+            second.kwargs["planning_targets"],
+            (pose_plan.pregrasp_pose,),
+        )
+
+    def test_direct_pregrasp_failure_is_not_retried_as_via_home_fallback(self) -> None:
+        """最初から直接計画する場合は、同じ失敗計画を重複実行しないこと。"""
+        class _ReadyClients:
+            def wait_for_services(self, *, timeout_sec: float) -> bool:
+                return True
+
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        bridge = Ros2MoveIt2PlannerBridge()
+        bridge._clients = _ReadyClients()
+        bridge._plan_phase = Mock(return_value=None)
+
+        with (
+            patch(
+                "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+                "phase_planner.moveit2_python_available",
+                return_value=True,
+            ),
+            patch(
+                "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+                "phase_policy.should_start_via_home",
+                return_value=False,
+            ),
+        ):
+            result = bridge.plan_phase_trajectory(
+                phase=HarvestTaskPhase.MOVING_TO_PREGRASP,
+                joint_state=_joint_state(),
+                base_frame_id=_BASE_FRAME_ID,
+                scene_snapshot=_scene_snapshot(),
+                plan=pose_plan,
+            )
+
+        self.assertFalse(result.success)
+        bridge._plan_phase.assert_called_once()
 
     def test_joint_state_clamped_when_out_of_bounds(self) -> None:
         """Isaac Sim が 0.0 スタートの場合 panda_joint4 が上限外になるのでクランプされること。

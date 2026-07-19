@@ -53,7 +53,7 @@ flowchart TB
 | 物性 | tomato mass | 0.03 kg | `physics_harvest.py:36` |
 | 破断 | stem break force / torque | 50 N / 50 N·m | `physics_harvest.py:35` |
 | 判定 | friction grasp 最小力 / 継続 / 最大相対速度 / 最大滑り | 1.0 N / 3 step / 0.02 m/s / 0.005 m | `config/scene.yaml` |
-| 軌道 | pull offset x / z | 0.08 / 0.08 m | `pregrasp_planner.py:22-23` |
+| 軌道 | pull offset x / z | 0.08 / 0.08 m | `harvest_pose_planner.py` |
 | physics | 観測dt | 1/60 s | `physics_harvest.py:53` |
 
 ## 確認できた事実（一次情報）

@@ -50,11 +50,11 @@ class PlanOnSnapshotArrivalTest(unittest.TestCase):
                     phase=phase, has_plan=False,
                 ))
 
-    def test_abort_starts_full_chain_planner_in_any_phase(self) -> None:
+    def test_abort_replans_only_free_space_phase_trajectory(self) -> None:
         self.assertTrue(trigger_starts_planner(
             ReplanTrigger.ABORT, HarvestTaskPhase.MOVING_TO_GRASP
         ))
-        self.assertTrue(trigger_starts_planner(
+        self.assertFalse(trigger_starts_planner(
             ReplanTrigger.ABORT, HarvestTaskPhase.DETACHING
         ))
 

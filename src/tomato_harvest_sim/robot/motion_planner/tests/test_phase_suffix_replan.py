@@ -5,7 +5,7 @@ from dataclasses import replace
 
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan, HarvestTaskPhase, JointStateSnapshot, JointTrajectory,
-    JointTrajectoryPoint, Pose3D, ScenePhase, SceneSnapshot, TfTreeSnapshot,
+    JointTrajectoryPoint, Pose3D, ScenePhase, SceneSnapshot,
     TomatoStatus,
 )
 from tomato_harvest_sim.robot.msg.planner import MoveIt2PlanningResult
@@ -13,17 +13,20 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     MoveIt2ServiceBridgePlanner,
 )
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
+    PHASE_ENTRY_PLANNING_PHASES,
+    PHASE_TRAJECTORY_FIELD_BY_PHASE,
     SUFFIX_REPLAN_PHASES,
-    SuffixReplanGate,
-    evaluate_suffix_update,
-    should_plan_home_on_entry,
-    suffix_trajectory,
+    PhasePlanningGate,
+    evaluate_phase_plan_update,
+    phase_trajectory,
+    should_plan_phase_on_entry,
     terminal_joint_state_of_phase,
 )
 
 _SUFFIX_FIELD_BY_PHASE = {
     HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
+    HarvestTaskPhase.DETACHING: "pull_joint_trajectory",
     HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
     HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
 }
@@ -48,6 +51,12 @@ def _plan(*, phase: HarvestTaskPhase, endpoint: float, revision: int = 1) -> Har
 
 
 class SuffixReplanPhaseSetTest(unittest.TestCase):
+    def test_every_trajectory_motion_phase_is_planned_on_entry(self) -> None:
+        self.assertEqual(
+            PHASE_ENTRY_PLANNING_PHASES,
+            frozenset(_SUFFIX_FIELD_BY_PHASE),
+        )
+
     def test_free_space_motion_phases_are_suffix_replan_targets(self) -> None:
         self.assertEqual(SUFFIX_REPLAN_PHASES, frozenset({
             HarvestTaskPhase.MOVING_TO_PREGRASP,
@@ -69,18 +78,19 @@ class SuffixTrajectorySelectionTest(unittest.TestCase):
         for phase, field in _SUFFIX_FIELD_BY_PHASE.items():
             with self.subTest(phase=phase):
                 plan = _plan(phase=phase, endpoint=1.0)
-                self.assertEqual(suffix_trajectory(plan, phase), getattr(plan, field))
+                self.assertEqual(phase_trajectory(plan, phase), getattr(plan, field))
+                self.assertEqual(PHASE_TRAJECTORY_FIELD_BY_PHASE[phase], field)
 
-    def test_unsupported_phase_has_no_suffix_trajectory(self) -> None:
+    def test_unsupported_phase_has_no_phase_trajectory(self) -> None:
         plan = _plan(phase=HarvestTaskPhase.MOVING_TO_PLACE, endpoint=1.0)
-        self.assertIsNone(suffix_trajectory(plan, HarvestTaskPhase.DETACHING))
+        self.assertIsNone(phase_trajectory(plan, HarvestTaskPhase.AT_GRASP))
 
 
 class SuffixUpdateTest(unittest.TestCase):
     def test_small_endpoint_difference_keeps_current_plan_in_each_phase(self) -> None:
         for phase in SUFFIX_REPLAN_PHASES:
             with self.subTest(phase=phase):
-                decision = evaluate_suffix_update(
+                decision = evaluate_phase_plan_update(
                     phase=phase,
                     current_plan=_plan(phase=phase, endpoint=1.0),
                     candidate_plan=_plan(phase=phase, endpoint=1.005, revision=2),
@@ -92,7 +102,7 @@ class SuffixUpdateTest(unittest.TestCase):
     def test_significant_endpoint_difference_adopts_suffix_in_each_phase(self) -> None:
         for phase in SUFFIX_REPLAN_PHASES:
             with self.subTest(phase=phase):
-                decision = evaluate_suffix_update(
+                decision = evaluate_phase_plan_update(
                     phase=phase,
                     current_plan=_plan(phase=phase, endpoint=1.0),
                     candidate_plan=_plan(phase=phase, endpoint=1.05, revision=2),
@@ -101,23 +111,23 @@ class SuffixUpdateTest(unittest.TestCase):
                 self.assertTrue(decision.adopted)
                 self.assertEqual(decision.reason, "adopted_significant_trajectory_delta")
 
-    def test_missing_candidate_suffix_trajectory_is_rejected(self) -> None:
+    def test_missing_candidate_phase_trajectory_is_rejected(self) -> None:
         phase = HarvestTaskPhase.MOVING_TO_PREGRASP
         candidate = replace(
             _plan(phase=phase, endpoint=1.2), pregrasp_joint_trajectory=None
         )
-        decision = evaluate_suffix_update(
+        decision = evaluate_phase_plan_update(
             phase=phase,
             current_plan=_plan(phase=phase, endpoint=1.0),
             candidate_plan=candidate,
         )
         self.assertFalse(decision.adopted)
-        self.assertEqual(decision.reason, "rejected_missing_suffix_trajectory")
+        self.assertEqual(decision.reason, "rejected_missing_phase_trajectory")
 
     def test_unsupported_phase_is_rejected(self) -> None:
         place_plan = _plan(phase=HarvestTaskPhase.MOVING_TO_PLACE, endpoint=1.0)
-        decision = evaluate_suffix_update(
-            phase=HarvestTaskPhase.DETACHING,
+        decision = evaluate_phase_plan_update(
+            phase=HarvestTaskPhase.AT_GRASP,
             current_plan=place_plan,
             candidate_plan=replace(place_plan, plan_revision=2),
         )
@@ -125,30 +135,21 @@ class SuffixUpdateTest(unittest.TestCase):
         self.assertEqual(decision.reason, "rejected_unsupported_phase")
 
 
-class HomeEntryPlanningTest(unittest.TestCase):
-    """returning_home進入時の能動的home計画判定 (Issue #32)。
+class PhaseEntryPlanningTest(unittest.TestCase):
+    def test_entering_each_motion_phase_triggers_trajectory_planning(self) -> None:
+        for phase in PHASE_ENTRY_PLANNING_PHASES:
+            with self.subTest(phase=phase):
+                self.assertTrue(should_plan_phase_on_entry(None, phase))
 
-    直行home軌道は衝突を考慮しないため、トレイ近傍から出発すると腕を
-    引っ掛けて追従不能なabortを誘発する。進入時に衝突考慮済みの計画へ
-    置き換えることで、abort後の受動的復旧では救えない固着を予防する。
-    """
+    def test_staying_in_same_motion_phase_does_not_plan_again(self) -> None:
+        for phase in PHASE_ENTRY_PLANNING_PHASES:
+            with self.subTest(phase=phase):
+                self.assertFalse(should_plan_phase_on_entry(phase, phase))
 
-    def test_entering_returning_home_triggers_home_planning(self) -> None:
-        self.assertTrue(should_plan_home_on_entry(
-            HarvestTaskPhase.PLACED, HarvestTaskPhase.RETURNING_HOME
-        ))
-        self.assertTrue(should_plan_home_on_entry(
-            None, HarvestTaskPhase.RETURNING_HOME
-        ))
-
-    def test_staying_in_returning_home_does_not_replan(self) -> None:
-        self.assertFalse(should_plan_home_on_entry(
-            HarvestTaskPhase.RETURNING_HOME, HarvestTaskPhase.RETURNING_HOME
-        ))
-
-    def test_other_phases_do_not_trigger_home_planning(self) -> None:
-        self.assertFalse(should_plan_home_on_entry(
-            HarvestTaskPhase.PLACED, HarvestTaskPhase.MOVING_TO_PLACE
+    def test_non_motion_phase_does_not_trigger_trajectory_planning(self) -> None:
+        self.assertFalse(should_plan_phase_on_entry(
+            HarvestTaskPhase.MOVING_TO_GRASP,
+            HarvestTaskPhase.AT_GRASP,
         ))
 
 
@@ -183,9 +184,9 @@ class TerminalJointStateTest(unittest.TestCase):
         )
 
 
-class SuffixReplanGateTest(unittest.TestCase):
+class PhasePlanningGateTest(unittest.TestCase):
     def test_second_planner_start_is_suppressed_while_in_flight(self) -> None:
-        gate = SuffixReplanGate()
+        gate = PhasePlanningGate()
         self.assertTrue(gate.try_begin())
         self.assertFalse(gate.try_begin())
         gate.finish()
@@ -204,9 +205,7 @@ def _scene() -> SceneSnapshot:
     )
 
 
-def _tf_tree() -> TfTreeSnapshot:
-    pose = Pose3D(0, 0, 0, 0, 0, 0)
-    return TfTreeSnapshot("panda_link0", "fixed_camera", "target", pose, pose, pose)
+_BASE_FRAME_ID = "panda_link0"
 
 
 class _SuffixFakeBridge:
@@ -217,14 +216,14 @@ class _SuffixFakeBridge:
         self.received_phase: HarvestTaskPhase | None = None
         self.received_joint_state: JointStateSnapshot | None = None
 
-    def plan_suffix_trajectory(self, **kwargs: object) -> MoveIt2PlanningResult:
+    def plan_phase_trajectory(self, **kwargs: object) -> MoveIt2PlanningResult:
         phase = kwargs["phase"]
         assert isinstance(phase, HarvestTaskPhase)
         self.received_phase = phase
         self.received_joint_state = kwargs["joint_state"]  # type: ignore[assignment]
         return MoveIt2PlanningResult(
             success=True, backend_name="suffix_bridge", reason="service_ok",
-            **{_SUFFIX_FIELD_BY_PHASE[phase]: self._suffix},
+            joint_trajectory=self._suffix,
         )
 
 
@@ -233,13 +232,13 @@ class _FlakySuffixFakeBridge(_SuffixFakeBridge):
         super().__init__(suffix)
         self.calls = 0
 
-    def plan_suffix_trajectory(self, **kwargs: object) -> MoveIt2PlanningResult:
+    def plan_phase_trajectory(self, **kwargs: object) -> MoveIt2PlanningResult:
         self.calls += 1
         if self.calls < 3:
             return MoveIt2PlanningResult(
                 success=False, backend_name="suffix_bridge", reason="temporary_failure"
             )
-        return super().plan_suffix_trajectory(**kwargs)
+        return super().plan_phase_trajectory(**kwargs)
 
 
 class PhaseSuffixIntegrationTest(unittest.TestCase):
@@ -249,11 +248,11 @@ class PhaseSuffixIntegrationTest(unittest.TestCase):
         bridge = _FlakySuffixFakeBridge(suffix)
         planner = MoveIt2ServiceBridgePlanner(bridge=bridge)  # type: ignore[arg-type]
 
-        candidate = planner.plan_from_phase(
+        candidate = planner.plan_phase_trajectory(
             phase,
             _plan(phase=phase, endpoint=1.0),
             JointStateSnapshot(("joint1", "joint2"), (0.25, 0.25)),
-            _tf_tree(),
+            _BASE_FRAME_ID,
             _scene(),
         )
 
@@ -276,8 +275,8 @@ class PhaseSuffixIntegrationTest(unittest.TestCase):
                     other for other in _SUFFIX_FIELD_BY_PHASE.values() if other != field
                 ]
 
-                candidate = planner.plan_from_phase(
-                    phase, prior, current_joints, _tf_tree(), _scene()
+                candidate = planner.plan_phase_trajectory(
+                    phase, prior, current_joints, _BASE_FRAME_ID, _scene()
                 )
 
                 self.assertIsNotNone(candidate)
@@ -286,7 +285,7 @@ class PhaseSuffixIntegrationTest(unittest.TestCase):
                 self.assertEqual(getattr(candidate, field), suffix)
                 for other in untouched_fields:
                     self.assertEqual(getattr(candidate, other), getattr(prior, other))
-                decision = evaluate_suffix_update(
+                decision = evaluate_phase_plan_update(
                     phase=phase, current_plan=prior, candidate_plan=candidate,  # type: ignore[arg-type]
                 )
                 self.assertTrue(decision.adopted)
@@ -296,10 +295,10 @@ class PhaseSuffixIntegrationTest(unittest.TestCase):
         planner = MoveIt2ServiceBridgePlanner(bridge=bridge)  # type: ignore[arg-type]
         prior = _plan(phase=HarvestTaskPhase.MOVING_TO_PLACE, endpoint=1.0)
 
-        candidate = planner.plan_from_phase(
-            HarvestTaskPhase.DETACHING, prior,
+        candidate = planner.plan_phase_trajectory(
+            HarvestTaskPhase.AT_GRASP, prior,
             JointStateSnapshot(("joint1", "joint2"), (0.25, 0.25)),
-            _tf_tree(), _scene(),
+            _BASE_FRAME_ID, _scene(),
         )
 
         self.assertIsNone(candidate)

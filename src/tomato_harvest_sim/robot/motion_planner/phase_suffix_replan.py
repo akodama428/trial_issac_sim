@@ -1,7 +1,7 @@
-"""自由空間phase共通のsuffix replan pure policyと多重起動gate (Issue #12, Step 4)。
+"""phase開始時計画と自由空間suffix replanのpure policy・多重起動gate。
 
-Step 3のplace限定suffix replanを、自由空間の移動phase全体
-(MOVING_TO_PREGRASP / MOVING_TO_GRASP / MOVING_TO_PLACE) へ一般化する。
+実行用JointTrajectoryは初期planで一括生成せず、各移動phaseの開始時に
+最新joint stateから生成する。自由空間phaseではabort後も同じ経路を使う。
 """
 from __future__ import annotations
 
@@ -15,10 +15,22 @@ from tomato_harvest_sim.msg.contracts import (
     JointTrajectory,
 )
 
-# suffix replanの対象phase。DETACHING は茎からの引き剥がしという接触支配区間で、
-# global plannerの経路再計画より局所的な力・微修正が支配的なため、周期replan対象に
-# しない (Issue #12 設計判断)。RETURNING_HOME も自由空間移動であり、abort反復が
-# step予算切れを招くため suffix replan の対象に含める (Issue #32)。
+# phaseごとの実行用trajectoryを保持するHarvestMotionPlanのfield名。
+PHASE_TRAJECTORY_FIELD_BY_PHASE: dict[HarvestTaskPhase, str] = {
+    HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
+    HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
+    HarvestTaskPhase.DETACHING: "pull_joint_trajectory",
+    HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
+    HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
+}
+
+# MoveItによる実行用trajectoryをphase開始時に生成する移動phase。
+PHASE_ENTRY_PLANNING_PHASES: frozenset[HarvestTaskPhase] = frozenset(
+    PHASE_TRAJECTORY_FIELD_BY_PHASE
+)
+
+# abort後にも同じphaseを再計画する自由空間phase。DETACHINGは接触支配区間のため、
+# 開始時計画は行うがsuffix replan対象には含めない (Issue #12)。
 SUFFIX_REPLAN_PHASES: frozenset[HarvestTaskPhase] = frozenset({
     HarvestTaskPhase.MOVING_TO_PREGRASP,
     HarvestTaskPhase.MOVING_TO_GRASP,
@@ -26,54 +38,39 @@ SUFFIX_REPLAN_PHASES: frozenset[HarvestTaskPhase] = frozenset({
     HarvestTaskPhase.RETURNING_HOME,
 })
 
-# phaseごとの残区間trajectoryを保持するHarvestMotionPlanのfield名。
-SUFFIX_TRAJECTORY_FIELD_BY_PHASE: dict[HarvestTaskPhase, str] = {
-    HarvestTaskPhase.MOVING_TO_PREGRASP: "pregrasp_joint_trajectory",
-    HarvestTaskPhase.MOVING_TO_GRASP: "grasp_joint_trajectory",
-    HarvestTaskPhase.MOVING_TO_PLACE: "place_joint_trajectory",
-    HarvestTaskPhase.RETURNING_HOME: "home_joint_trajectory",
-}
 
-
-def suffix_trajectory(
+def phase_trajectory(
     plan: HarvestMotionPlan, phase: HarvestTaskPhase
 ) -> JointTrajectory | None:
-    """planから、phaseの残区間に対応するtrajectoryを取り出す。
+    """planからphaseに対応する実行用trajectoryを取り出す。
 
     Args:
         plan: 対象のplan。
-        phase: 残区間を選択するphase。
+        phase: trajectoryを選択するphase。
 
     Returns:
-        phaseがsuffix replan対象ならその区間のtrajectory、対象外ならNone。
+        phaseが計画対象ならその区間のtrajectory、対象外ならNone。
     """
-    field = SUFFIX_TRAJECTORY_FIELD_BY_PHASE.get(phase)
+    field = PHASE_TRAJECTORY_FIELD_BY_PHASE.get(phase)
     if field is None:
         return None
     trajectory = getattr(plan, field)
     return trajectory if isinstance(trajectory, JointTrajectory) else None
 
 
-def should_plan_home_on_entry(
+def should_plan_phase_on_entry(
     previous_phase: HarvestTaskPhase | None, phase: HarvestTaskPhase | None
 ) -> bool:
-    """RETURNING_HOME進入時に能動的なhome計画を起動するか判定する (Issue #32)。
-
-    直行home軌道は衝突を考慮しないため、place後のトレイ近傍から出発すると
-    腕を障害物へ引っ掛け、計画では復旧できない物理固着を誘発し得る。
-    進入時に一度だけ衝突考慮済みのhome区間計画へ置き換える。
+    """移動phase進入時に実行用trajectory計画を起動するか判定する。
 
     Args:
         previous_phase: 直前に観測していたphase。未観測ならNone。
         phase: 新しく観測したphase。
 
     Returns:
-        RETURNING_HOMEへの遷移を新規に観測した場合のみTrue。
+        計画対象の移動phaseへの遷移を新規に観測した場合のみTrue。
     """
-    return (
-        phase is HarvestTaskPhase.RETURNING_HOME
-        and previous_phase is not HarvestTaskPhase.RETURNING_HOME
-    )
+    return phase in PHASE_ENTRY_PLANNING_PHASES and previous_phase is not phase
 
 
 def terminal_joint_state_of_phase(
@@ -92,7 +89,7 @@ def terminal_joint_state_of_phase(
     Returns:
         phase残区間trajectoryの終端関節構成。対象外phaseやtrajectory欠落時はNone。
     """
-    trajectory = suffix_trajectory(plan, phase)
+    trajectory = phase_trajectory(plan, phase)
     if trajectory is None or not trajectory.points:
         return None
     return JointStateSnapshot(
@@ -102,13 +99,13 @@ def terminal_joint_state_of_phase(
 
 
 @dataclass(frozen=True)
-class SuffixUpdateDecision:
+class PhasePlanUpdateDecision:
     adopted: bool
     reason: str
     max_trajectory_delta_rad: float | None = None
 
 
-class SuffixReplanGate:
+class PhasePlanningGate:
     """planner実行中の二重起動をthread-safeに抑止する。"""
 
     def __init__(self) -> None:
@@ -129,30 +126,30 @@ class SuffixReplanGate:
             self._in_flight = False
 
 
-def evaluate_suffix_update(
+def evaluate_phase_plan_update(
     *,
     phase: HarvestTaskPhase,
     current_plan: HarvestMotionPlan,
     candidate_plan: HarvestMotionPlan,
     minimum_endpoint_delta_rad: float = 0.02,
-) -> SuffixUpdateDecision:
-    """candidateのphase残区間trajectory差がgoal差し替えに値するか判定する。"""
-    if phase not in SUFFIX_REPLAN_PHASES:
-        return SuffixUpdateDecision(False, "rejected_unsupported_phase")
-    candidate = suffix_trajectory(candidate_plan, phase)
+) -> PhasePlanUpdateDecision:
+    """candidateのphase trajectoryを新しい実行計画として採用するか判定する。"""
+    if phase not in PHASE_ENTRY_PLANNING_PHASES:
+        return PhasePlanUpdateDecision(False, "rejected_unsupported_phase")
+    candidate = phase_trajectory(candidate_plan, phase)
     if candidate is None or not candidate.points:
-        return SuffixUpdateDecision(False, "rejected_missing_suffix_trajectory")
-    current = suffix_trajectory(current_plan, phase)
+        return PhasePlanUpdateDecision(False, "rejected_missing_phase_trajectory")
+    current = phase_trajectory(current_plan, phase)
     if current is None or not current.points:
-        return SuffixUpdateDecision(True, "adopted_missing_current_trajectory")
+        return PhasePlanUpdateDecision(True, "adopted_missing_current_trajectory")
     delta = _boundary_trajectory_delta(current, candidate)
     if delta is None:
-        return SuffixUpdateDecision(True, "adopted_incomparable_trajectory")
+        return PhasePlanUpdateDecision(True, "adopted_incomparable_trajectory")
     if delta < minimum_endpoint_delta_rad:
-        return SuffixUpdateDecision(
+        return PhasePlanUpdateDecision(
             False, "rejected_small_trajectory_delta", delta
         )
-    return SuffixUpdateDecision(
+    return PhasePlanUpdateDecision(
         True, "adopted_significant_trajectory_delta", delta
     )
 

@@ -58,14 +58,19 @@ def summarize(events: Iterable[dict[str, object]]) -> dict[str, object]:
         "max": max(latencies) if latencies else None,
     }
     suffix_latencies_by_phase: dict[str, list[float]] = {}
+    phase_plan_latencies_by_phase: dict[str, list[float]] = {}
     for event in event_list:
-        if (
-            event["event"] == "suffix_replan_completed"
-            and event.get("success") is True
-            and isinstance(event.get("latency_ms"), (int, float))
+        if event.get("success") is not True or not isinstance(
+            event.get("latency_ms"), (int, float)
         ):
-            phase = str(event.get("phase", "unknown"))
+            continue
+        phase = str(event.get("phase", "unknown"))
+        if event["event"] == "suffix_replan_completed":
             suffix_latencies_by_phase.setdefault(phase, []).append(
+                float(event["latency_ms"])
+            )
+        if event["event"] == "phase_plan_completed":
+            phase_plan_latencies_by_phase.setdefault(phase, []).append(
                 float(event["latency_ms"])
             )
     adoption_by_producer: dict[str, dict[str, int]] = {}
@@ -92,6 +97,17 @@ def summarize(events: Iterable[dict[str, object]]) -> dict[str, object]:
                 },
             }
             for phase, latencies in sorted(suffix_latencies_by_phase.items())
+        },
+        "phase_plan": {
+            phase: {
+                "successful_count": len(latencies),
+                "latency_ms": {
+                    "mean": statistics.fmean(latencies),
+                    "min": min(latencies),
+                    "max": max(latencies),
+                },
+            }
+            for phase, latencies in sorted(phase_plan_latencies_by_phase.items())
         },
         "phase_abort": {
             phase: {
