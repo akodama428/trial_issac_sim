@@ -21,6 +21,10 @@ constexpr char kFingerJoint1[] = "panda_finger_joint1";
 constexpr char kFingerJoint2[] = "panda_finger_joint2";
 constexpr double kGripperOpenPosition = 0.04;
 constexpr double kGripperClosedPosition = 0.0;
+constexpr std::size_t kArmJointCount = 7;
+constexpr std::array<double, kArmJointCount> kMaxEffort = {
+  87.0, 87.0, 87.0, 87.0, 12.0, 12.0, 12.0
+};
 
 }  // namespace
 
@@ -42,6 +46,24 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_init(
     info_.hardware_parameters.count("isaac_joint_commands_topic")
     ? info_.hardware_parameters.at("isaac_joint_commands_topic")
     : "/isaac_joint_commands";
+  isaac_arm_effort_commands_topic_ =
+    info_.hardware_parameters.count("isaac_arm_effort_commands_topic")
+    ? info_.hardware_parameters.at("isaac_arm_effort_commands_topic")
+    : "/isaac_arm_effort_commands";
+  isaac_finger_position_commands_topic_ =
+    info_.hardware_parameters.count("isaac_finger_position_commands_topic")
+    ? info_.hardware_parameters.at("isaac_finger_position_commands_topic")
+    : "/isaac_finger_position_commands";
+  arm_command_mode_ =
+    info_.hardware_parameters.count("arm_command_mode")
+    ? info_.hardware_parameters.at("arm_command_mode")
+    : "position_velocity";
+  if (arm_command_mode_ != "position_velocity" && arm_command_mode_ != "effort") {
+    RCLCPP_ERROR(
+      rclcpp::get_logger("IsaacSimHardwareInterface"),
+      "Unsupported arm_command_mode '%s'.", arm_command_mode_.c_str());
+    return hardware_interface::CallbackReturn::ERROR;
+  }
 
   gripper_closed_topic_ =
     info_.hardware_parameters.count("gripper_closed_topic")
@@ -53,12 +75,15 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_init(
   velocity_state_.resize(n_joints, 0.0);
   position_command_.resize(n_joints, std::numeric_limits<double>::quiet_NaN());
   velocity_command_.resize(n_joints, 0.0);
+  effort_command_.resize(n_joints, 0.0);
 
-  for (const auto & joint : info_.joints) {
-    if (joint.command_interfaces.size() != 2) {
+  for (std::size_t index = 0; index < info_.joints.size(); ++index) {
+    const auto & joint = info_.joints[index];
+    const std::size_t expected_command_interfaces = index < kArmJointCount ? 3 : 2;
+    if (joint.command_interfaces.size() != expected_command_interfaces) {
       RCLCPP_ERROR(rclcpp::get_logger("IsaacSimHardwareInterface"),
-        "Joint '%s' must have exactly 2 command interfaces (position, velocity).",
-        joint.name.c_str());
+        "Joint '%s' must have %zu command interfaces.",
+        joint.name.c_str(), expected_command_interfaces);
       return hardware_interface::CallbackReturn::ERROR;
     }
     if (joint.state_interfaces.size() != 2) {
@@ -89,6 +114,12 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_configure(
   joint_cmd_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
     isaac_joint_commands_topic_,
     rclcpp::SystemDefaultsQoS());
+  arm_effort_cmd_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
+    isaac_arm_effort_commands_topic_,
+    rclcpp::SystemDefaultsQoS());
+  finger_position_cmd_pub_ = node_->create_publisher<sensor_msgs::msg::JointState>(
+    isaac_finger_position_commands_topic_,
+    rclcpp::SystemDefaultsQoS());
 
   gripper_closed_sub_ = node_->create_subscription<std_msgs::msg::String>(
     gripper_closed_topic_,
@@ -99,10 +130,10 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_configure(
 
   RCLCPP_INFO(
     rclcpp::get_logger("IsaacSimHardwareInterface"),
-    "Configured: subscribing to '%s' and '%s', publishing to '%s'",
+    "Configured: mode='%s', subscribing to '%s' and '%s', publishing commands",
+    arm_command_mode_.c_str(),
     isaac_joint_states_topic_.c_str(),
-    gripper_closed_topic_.c_str(),
-    isaac_joint_commands_topic_.c_str());
+    gripper_closed_topic_.c_str());
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -131,6 +162,7 @@ hardware_interface::CallbackReturn IsaacSimHardwareInterface::on_activate(
     apply_gripper_command_to_fingers();
   }
   velocity_command_.assign(n_joints, 0.0);
+  effort_command_.assign(n_joints, 0.0);
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -171,6 +203,12 @@ IsaacSimHardwareInterface::export_command_interfaces()
       info_.joints[i].name,
       hardware_interface::HW_IF_VELOCITY,
       &velocity_command_[i]);
+    if (i < kArmJointCount) {
+      command_interfaces.emplace_back(
+        info_.joints[i].name,
+        hardware_interface::HW_IF_EFFORT,
+        &effort_command_[i]);
+    }
   }
   return command_interfaces;
 }
@@ -213,6 +251,34 @@ hardware_interface::return_type IsaacSimHardwareInterface::write(
 
   std::lock_guard<std::mutex> lock(state_mutex_);
   apply_gripper_command_to_fingers();
+
+  if (arm_command_mode_ == "effort") {
+    auto arm_msg = sensor_msgs::msg::JointState();
+    arm_msg.header.stamp = time;
+    arm_msg.name.reserve(kArmJointCount);
+    arm_msg.effort.reserve(kArmJointCount);
+    for (std::size_t i = 0; i < kArmJointCount; ++i) {
+      const double requested = std::isfinite(effort_command_[i]) ? effort_command_[i] : 0.0;
+      arm_msg.name.push_back(info_.joints[i].name);
+      arm_msg.effort.push_back(std::clamp(requested, -kMaxEffort[i], kMaxEffort[i]));
+    }
+
+    auto finger_msg = sensor_msgs::msg::JointState();
+    finger_msg.header.stamp = time;
+    finger_msg.name.reserve(2);
+    finger_msg.position.reserve(2);
+    for (std::size_t i = kArmJointCount; i < info_.joints.size(); ++i) {
+      const auto finger_index = i - kArmJointCount;
+      const double requested = std::isfinite(position_command_[i])
+        ? position_command_[i] : position_state_[i];
+      finger_msg.name.push_back(info_.joints[i].name);
+      finger_msg.position.push_back(
+        std::clamp(requested, FINGER_LOWER[finger_index], FINGER_UPPER[finger_index]));
+    }
+    arm_effort_cmd_pub_->publish(arm_msg);
+    finger_position_cmd_pub_->publish(finger_msg);
+    return hardware_interface::return_type::OK;
+  }
 
   for (std::size_t i = 0; i < info_.joints.size(); ++i) {
     msg.name.push_back(info_.joints[i].name);

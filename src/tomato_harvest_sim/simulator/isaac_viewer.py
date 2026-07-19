@@ -77,6 +77,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="success",
         help="Choose the stable grasp or failed grasp demo path.",
     )
+    parser.add_argument(
+        "--arm-command-mode",
+        choices=("position_velocity", "effort"),
+        default="position_velocity",
+        help="Select the Isaac arm command interface used by ros2_control.",
+    )
     return parser.parse_args(argv)
 
 
@@ -176,6 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"  headless={args.headless}", flush=True)
     print(f"  camera_view={args.camera_view}", flush=True)
     print(f"  grasp_mode={args.grasp_mode}", flush=True)
+    print(f"  arm_command_mode={args.arm_command_mode}", flush=True)
     simulation_app = SimulationApp(
         build_simulation_app_config(headless=args.headless),
         experience=str(ISAAC_SIM_EXPERIENCE),
@@ -197,10 +204,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             trajectory_debug_enabled=_os.environ.get(
                 "TOMATO_HARVEST_DEBUG_TRAJECTORY", ""
             ).strip() not in {"", "0", "false", "False"},
+            arm_command_mode=args.arm_command_mode,
         )
         _initialize_robot_to_home(simulation_app=simulation_app, franka_driver=franka_driver)
         from tomato_harvest_sim.simulator.isaac_joint_ros2_bridge import IsaacJointRos2Bridge
-        isaac_joint_bridge = IsaacJointRos2Bridge(driver=franka_driver)
+        isaac_joint_bridge = IsaacJointRos2Bridge(
+            driver=franka_driver,
+            arm_command_mode=args.arm_command_mode,
+        )
         _run_simulator_node_main_loop(
             simulation_app=simulation_app,
             franka_driver=franka_driver,
@@ -756,6 +767,7 @@ def _initialize_robot_to_home(*, simulation_app: object, franka_driver: IsaacFra
         franka_driver.set_joint_positions_with_debug(home, context="home_init")
         for _ in range(10):
             simulation_app.update()
+        franka_driver.activate_arm_command_mode()
         print(
             f"[Simulator] Robot initialized from pose case '{case_id}': {list(home[:7])}",
             flush=True,

@@ -49,16 +49,22 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;
   rclcpp::Subscription<std_msgs::msg::String>::SharedPtr gripper_closed_sub_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_cmd_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr arm_effort_cmd_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr finger_position_cmd_pub_;
 
   std::mutex state_mutex_;
   std::vector<double> position_state_;
   std::vector<double> velocity_state_;
   std::vector<double> position_command_;
   std::vector<double> velocity_command_;
+  std::vector<double> effort_command_;
 
   std::string isaac_joint_states_topic_;
   std::string isaac_joint_commands_topic_;
+  std::string isaac_arm_effort_commands_topic_;
+  std::string isaac_finger_position_commands_topic_;
   std::string gripper_closed_topic_;
+  std::string arm_command_mode_;
   std::optional<bool> gripper_closed_command_;
   bool state_received_{false};
 };

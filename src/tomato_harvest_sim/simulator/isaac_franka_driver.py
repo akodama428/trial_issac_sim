@@ -14,6 +14,8 @@ from tomato_harvest_sim.robot.msg.trajectory_tracking import ObservationData
 class _FallbackArticulationAction:
     joint_positions: np.ndarray | None = None
     joint_velocities: np.ndarray | None = None
+    joint_efforts: np.ndarray | None = None
+    joint_indices: np.ndarray | None = None
 
 
 def _hand_pose_from_grasp_center_pose(
@@ -85,14 +87,24 @@ class IsaacFrankaDriver:
     )
     GRASP_TARGET_OFFSET_FROM_HAND_M = (0.0, 0.0, 0.0584)
 
-    def __init__(self, *, robot_prim_path: str, trajectory_debug_enabled: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        robot_prim_path: str,
+        trajectory_debug_enabled: bool = False,
+        arm_command_mode: str = "position_velocity",
+    ) -> None:
+        if arm_command_mode not in {"position_velocity", "effort"}:
+            raise ValueError(f"unsupported arm command mode: {arm_command_mode}")
         self._robot_prim_path = robot_prim_path
         self._trajectory_debug_enabled = trajectory_debug_enabled
+        self._arm_command_mode = arm_command_mode
         self._initialized = False
         self._articulation = None
         self._articulation_kinematics_solver = None
         self._kinematics_solver = None
         self._home_joint_positions: np.ndarray | None = None
+        self._arm_effort_control_activated = False
 
     def initialize_if_needed(self) -> bool:
         if self._initialized:
@@ -120,6 +132,19 @@ class IsaacFrankaDriver:
         if current_velocities is None:
             return None
         return np.asarray(current_velocities, dtype=float).reshape(-1)
+
+    def current_joint_efforts(self) -> np.ndarray | None:
+        """Isaac APIが提供する実関節effort readbackを返す。"""
+        if self._articulation is None:
+            return None
+        for method_name in ("get_measured_joint_efforts", "get_applied_joint_efforts"):
+            method = getattr(self._articulation, method_name, None)
+            if not callable(method):
+                continue
+            efforts = method()
+            if efforts is not None:
+                return np.asarray(efforts, dtype=float).reshape(-1)
+        return None
 
     def get_observation(self) -> ObservationData:
         return ObservationData(
@@ -282,6 +307,52 @@ class IsaacFrankaDriver:
             f"readback_q={self._format_joint_positions(readback[:7]) if readback is not None else 'n/a'}"
         )
 
+    def set_arm_efforts_with_debug(
+        self,
+        *,
+        efforts: np.ndarray,
+        context: str,
+    ) -> None:
+        """arm 7軸へeffortだけを適用する。"""
+        if self._articulation is None:
+            return
+        effort_array = np.asarray(efforts, dtype=float).reshape(-1)
+        if effort_array.shape != (7,) or not np.all(np.isfinite(effort_array)):
+            return
+        action = self._create_articulation_action(
+            efforts=effort_array,
+            joint_indices=np.arange(7, dtype=np.int64),
+        )
+        self._articulation.apply_action(action)
+        self._debug_log(
+            "[Simulator][TrajectoryDebug][set_arm_efforts] "
+            f"context={context} "
+            f"command_tau={self._format_joint_positions(effort_array)}"
+        )
+
+    def set_finger_positions_with_debug(
+        self,
+        *,
+        positions: np.ndarray,
+        context: str,
+    ) -> None:
+        """finger 2軸へpositionだけを適用する。"""
+        if self._articulation is None:
+            return
+        position_array = np.asarray(positions, dtype=float).reshape(-1)
+        if position_array.shape != (2,) or not np.all(np.isfinite(position_array)):
+            return
+        action = self._create_articulation_action(
+            positions=position_array,
+            joint_indices=np.asarray((7, 8), dtype=np.int64),
+        )
+        self._articulation.apply_action(action)
+        self._debug_log(
+            "[Simulator][TrajectoryDebug][set_finger_positions] "
+            f"context={context} "
+            f"command_q={self._format_joint_positions(position_array)}"
+        )
+
     def _do_initialize(self) -> None:
         import omni.kit.app
         from isaacsim.core.prims import SingleArticulation
@@ -310,14 +381,37 @@ class IsaacFrankaDriver:
         )
         self._home_joint_positions = np.asarray(joint_positions, dtype=float)
 
+    def activate_arm_command_mode(self) -> None:
+        """home配置後に選択済みarm制御方式を有効化する。"""
+        if self._arm_command_mode != "effort" or self._arm_effort_control_activated:
+            return
+        self._disable_arm_drive_gains_for_effort_control()
+        self._arm_effort_control_activated = True
+
+    def _disable_arm_drive_gains_for_effort_control(self) -> None:
+        """armのUSD drive PDを無効化し、effortとの二重制御を防ぐ。"""
+        controller = self._articulation.get_articulation_controller()
+        kps, kds = controller.get_gains()
+        effort_kps = np.asarray(kps, dtype=float).copy()
+        effort_kds = np.asarray(kds, dtype=float).copy()
+        if effort_kps.shape[0] < 7 or effort_kds.shape[0] < 7:
+            raise RuntimeError("Franka articulation gains do not contain seven arm joints")
+        effort_kps[:7] = 0.0
+        effort_kds[:7] = 0.0
+        controller.set_gains(kps=effort_kps, kds=effort_kds, save_to_usd=False)
+
     def _create_articulation_action(
         self,
         *,
         positions: np.ndarray | None = None,
         velocities: np.ndarray | None = None,
+        efforts: np.ndarray | None = None,
+        joint_indices: np.ndarray | None = None,
     ) -> object:
         position_array = None if positions is None else np.asarray(positions, dtype=float)
         velocity_array = None if velocities is None else np.asarray(velocities, dtype=float)
+        effort_array = None if efforts is None else np.asarray(efforts, dtype=float)
+        index_array = None if joint_indices is None else np.asarray(joint_indices, dtype=np.int64)
         try:
             from isaacsim.core.utils.types import ArticulationAction
 
@@ -326,11 +420,17 @@ class IsaacFrankaDriver:
                 kwargs["joint_positions"] = position_array
             if velocity_array is not None:
                 kwargs["joint_velocities"] = velocity_array
+            if effort_array is not None:
+                kwargs["joint_efforts"] = effort_array
+            if index_array is not None:
+                kwargs["joint_indices"] = index_array
             return ArticulationAction(**kwargs)
         except Exception:
             return _FallbackArticulationAction(
                 joint_positions=position_array,
                 joint_velocities=velocity_array,
+                joint_efforts=effort_array,
+                joint_indices=index_array,
             )
 
     def _debug_log(self, message: str) -> None:

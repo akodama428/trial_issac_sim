@@ -10,6 +10,7 @@ STACK_LOG="${ARTIFACT_DIR}/run_ros2_components.log"
 BAG_DIR="${ARTIFACT_DIR}/home_divergence_bag"
 BAG_LOG="${ARTIFACT_DIR}/bag_record.log"
 BAG_PID=""
+ARM_COMMAND_MODE="${TOMATO_HARVEST_ARM_COMMAND_MODE:-position_velocity}"
 
 mkdir -p "${ARTIFACT_DIR}"
 # self-hosted runnerのartifact volumeはrun間で再利用される。grep判定が過去runの
@@ -39,6 +40,9 @@ if [[ "${CI_RECORD_HOME_DIVERGENCE_BAG:-}" == "1" ]]; then
     /tomato_harvest/phase \
     /joint_trajectory_controller/joint_trajectory \
     /joint_trajectory_controller/controller_state \
+    /isaac_arm_effort_commands \
+    /isaac_finger_position_commands \
+    /isaac_joint_states \
     >"${BAG_LOG}" 2>&1 &
   BAG_PID=$!
 fi
@@ -52,6 +56,7 @@ timeout --signal=INT "${E2E_TIMEOUT_SEC}" \
   --headless \
   --headless-steps "${HEADLESS_STEPS}" \
   --grasp-mode "${CI_GRASP_MODE:-physics}" \
+  --arm-command-mode "${ARM_COMMAND_MODE}" \
   --auto-start \
   --controller-log "${CONTROLLER_LOG}" \
   --robot-log "${ROBOT_LOG}" \

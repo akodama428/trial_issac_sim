@@ -4,11 +4,125 @@ version: 0.1.0
 status: draft
 owner: atsushi
 created: 2026-06-17
-updated: 2026-06-27
+updated: 2026-07-18
 ---
 
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
+
+## Step 3-13-2 Isaac joint effort校正（2026-07-19）
+
+### 調査目的・条件
+
+- Isaac Sim 6.0 / PhysX / 公式Franka USDを対象に、既知のjoint1 effortを直接入力したときの
+  commanded、applied、measured effortと運動応答を比較する。
+- ROS 2 `JointState.effort`へpublishしている`get_measured_joint_efforts()`の単位、符号、
+  joint mappingと、position/velocity drive内部トルクとの意味の違いを確認する。
+
+### 確認済みの事実
+
+- Isaac Sim 6.0公式Joint State Sensorはrevolute DOFのeffortをNm、prismatic DOFをNで返し、
+  `stage_meters_per_unit`とDOF type/nameも同時に返す。
+- `get_applied_joint_efforts()`は、利用者が`set_joint_efforts()`で直接設定したeffortを返す。
+- `get_measured_joint_efforts()`は、solverが計算したjoint forceをDOFの運動方向へ射影した
+  measured effortを返す。jointのchild linkへ入るincoming joint forceという符号規約を持つ。
+- `get_measured_joint_forces()`は各incoming jointの6次元spatial force/torqueであり、
+  projected effortとは別の観測量である。
+- Isaac Sim 6.0では旧`isaacsim.sensors.physics.EffortSensor`はdeprecatedであり、
+  新規観測には`isaacsim.sensors.experimental.physics`を使う。
+- Isaac Sim / Omni Physics tensor APIの`get_dof_actuation_forces()`は、利用者が直接設定した
+  DOF actuation forceを返す。このforceはimplicit PD controller forceから独立しており、
+  position/velocity driveのsolver出力getterではない。
+- PhysX 5 articulation driveは、step開始時の誤差へ単純な明示PD式を適用するのではなく、
+  step終了状態に対するconstraintとしてimplicitにsolver反復される。
+- PhysXの`eLINK_INCOMING_JOINT_FORCE`はjoint drive forceを含むが、joint friction、
+  max joint velocity clamp、利用者のdirect joint force、joint limit等も含むincoming spatial
+  joint forceである。DOF方向へ射影してdrive成分だけを分離する公開APIではない。
+- 旧`PxArticulationCacheFlag::eJOINT_SOLVER_FORCES`は報告値が不正でdeprecatedとなっており、
+  NVIDIAは`eLINK_INCOMING_JOINT_FORCE`を使うよう明記している。
+- `computeJointForce`等のinverse dynamics APIが返すjoint forceは目標加速度を実現する計算値で、
+  joint driveとdampingを計算に含めない。simulation stepで実際にclampされたdrive torqueの
+  readbackではない。
+- 2026-07-19時点で、Isaac Sim 6.0のArticulationController、SingleArticulation、
+  Omni Physics tensor API、PhysX articulation cacheに、clamp後implicit drive torqueだけを
+  返す公開getterは確認できなかった。
+
+### 現時点の試験方針（推論）
+
+- joint1のimplicit drive stiffness/dampingだけを0にし、joint2〜7のposition driveは維持して
+  arm姿勢の重力落下を防ぐ。
+- 各0 / +1 / -1 / +5 / -5 Nm pulseは同じhome位置・ゼロ速度へresetして独立実行する。
+- commandedとappliedの一致で入力単位・mappingを、速度変化の符号で作用方向を、
+  measured effortとの関係でROS `JointState.effort`の意味を評価する。
+- position/velocity drive内部出力はdirect effort APIと同一ではないため、この校正だけで
+  A modeのimplicit drive torque観測可否を断定しない。
+
+### 未解決の確認事項
+
+- direct effort校正ではmeasured projected effortとapplied effortの符号が一致したが、
+  implicit drive・limit・接触が共存する条件で各寄与を分離する方法。
+- 実験用pulse中にjoint2〜7の保持driveからjoint1へ残るcouplingが校正精度へ与える影響。
+- drive-only torqueが必要な場合に、PhysX solver内部instrumentationを保守するか、
+  implicit driveを明示effort controllerへ置換してcommand/clampを観測可能にするか。
+
+### 一次情報
+
+- Isaac Sim 6.0 Joint State Sensor:
+  https://docs.isaacsim.omniverse.nvidia.com/latest/sensors/isaacsim_sensors_physics_joint_state.html
+- Isaac Sim Articulation Joint Sensors:
+  https://docs.isaacsim.omniverse.nvidia.com/latest/sensors/isaacsim_sensors_physics_articulation_force.html
+- Isaac Sim 6.0 Effort Sensor:
+  https://docs.isaacsim.omniverse.nvidia.com/6.0.0/sensors/isaacsim_sensors_physics_effort.html
+- Isaac Sim 6.0 Core API:
+  https://docs.isaacsim.omniverse.nvidia.com/6.0.0/py/source/deprecated/isaacsim.core.api/docs/index.html
+- Omni Physics Tensor API:
+  https://docs.omniverse.nvidia.com/kit/docs/omni_physics/107.3/extensions/runtime/source/omni.physics.tensors/docs/api/python.html
+- PhysX 5.3 Articulations:
+  https://nvidia-omniverse.github.io/PhysX/physx/5.3.0/docs/Articulations.html
+- PhysX `PxArticulationDrive`:
+  https://nvidia-omniverse.github.io/PhysX/physx/5.4.0/_api_build/struct_px_articulation_drive.html
+
+## Step 3-13 JTC effort command interface化（2026-07-18）
+
+### 確認済みの事実
+
+- ros2_control Jazzy公式JointTrajectoryController（JTC）は`effort`単独のcommand
+  interfaceをサポートする。この場合、位置・速度の軌道追従誤差をPIDでeffortへ変換し、
+  軌道pointにeffortがあればfeed-forwardとして加算する。
+- JTCの`position, effort`併用モードはPIDを使わず、positionと軌道effortを各interfaceへ
+  直接転送する。このためIssue #61の「PIDでmaxForceを考慮したトルク制御」の初回検証には
+  `effort`単独モードが適合する。
+- JTCのeffort commandにはpositionとvelocityのstate interfaceが必要である。PIDには
+  `u_clamp_min/max`、`i_clamp_min/max`、`conditional_integration`または
+  `back_calculation`等のanti-windup設定がある。
+- Isaac Sim公式Articulation Controllerはjoint effort commandをサポートする一方、同一jointを
+  positionとeffortなど複数方式で同時制御できない。joint indexを指定してarmとfingerへ
+  異なる制御方式を適用できる。
+- 現行実装はJTCからposition+velocityを出し、C++ HardwareInterface、ROS 2 bridge、
+  `IsaacFrankaDriver`を経て、armとfinger全9軸へposition+velocity targetを同時適用している。
+
+### 設計への反映（推論）
+
+- 既定のposition+velocity経路は維持し、起動時に
+  `position_velocity`または`effort`を選ぶA/B構成とする。実行中のhot switchは行わない。
+- effortモードではarm 7軸へeffortだけを適用し、finger 2軸のposition commandとは
+  joint indexで分離する。armのposition/velocity targetを同じArticulationActionへ混在させない。
+- JTCの出力clampとHardwareInterfaceの防御的clampを二重化し、joint1〜4は±87 Nm、
+  joint5〜7は±12 Nmを絶対上限とする。PID tuningの初期段階はI項と逆動力学feed-forwardを
+  無効化し、free-spaceの小振幅試験後にE2Eへ進む。
+- 実装順は、command/applied effort観測、mode/interface契約、Isaac effort適用、
+  single-joint tuning、tray接触OFF/ONのE2E A/B比較とする。
+
+### 一次情報
+
+- ros2_control Jazzy JointTrajectoryController:
+  https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/userdoc.html
+- ros2_control Jazzy JTC parameters:
+  https://control.ros.org/jazzy/doc/ros2_controllers/joint_trajectory_controller/doc/parameters.html
+- ROS 2 Jazzy hardware interface types:
+  https://docs.ros.org/en/jazzy/p/hardware_interface/doc/hardware_interface_types_userdoc.html
+- Isaac Sim Articulation Controller:
+  https://docs.isaacsim.omniverse.nvidia.com/latest/robot_simulation/articulation_controller.html
 
 ## Step 3-8-6 physics配置判定対策（2026-07-17）
 

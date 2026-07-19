@@ -31,6 +31,9 @@ class IsaacJointRos2Bridge:
         driver: IsaacFrankaDriver,
         joint_states_topic: str = "/isaac_joint_states",
         joint_commands_topic: str = "/isaac_joint_commands",
+        arm_effort_commands_topic: str = "/isaac_arm_effort_commands",
+        finger_position_commands_topic: str = "/isaac_finger_position_commands",
+        arm_command_mode: str = "position_velocity",
         spin_timeout_sec: float = 0.001,
     ) -> None:
         import rclpy
@@ -38,6 +41,9 @@ class IsaacJointRos2Bridge:
         from sensor_msgs.msg import JointState
 
         self._driver = driver
+        if arm_command_mode not in {"position_velocity", "effort"}:
+            raise ValueError(f"unsupported arm command mode: {arm_command_mode}")
+        self._arm_command_mode = arm_command_mode
         self._spin_timeout_sec = spin_timeout_sec
         self._rclpy = rclpy
         self._initialized_here = False
@@ -53,12 +59,27 @@ class IsaacJointRos2Bridge:
         self._pub = self._node.create_publisher(
             JointState, joint_states_topic, rclpy.qos.QoSProfile(depth=1)
         )
-        self._sub = self._node.create_subscription(
-            JointState,
-            joint_commands_topic,
-            self._on_joint_command,
-            rclpy.qos.QoSProfile(depth=1),
-        )
+        qos = rclpy.qos.QoSProfile(depth=1)
+        self._sub = None
+        self._arm_effort_sub = None
+        self._finger_position_sub = None
+        if arm_command_mode == "position_velocity":
+            self._sub = self._node.create_subscription(
+                JointState, joint_commands_topic, self._on_joint_command, qos
+            )
+        else:
+            self._arm_effort_sub = self._node.create_subscription(
+                JointState,
+                arm_effort_commands_topic,
+                self._on_arm_effort_command,
+                qos,
+            )
+            self._finger_position_sub = self._node.create_subscription(
+                JointState,
+                finger_position_commands_topic,
+                self._on_finger_position_command,
+                qos,
+            )
         # Publish simulation time to /clock so that ros2_control (use_sim_time: true)
         # advances the JointTrajectoryController in sync with Isaac Sim physics.
         self._clock_pub = self._node.create_publisher(
@@ -66,6 +87,8 @@ class IsaacJointRos2Bridge:
         )
 
         self._pending_command: tuple[np.ndarray, np.ndarray] | None = None
+        self._pending_arm_effort: np.ndarray | None = None
+        self._pending_finger_positions: np.ndarray | None = None
         self._JointState = JointState
         self._Clock = Clock
 
@@ -111,6 +134,10 @@ class IsaacJointRos2Bridge:
         msg.name = list(joint_names)
         msg.position = [float(v) for v in positions[: len(joint_names)]]
         msg.velocity = [float(v) for v in velocities[: len(joint_names)]]
+        effort_reader = getattr(self._driver, "current_joint_efforts", None)
+        efforts = effort_reader() if callable(effort_reader) else None
+        if efforts is not None and len(efforts) >= len(joint_names):
+            msg.effort = [float(v) for v in efforts[: len(joint_names)]]
         self._pub.publish(msg)
 
     def _on_joint_command(self, msg: object) -> None:
@@ -139,8 +166,29 @@ class IsaacJointRos2Bridge:
 
         self._pending_command = (pos, vel)
 
+    def _on_arm_effort_command(self, msg: object) -> None:
+        names = tuple(getattr(msg, "name", ()))
+        efforts = np.asarray(getattr(msg, "effort", ()), dtype=float).reshape(-1)
+        if names != tuple(self._driver.ARM_JOINT_NAMES):
+            return
+        if efforts.shape != (7,) or not np.all(np.isfinite(efforts)):
+            return
+        self._pending_arm_effort = efforts.copy()
+
+    def _on_finger_position_command(self, msg: object) -> None:
+        names = tuple(getattr(msg, "name", ()))
+        positions = np.asarray(getattr(msg, "position", ()), dtype=float).reshape(-1)
+        if names != self.FINGER_JOINT_NAMES:
+            return
+        if positions.shape != (2,) or not np.all(np.isfinite(positions)):
+            return
+        self._pending_finger_positions = positions.copy()
+
     def _apply_pending_command(self) -> None:
         """HWI から受けた最新の関節コマンドを articulation へ適用する。"""
+        if getattr(self, "_arm_command_mode", "position_velocity") == "effort":
+            self._apply_pending_effort_commands()
+            return
         if self._pending_command is None:
             return
         if not self._driver.initialize_if_needed():
@@ -162,6 +210,24 @@ class IsaacJointRos2Bridge:
             velocities=full_velocities,
             context="isaac_joint_command",
         )
+
+    def _apply_pending_effort_commands(self) -> None:
+        if not self._driver.initialize_if_needed():
+            return
+        if self._pending_arm_effort is not None:
+            efforts = self._pending_arm_effort
+            self._pending_arm_effort = None
+            self._driver.set_arm_efforts_with_debug(
+                efforts=efforts,
+                context="isaac_arm_effort_command",
+            )
+        if self._pending_finger_positions is not None:
+            positions = self._pending_finger_positions
+            self._pending_finger_positions = None
+            self._driver.set_finger_positions_with_debug(
+                positions=positions,
+                context="isaac_finger_position_command",
+            )
 
     def _joint_names_for_dof_count(self, dof_count: int) -> tuple[str, ...]:
         arm_joint_names = tuple(self._driver.ARM_JOINT_NAMES)

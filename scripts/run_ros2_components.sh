@@ -21,6 +21,7 @@
 #   --headless                 Isaac Sim をヘッドレスモードで起動（--isaac 時のみ有効）
 #   --headless-steps N         ヘッドレス実行ステップ数（デフォルト: 64）
 #   --grasp-mode MODE          success / failure / physics
+#   --arm-command-mode MODE    position_velocity / effort
 #   --auto-start               起動後に自動で Start コマンドを送信
 #   --rebuild                  C++ パッケージを強制再ビルドする
 #   --moveit                   MoveIt2 move_group を起動する（GetMotionPlan サービス提供）
@@ -57,6 +58,7 @@ USE_ISAAC=false
 AUTO_START=false
 USE_MOVEIT=false
 HEADLESS_ARGS=()
+ARM_COMMAND_MODE="${TOMATO_HARVEST_ARM_COMMAND_MODE:-position_velocity}"
 
 # ---------------------------------------------------------------------------- #
 # 引数解析
@@ -103,6 +105,10 @@ while [[ $# -gt 0 ]]; do
       HEADLESS_ARGS+=(--grasp-mode "$2")
       shift 2
       ;;
+    --arm-command-mode)
+      ARM_COMMAND_MODE="$2"
+      shift 2
+      ;;
     --moveit)
       USE_MOVEIT=true
       shift
@@ -113,6 +119,13 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${ARM_COMMAND_MODE}" != "position_velocity" && "${ARM_COMMAND_MODE}" != "effort" ]]; then
+  echo "[ERROR] --arm-command-mode must be position_velocity or effort" >&2
+  exit 1
+fi
+export TOMATO_HARVEST_ARM_COMMAND_MODE="${ARM_COMMAND_MODE}"
+HEADLESS_ARGS+=(--arm-command-mode "${ARM_COMMAND_MODE}")
 
 ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
 WS_SETUP="${WS_DIR}/install/setup.bash"
@@ -238,6 +251,7 @@ sleep 3
 # ---------------------------------------------------------------------------- #
 log "--- franka_ros2_control 起動 ---"
 log "  ログ: ${CONTROLLER_LOG}"
+log "  arm command mode: ${ARM_COMMAND_MODE}"
 
 start_bg "franka_ros2_control bringup" \
   ros2 launch franka_ros2_control franka_ros2_control.launch.py \

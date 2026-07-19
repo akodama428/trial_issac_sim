@@ -1,0 +1,48 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    joint_trajectory_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+joint_trajectory_controller:
+  ros__parameters:
+    joints:
+      - panda_joint1
+      - panda_joint2
+      - panda_joint3
+      - panda_joint4
+      - panda_joint5
+      - panda_joint6
+      - panda_joint7
+    command_interfaces:
+      - effort
+    state_interfaces:
+      - position
+      - velocity
+    interpolation_method: splines
+    interpolate_from_desired_state: false
+    set_last_command_interface_value_as_state_on_activation: false
+    allow_partial_joints_goal: false
+    allow_integration_in_goal_trajectories: true
+    gains:
+      panda_joint1: {p: 100.0, i: 0.0, d: 10.0, u_clamp_min: -87.0, u_clamp_max: 87.0, antiwindup_strategy: conditional_integration}
+      panda_joint2: {p: 100.0, i: 0.0, d: 10.0, u_clamp_min: -87.0, u_clamp_max: 87.0, antiwindup_strategy: conditional_integration}
+      panda_joint3: {p: 100.0, i: 0.0, d: 10.0, u_clamp_min: -87.0, u_clamp_max: 87.0, antiwindup_strategy: conditional_integration}
+      panda_joint4: {p: 100.0, i: 0.0, d: 10.0, u_clamp_min: -87.0, u_clamp_max: 87.0, antiwindup_strategy: conditional_integration}
+      panda_joint5: {p: 50.0, i: 0.0, d: 5.0, u_clamp_min: -12.0, u_clamp_max: 12.0, antiwindup_strategy: conditional_integration}
+      panda_joint6: {p: 50.0, i: 0.0, d: 5.0, u_clamp_min: -12.0, u_clamp_max: 12.0, antiwindup_strategy: conditional_integration}
+      panda_joint7: {p: 50.0, i: 0.0, d: 5.0, u_clamp_min: -12.0, u_clamp_max: 12.0, antiwindup_strategy: conditional_integration}
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 5.0
+      panda_joint1: {goal: 0.10}
+      panda_joint2: {goal: 0.10}
+      panda_joint3: {goal: 0.10}
+      panda_joint4: {goal: 0.10}
+      panda_joint5: {goal: 0.10}
+      panda_joint6: {goal: 0.10}
+      panda_joint7: {goal: 0.10}

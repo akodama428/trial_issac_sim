@@ -37,6 +37,7 @@ class _JointStateStub:
         self.name: list[str] = []
         self.position: list[float] = []
         self.velocity: list[float] = []
+        self.effort: list[float] = []
 
 
 class _DriverStub:
@@ -59,6 +60,9 @@ class _DriverStub:
 
     def current_joint_velocities(self) -> np.ndarray:
         return self.velocities.copy()
+
+    def current_joint_efforts(self) -> np.ndarray:
+        return np.arange(9, dtype=float)
 
     def set_joint_velocity_targets_with_debug(self, *, positions, velocities, context):
         self.last_velocity_call = (np.asarray(positions).copy(), np.asarray(velocities).copy(), context)
@@ -102,6 +106,7 @@ class IsaacJointRos2BridgeFingerTest(unittest.TestCase):
         )
         self.assertAlmostEqual(message.position[7], 0.04)
         self.assertAlmostEqual(message.position[8], 0.04)
+        self.assertEqual(message.effort, [float(value) for value in range(9)])
 
     def test_joint_command_stores_arm_and_finger_positions(self) -> None:
         driver = _DriverStub()

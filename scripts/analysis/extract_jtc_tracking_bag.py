@@ -21,6 +21,8 @@ types = {t.name: get_message(t.type) for t in reader.get_all_topics_and_types()}
 
 state_rows = []
 phase_rows = []
+effort_rows = []
+effort_joint_names = None
 joint_names = None
 while reader.has_next():
     topic, data, t_ns = reader.read_next()
@@ -36,6 +38,12 @@ while reader.has_next():
     elif topic == "/tomato_harvest/phase":
         msg = deserialize_message(data, types[topic])
         phase_rows.append([t_ns * 1e-9, msg.data])
+    elif topic == "/isaac_joint_states":
+        msg = deserialize_message(data, types[topic])
+        if msg.effort and len(msg.effort) == len(msg.name):
+            if effort_joint_names is None:
+                effort_joint_names = list(msg.name)
+            effort_rows.append([t_ns * 1e-9] + list(msg.effort))
 
 with open(f"{OUT_DIR}/controller_state.csv", "w", newline="") as f:
     writer = csv.writer(f)
@@ -47,5 +55,13 @@ with open(f"{OUT_DIR}/phase.csv", "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow(["t", "phase"])
     writer.writerows(phase_rows)
+if effort_rows:
+    with open(f"{OUT_DIR}/joint_effort.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["t"] + effort_joint_names)
+        writer.writerows(effort_rows)
 print(f"joints={joint_names}")
-print(f"state_rows={len(state_rows)} phase_rows={len(phase_rows)}")
+print(
+    f"state_rows={len(state_rows)} phase_rows={len(phase_rows)} "
+    f"effort_rows={len(effort_rows)}"
+)

@@ -34,6 +34,16 @@ class IsaacViewerConfigTest(unittest.TestCase):
 
         self.assertEqual(args.grasp_mode, "physics")
 
+    def test_parse_args_defaults_to_position_velocity_arm_command_mode(self) -> None:
+        args = parse_args([])
+
+        self.assertEqual(args.arm_command_mode, "position_velocity")
+
+    def test_parse_args_accepts_effort_arm_command_mode(self) -> None:
+        args = parse_args(["--arm-command-mode", "effort"])
+
+        self.assertEqual(args.arm_command_mode, "effort")
+
     def test_build_appframework_argv_includes_viewport_extensions(self) -> None:
         argv = build_appframework_argv(headless=False)
 

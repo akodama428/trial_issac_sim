@@ -99,47 +99,57 @@
       <plugin>franka_ros2_control/IsaacSimHardwareInterface</plugin>
       <param name="isaac_joint_states_topic">/isaac_joint_states</param>
       <param name="isaac_joint_commands_topic">/isaac_joint_commands</param>
+      <param name="isaac_arm_effort_commands_topic">/isaac_arm_effort_commands</param>
+      <param name="isaac_finger_position_commands_topic">/isaac_finger_position_commands</param>
+      <param name="arm_command_mode">__ARM_COMMAND_MODE__</param>
       <param name="gripper_closed_topic">/tomato_harvest/gripper_closed</param>
     </hardware>
     <joint name="panda_joint1">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint2">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint3">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint4">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint5">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint6">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>
     <joint name="panda_joint7">
       <command_interface name="position"/>
       <command_interface name="velocity"/>
+      <command_interface name="effort"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
     </joint>

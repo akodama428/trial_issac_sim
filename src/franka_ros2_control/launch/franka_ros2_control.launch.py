@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from launch import LaunchDescription
@@ -9,12 +10,22 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description() -> LaunchDescription:
     pkg_share = FindPackageShare("franka_ros2_control")
 
-    urdf_path = PathJoinSubstitution([pkg_share, "config", "franka_ros2_control.urdf"])
-    controllers_yaml = PathJoinSubstitution([pkg_share, "config", "franka_controllers.yaml"])
+    arm_command_mode = os.environ.get(
+        "TOMATO_HARVEST_ARM_COMMAND_MODE", "position_velocity"
+    )
+    if arm_command_mode not in {"position_velocity", "effort"}:
+        raise RuntimeError(f"unsupported arm command mode: {arm_command_mode}")
+    controller_file = (
+        "franka_controllers_effort.yaml"
+        if arm_command_mode == "effort"
+        else "franka_controllers.yaml"
+    )
+    controllers_yaml = PathJoinSubstitution([pkg_share, "config", controller_file])
 
-    robot_description = {"robot_description": open(
+    robot_description_text = open(
         Path(__file__).parent.parent / "config" / "franka_ros2_control.urdf"
-    ).read()}
+    ).read().replace("__ARM_COMMAND_MODE__", arm_command_mode)
+    robot_description = {"robot_description": robot_description_text}
 
     controller_manager_node = Node(
         package="controller_manager",
