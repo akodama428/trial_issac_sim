@@ -10,6 +10,8 @@ from tomato_harvest_sim.robot.motion_planner.moveit_bridge.geometry import (
     quaternion_from_pose,
 )
 
+_PANDA_FINGER_LINKS = ("panda_leftfinger", "panda_rightfinger")
+
 
 @dataclass(frozen=True)
 class TomatoPlanningSceneOps:
@@ -17,6 +19,20 @@ class TomatoPlanningSceneOps:
     remove_world_tomato: bool
     add_attached_tomato: bool
     remove_attached_tomato: bool
+    add_world_stem: bool
+    remove_world_stem: bool
+
+
+def attached_tomato_touch_links(
+    end_effector_link: str,
+) -> tuple[str, ...]:
+    """把持物との接触を許可するgripper linkを返す。
+
+    attached objectは固定先linkとの接触だけが暗黙に許可される。実際に
+    tomatoを挟む左右fingerもtouch linkへ含め、把持直後の意図的な接触を
+    MoveItのstart-state collisionとして扱わないようにする。
+    """
+    return tuple(dict.fromkeys((end_effector_link, *_PANDA_FINGER_LINKS)))
 
 
 def tomato_planning_scene_ops(
@@ -25,9 +41,37 @@ def tomato_planning_scene_ops(
     planning_scene_has_attached_tomato: bool,
 ) -> TomatoPlanningSceneOps:
     if attach_tomato:
-        return TomatoPlanningSceneOps(False, False, True, False)
+        if planning_scene_has_attached_tomato:
+            # DETACHINGでattachしたobjectをMOVING_TO_PLACEでも維持する。
+            # 同じADD/REMOVEを再送するとPlanningScene適用が失敗し得るため、
+            # 既に完了したworld→attached遷移は繰り返さない。
+            return TomatoPlanningSceneOps(
+                add_world_tomato=False,
+                remove_world_tomato=False,
+                add_attached_tomato=False,
+                remove_attached_tomato=False,
+                add_world_stem=False,
+                remove_world_stem=False,
+            )
+        # 把持後は同じtomatoをworld objectとattached objectの両方へ残さない。
+        # AttachedCollisionObject.ADDが同じIDのworld objectをattached側へ
+        # 自動的に移管するため、world側の明示REMOVEは同時に送らない。
+        # stemはgripperとの意図的接触中なので、pull計画の開始状態から除外する。
+        return TomatoPlanningSceneOps(
+            add_world_tomato=False,
+            remove_world_tomato=False,
+            add_attached_tomato=True,
+            remove_attached_tomato=False,
+            add_world_stem=False,
+            remove_world_stem=True,
+        )
     return TomatoPlanningSceneOps(
-        True, False, False, planning_scene_has_attached_tomato
+        add_world_tomato=True,
+        remove_world_tomato=False,
+        add_attached_tomato=False,
+        remove_attached_tomato=planning_scene_has_attached_tomato,
+        add_world_stem=True,
+        remove_world_stem=False,
     )
 
 
@@ -89,12 +133,6 @@ def build_planning_scene_request(
             pose=scene_snapshot.branch_pose,
             size_xyz=config.branch_size_m,
         ),
-        _box_collision_object(
-            object_id="tomato_stem",
-            frame_id=base_frame_id,
-            pose=scene_snapshot.stem_pose,
-            size_xyz=config.stem_size_m,
-        ),
         *_tray_collision_objects(
             frame_id=base_frame_id,
             tray_pose=scene_snapshot.tray_pose,
@@ -103,6 +141,21 @@ def build_planning_scene_request(
             collision_margin_m=config.tray_collision_margin_m,
         ),
     ]
+    if tomato_ops.add_world_stem:
+        scene.world.collision_objects.append(
+            _box_collision_object(
+                object_id="tomato_stem",
+                frame_id=base_frame_id,
+                pose=scene_snapshot.stem_pose,
+                size_xyz=config.stem_size_m,
+            )
+        )
+    if tomato_ops.remove_world_stem:
+        scene.world.collision_objects.append(
+            _remove_collision_object(
+                object_id="tomato_stem", frame_id=base_frame_id
+            )
+        )
     if tomato_ops.add_world_tomato:
         scene.world.collision_objects.append(
             _sphere_collision_object(
@@ -128,6 +181,9 @@ def build_planning_scene_request(
             frame_id=config.end_effector_link,
             pose=Pose3D(*config.attached_tomato_offset_m, 0.0, 0.0, 0.0),
             radius_m=config.attached_tomato_radius_m,
+        )
+        attached.touch_links = list(
+            attached_tomato_touch_links(config.end_effector_link)
         )
         attached_objects.append(attached)
     if tomato_ops.remove_attached_tomato:

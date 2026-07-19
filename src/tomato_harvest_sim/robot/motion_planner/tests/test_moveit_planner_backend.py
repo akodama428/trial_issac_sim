@@ -29,6 +29,9 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import (
     ik_goal_is_near_seed,
     should_start_via_home,
 )
+from tomato_harvest_sim.robot.motion_planner.moveit_bridge.planning_scene import (
+    attached_tomato_touch_links,
+)
 
 
 def _scene_snapshot() -> SceneSnapshot:
@@ -93,6 +96,8 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         self.assertFalse(ops.remove_world_tomato)
         self.assertFalse(ops.add_attached_tomato)
         self.assertFalse(ops.remove_attached_tomato)
+        self.assertTrue(ops.add_world_stem)
+        self.assertFalse(ops.remove_world_stem)
 
     def test_attached_tomato_is_removed_only_after_prior_attach(self) -> None:
         ops = _tomato_planning_scene_ops(
@@ -104,17 +109,43 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         self.assertFalse(ops.remove_world_tomato)
         self.assertFalse(ops.add_attached_tomato)
         self.assertTrue(ops.remove_attached_tomato)
+        self.assertTrue(ops.add_world_stem)
+        self.assertFalse(ops.remove_world_stem)
 
-    def test_world_tomato_is_removed_when_switching_to_robot_attach(self) -> None:
+    def test_world_tomato_is_attached_and_stem_is_removed_after_grasp(self) -> None:
         ops = _tomato_planning_scene_ops(
             attach_tomato=True,
             planning_scene_has_attached_tomato=False,
         )
 
         self.assertFalse(ops.add_world_tomato)
+        # AttachedCollisionObject.ADDが同じIDのworld objectを自動的に移管する。
+        # 同じPlanningScene diffで明示REMOVEも送ると適用に失敗するため送らない。
         self.assertFalse(ops.remove_world_tomato)
         self.assertTrue(ops.add_attached_tomato)
         self.assertFalse(ops.remove_attached_tomato)
+        self.assertFalse(ops.add_world_stem)
+        self.assertTrue(ops.remove_world_stem)
+
+    def test_already_attached_tomato_is_not_added_or_removed_again(self) -> None:
+        ops = _tomato_planning_scene_ops(
+            attach_tomato=True,
+            planning_scene_has_attached_tomato=True,
+        )
+
+        self.assertFalse(ops.add_world_tomato)
+        self.assertFalse(ops.remove_world_tomato)
+        self.assertFalse(ops.add_attached_tomato)
+        self.assertFalse(ops.remove_attached_tomato)
+        self.assertFalse(ops.add_world_stem)
+        self.assertFalse(ops.remove_world_stem)
+
+    def test_attached_tomato_allows_intentional_gripper_contact(self) -> None:
+        """把持物はhandと両fingerへの接触を許可してstart collisionにしないこと。"""
+        self.assertEqual(
+            attached_tomato_touch_links("panda_hand"),
+            ("panda_hand", "panda_leftfinger", "panda_rightfinger"),
+        )
 
     def test_moveit_target_pose_is_shifted_from_runtime_tool_pose(self) -> None:
         runtime_tool_pose = Pose3D(0.42, 0.0, 0.54, 180.0, 0.0, 0.0)
