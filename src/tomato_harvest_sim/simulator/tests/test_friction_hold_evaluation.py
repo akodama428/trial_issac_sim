@@ -1,3 +1,5 @@
+import pytest
+
 from tomato_harvest_sim.msg.contracts import Pose3D
 from tomato_harvest_sim.simulator.friction_hold_evaluation import (
     FrictionHoldEvaluation,
@@ -65,5 +67,5 @@ def test_hold_slip_is_measured_in_hand_local_frame() -> None:
     )
 
     assert rigid_rotation.slip_m < 1e-9
-    assert slipped.slip_m == 0.006
-    assert slipped.maximum_slip_m == 0.006
+    assert slipped.slip_m == pytest.approx(0.006)
+    assert slipped.maximum_slip_m == pytest.approx(0.006)

@@ -76,6 +76,13 @@ def detaching_outcome(tomato_status: TomatoStatus) -> HarvestTaskPhase | None:
     return None
 
 
+def should_defer_detaching_execution_result(
+    phase: HarvestTaskPhase, *, evaluation_enabled: bool
+) -> bool:
+    """Issue #4評価中だけ軌道成功より物理hold完了を優先する。"""
+    return evaluation_enabled and phase is HarvestTaskPhase.DETACHING
+
+
 def moving_to_place_outcome(
     tomato_status: TomatoStatus,
     robot_tool_pose: object | None,
@@ -103,6 +110,7 @@ def moving_to_place_outcome(
 
 def main() -> None:
     import json
+    import os
     import rclpy
     from rclpy.node import Node
     from std_msgs.msg import String
@@ -142,6 +150,10 @@ def main() -> None:
             self._last_snapshot = None
             self._last_plan = None
             self._execution_status: str = "idle"
+            self._friction_hold_evaluation_enabled = (
+                int(os.environ.get("TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS", "0"))
+                > 0
+            )
 
             self._pub = self.create_publisher(String, PHASE_TOPIC, 10)
 
@@ -203,6 +215,11 @@ def main() -> None:
 
         def _on_trajectory_succeeded(self) -> None:
             """軌道実行成功 → 移動フェーズを次フェーズへ進める。"""
+            if should_defer_detaching_execution_result(
+                self._phase,
+                evaluation_enabled=self._friction_hold_evaluation_enabled,
+            ):
+                return
             self._apply_transition(advance(self._machine, ExecutionSucceeded()))
 
         def _on_trajectory_aborted(self, reason: str | None) -> None:
@@ -213,6 +230,11 @@ def main() -> None:
             motion_command_node が古い plan で即座にコマンドを再生成し、
             実行系の "aborted" と往復する高速ループになるため何もしない。
             """
+            if should_defer_detaching_execution_result(
+                self._phase,
+                evaluation_enabled=self._friction_hold_evaluation_enabled,
+            ):
+                return
             self._apply_transition(
                 advance(self._machine, ExecutionAborted(reason))
             )

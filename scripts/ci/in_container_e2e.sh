@@ -69,6 +69,14 @@ if [[ "${status}" -ne 0 ]]; then
   exit "${status}"
 fi
 
+if [[ "${CI_RECORD_HOME_DIVERGENCE_BAG:-}" == "1" ]]; then
+  stop_rosbag
+  mkdir -p "${ARTIFACT_DIR}/friction_hold"
+  python3 scripts/analysis/extract_jtc_tracking_bag.py \
+    "${BAG_DIR}" \
+    "${ARTIFACT_DIR}/friction_hold"
+fi
+
 if ! grep -q "Headless simulator node setup completed." "${STACK_LOG}"; then
   echo "Headless Isaac Sim completion marker was not found." >&2
   exit 1
