@@ -127,6 +127,25 @@ class SuffixUpdateTest(unittest.TestCase):
         self.assertFalse(decision.adopted)
         self.assertEqual(decision.reason, "rejected_missing_phase_trajectory")
 
+    def test_empty_detaching_trajectory_is_rejected(self) -> None:
+        phase = HarvestTaskPhase.DETACHING
+        candidate = replace(
+            _plan(phase=phase, endpoint=1.2),
+            pull_joint_trajectory=JointTrajectory(
+                joint_names=("joint1", "joint2"),
+                points=(),
+            ),
+        )
+
+        decision = evaluate_phase_plan_update(
+            phase=phase,
+            current_plan=_plan(phase=phase, endpoint=1.0),
+            candidate_plan=candidate,
+        )
+
+        self.assertFalse(decision.adopted)
+        self.assertEqual(decision.reason, "rejected_missing_phase_trajectory")
+
     def test_unsupported_phase_is_rejected(self) -> None:
         place_plan = _plan(phase=HarvestTaskPhase.MOVING_TO_PLACE, endpoint=1.0)
         decision = evaluate_phase_plan_update(
@@ -304,7 +323,33 @@ class _FlakySuffixFakeBridge(_SuffixFakeBridge):
         return super().plan_phase_trajectory(**kwargs)
 
 
+class _EmptySuffixFakeBridge(_SuffixFakeBridge):
+    def __init__(self) -> None:
+        super().__init__(JointTrajectory(("joint1", "joint2"), ()))
+        self.calls = 0
+
+    def plan_phase_trajectory(self, **kwargs: object) -> MoveIt2PlanningResult:
+        self.calls += 1
+        return super().plan_phase_trajectory(**kwargs)
+
+
 class PhaseSuffixIntegrationTest(unittest.TestCase):
+    def test_success_with_empty_trajectory_is_retried_then_rejected(self) -> None:
+        phase = HarvestTaskPhase.DETACHING
+        bridge = _EmptySuffixFakeBridge()
+        planner = MoveIt2ServiceBridgePlanner(bridge=bridge)  # type: ignore[arg-type]
+
+        candidate = planner.plan_phase_trajectory(
+            phase,
+            _plan(phase=phase, endpoint=1.0),
+            JointStateSnapshot(("joint1", "joint2"), (0.25, 0.25)),
+            _BASE_FRAME_ID,
+            _scene(),
+        )
+
+        self.assertIsNone(candidate)
+        self.assertEqual(bridge.calls, 3)
+
     def test_temporary_suffix_failure_is_retried(self) -> None:
         phase = HarvestTaskPhase.MOVING_TO_PLACE
         suffix = _trajectory(1.0)

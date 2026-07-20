@@ -1,7 +1,7 @@
 """ROS非依存のHarvestTaskPhase状態機械。"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TypeAlias
 
 from tomato_harvest_sim.msg.contracts import ControlCommand, HarvestTaskPhase, TomatoStatus
@@ -16,6 +16,10 @@ GRASP_DIAGNOSTIC_INTERVAL_STEPS = 10
 # ままphaseだけが死ぬ復旧不能な固着になる。実落下ならFALLENが継続するため、
 # snapshot tick(約30-60Hz)で30連続 ≒ 0.5〜1.0秒の確認で判定できる。
 FALLEN_CONFIRM_STEPS = 30
+# DETACHINGの実行abort後、JTC結果より遅れて届く物理DETACHEDを待つ上限。
+# 成果が得られない場合は有限時間でFAILEDへ落とし、replan対象外phaseでの
+# 永久待機を防ぐ (Issue #58)。
+DETACH_ABORT_OUTCOME_CONFIRM_STEPS = 30
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,9 @@ class PhaseMachineState:
     settle_steps: int = 0
     eval_steps: int = 0
     fallen_steps: int = 0
+    abort_pending: bool = False
+    abort_reason: str | None = None
+    abort_wait_steps: int = 0
 
 
 @dataclass(frozen=True)
@@ -49,7 +56,7 @@ class ExecutionSucceeded:
 
 @dataclass(frozen=True)
 class ExecutionAborted:
-    pass
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,9 +94,7 @@ def _confirm_fallen(state: PhaseMachineState) -> Transition:
     steps = state.fallen_steps + 1
     if steps >= FALLEN_CONFIRM_STEPS:
         return Transition(_enter(state, HarvestTaskPhase.FAILED))
-    return Transition(PhaseMachineState(
-        state.phase, state.running, state.settle_steps, state.eval_steps, steps
-    ))
+    return Transition(replace(state, fallen_steps=steps))
 
 
 def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
@@ -107,10 +112,26 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
     if isinstance(event, PlanAdopted) and state.phase is HarvestTaskPhase.TARGET_FOUND:
         return Transition(_enter(state, HarvestTaskPhase.MOVING_TO_PREGRASP))
     if isinstance(event, ExecutionAborted):
+        if event.reason == "missing_trajectory":
+            return Transition(
+                _enter(state, HarvestTaskPhase.FAILED),
+                warning="phase_plan_contract_violation",
+            )
+        if state.phase is HarvestTaskPhase.DETACHING:
+            if state.abort_pending:
+                return Transition(state)
+            return Transition(
+                replace(
+                    state,
+                    abort_pending=True,
+                    abort_reason=event.reason,
+                    abort_wait_steps=0,
+                ),
+                warning="detaching_abort_outcome_wait",
+            )
         moving = {
             HarvestTaskPhase.MOVING_TO_PREGRASP, HarvestTaskPhase.MOVING_TO_GRASP,
-            HarvestTaskPhase.DETACHING, HarvestTaskPhase.MOVING_TO_PLACE,
-            HarvestTaskPhase.RETURNING_HOME,
+            HarvestTaskPhase.MOVING_TO_PLACE, HarvestTaskPhase.RETURNING_HOME,
         }
         warning = f"trajectory aborted at phase={state.phase.value} — waiting for replan" if state.phase in moving else None
         return Transition(state, warning=warning)
@@ -127,15 +148,13 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
     if not isinstance(event, SnapshotTick):
         return Transition(state)
     if event.tomato_status is not TomatoStatus.FALLEN and state.fallen_steps:
-        state = PhaseMachineState(
-            state.phase, state.running, state.settle_steps, state.eval_steps, 0
-        )
+        state = replace(state, fallen_steps=0)
     if state.phase is HarvestTaskPhase.AT_GRASP:
         steps = state.settle_steps + 1
         if steps >= GRASP_SETTLE_STEPS:
             return Transition(_enter(state, HarvestTaskPhase.GRASP_EVALUATION))
         return Transition(
-            PhaseMachineState(state.phase, state.running, steps, state.eval_steps),
+            replace(state, settle_steps=steps),
             diagnostic="entry" if steps == 1 else None,
         )
     if state.phase is HarvestTaskPhase.GRASP_EVALUATION:
@@ -150,12 +169,20 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
             return Transition(_enter(state, HarvestTaskPhase.FAILED), diagnostic)
         if steps >= GRASP_EVAL_TIMEOUT:
             return Transition(_enter(state, HarvestTaskPhase.FAILED), diagnostic, "GRASP_EVALUATION timeout")
-        return Transition(PhaseMachineState(state.phase, state.running, state.settle_steps, steps), diagnostic)
+        return Transition(replace(state, eval_steps=steps), diagnostic)
     if state.phase is HarvestTaskPhase.DETACHING:
         if event.tomato_status is TomatoStatus.DETACHED:
             return Transition(_enter(state, HarvestTaskPhase.MOVING_TO_PLACE))
         if event.tomato_status is TomatoStatus.FALLEN:
             return _confirm_fallen(state)
+        if state.abort_pending:
+            steps = state.abort_wait_steps + 1
+            if steps >= DETACH_ABORT_OUTCOME_CONFIRM_STEPS:
+                return Transition(
+                    _enter(state, HarvestTaskPhase.FAILED),
+                    warning="detaching_abort_outcome_timeout",
+                )
+            return Transition(replace(state, abort_wait_steps=steps))
     if state.phase is HarvestTaskPhase.MOVING_TO_PLACE:
         if event.tomato_status is TomatoStatus.FALLEN:
             return _confirm_fallen(state)

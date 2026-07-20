@@ -1,7 +1,9 @@
 from tomato_harvest_sim.msg.contracts import ControlCommand, HarvestTaskPhase, TomatoStatus
 from tomato_harvest_sim.robot.behavior_planner.phase_machine import (
+    DETACH_ABORT_OUTCOME_CONFIRM_STEPS,
     FALLEN_CONFIRM_STEPS,
-    ControlReceived, ExecutionSucceeded, PhaseMachineState, SnapshotTick, advance,
+    ControlReceived, ExecutionAborted, ExecutionSucceeded, PhaseMachineState,
+    SnapshotTick, advance,
 )
 
 
@@ -89,3 +91,77 @@ def test_fallen_debounce_applies_to_detaching_and_releasing() -> None:
         for _ in range(FALLEN_CONFIRM_STEPS - 1):
             after_one = advance(after_one, SnapshotTick(TomatoStatus.FALLEN)).state
         assert after_one.phase is HarvestTaskPhase.FAILED, phase
+
+
+def test_missing_trajectory_abort_fails_fast_as_contract_violation() -> None:
+    state = PhaseMachineState(HarvestTaskPhase.DETACHING, True)
+
+    transition = advance(state, ExecutionAborted("missing_trajectory"))
+
+    assert transition.state.phase is HarvestTaskPhase.FAILED
+    assert transition.warning == "phase_plan_contract_violation"
+
+
+def test_detaching_abort_waits_for_physical_outcome() -> None:
+    state = PhaseMachineState(HarvestTaskPhase.DETACHING, True)
+
+    transition = advance(state, ExecutionAborted("servo_target_timeout"))
+
+    assert transition.state.phase is HarvestTaskPhase.DETACHING
+    assert transition.state.abort_pending
+    assert transition.state.abort_reason == "servo_target_timeout"
+    assert transition.state.abort_wait_steps == 0
+
+
+def test_detaching_abort_accepts_delayed_detached_outcome() -> None:
+    state = advance(
+        PhaseMachineState(HarvestTaskPhase.DETACHING, True),
+        ExecutionAborted("servo_target_timeout"),
+    ).state
+    for _ in range(DETACH_ABORT_OUTCOME_CONFIRM_STEPS - 1):
+        state = advance(state, SnapshotTick(TomatoStatus.HELD)).state
+
+    transition = advance(state, SnapshotTick(TomatoStatus.DETACHED))
+
+    assert transition.state.phase is HarvestTaskPhase.MOVING_TO_PLACE
+    assert not transition.state.abort_pending
+
+
+def test_detaching_abort_without_outcome_fails_within_finite_steps() -> None:
+    state = advance(
+        PhaseMachineState(HarvestTaskPhase.DETACHING, True),
+        ExecutionAborted("servo_target_timeout"),
+    ).state
+
+    for _ in range(DETACH_ABORT_OUTCOME_CONFIRM_STEPS):
+        transition = advance(state, SnapshotTick(TomatoStatus.HELD))
+        state = transition.state
+
+    assert state.phase is HarvestTaskPhase.FAILED
+    assert transition.warning == "detaching_abort_outcome_timeout"
+
+
+def test_free_space_abort_still_waits_for_suffix_replan() -> None:
+    state = PhaseMachineState(HarvestTaskPhase.MOVING_TO_PLACE, True)
+
+    transition = advance(state, ExecutionAborted("servo_target_timeout"))
+
+    assert transition.state == state
+    assert "waiting for replan" in (transition.warning or "")
+
+
+def test_phase_entry_resets_detaching_abort_state() -> None:
+    state = PhaseMachineState(
+        HarvestTaskPhase.DETACHING,
+        True,
+        abort_pending=True,
+        abort_reason="servo_target_timeout",
+        abort_wait_steps=7,
+    )
+
+    transition = advance(state, SnapshotTick(TomatoStatus.DETACHED))
+
+    assert transition.state.phase is HarvestTaskPhase.MOVING_TO_PLACE
+    assert not transition.state.abort_pending
+    assert transition.state.abort_reason is None
+    assert transition.state.abort_wait_steps == 0
