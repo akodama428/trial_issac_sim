@@ -30,8 +30,14 @@ while reader.has_next():
             joint_names = list(msg.joint_names)
         ref = getattr(msg, "reference", None) or getattr(msg, "desired", None)
         fb = getattr(msg, "feedback", None) or getattr(msg, "actual", None)
+        feedback_velocities = list(getattr(fb, "velocities", []))
+        if len(feedback_velocities) != len(msg.joint_names):
+            feedback_velocities = [float("nan")] * len(msg.joint_names)
         state_rows.append(
-            [t_ns * 1e-9] + list(ref.positions) + list(fb.positions)
+            [t_ns * 1e-9]
+            + list(ref.positions)
+            + list(fb.positions)
+            + feedback_velocities
         )
     elif topic == "/tomato_harvest/phase":
         msg = deserialize_message(data, types[topic])
@@ -40,7 +46,10 @@ while reader.has_next():
 with open(f"{OUT_DIR}/controller_state.csv", "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow(
-        ["t"] + [f"{n}_ref" for n in joint_names] + [f"{n}_fb" for n in joint_names]
+        ["t"]
+        + [f"{n}_ref" for n in joint_names]
+        + [f"{n}_fb" for n in joint_names]
+        + [f"{n}_fb_velocity" for n in joint_names]
     )
     writer.writerows(state_rows)
 with open(f"{OUT_DIR}/phase.csv", "w", newline="") as f:

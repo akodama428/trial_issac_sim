@@ -1,0 +1,25 @@
+{
+  "observation_samples": 2721,
+  "hold_samples": 601,
+  "hold_elapsed_steps": 600,
+  "hold_duration_sec": 5.0,
+  "maximum_lift_distance_m": 0.1575,
+  "maximum_hold_slip_m": 0.001065,
+  "minimum_hold_force_left_n": 16.4286,
+  "minimum_hold_force_right_n": 16.4501,
+  "grasp_joint_create_count": 0,
+  "geometry_fallback_count": 0,
+  "teleport_restore_count": 0,
+  "lift_pass": true,
+  "duration_pass": true,
+  "slip_pass": true,
+  "natural_release_pass": true,
+  "cycle_complete": true,
+  "maximum_abs_joint7_velocity_rad_s": 0.013139203190803528,
+  "images": {
+    "relative_displacement": "docs/reports/physics_levelup/assets/issue4/issue4_hold_relative_displacement.png",
+    "finger_forces": "docs/reports/physics_levelup/assets/issue4/issue4_hold_finger_forces.png",
+    "joint7_velocity": "docs/reports/physics_levelup/assets/issue4/issue4_hold_joint7_velocity.png"
+  },
+  "overall_pass": true
+}
