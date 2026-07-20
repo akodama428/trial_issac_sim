@@ -553,7 +553,7 @@ stateDiagram-v2
 <p>上記いずれのフェーズにも一致しない場合（IDLE/DETECTING/TARGET_FOUND/PLANNING/PREGRASP_REACHED/DETACHED/COMPLETE/FAILED/STOPPED）は例外が握りつぶされ、<code>motion_command</code> は publish されない。</p>
 
 <h3 id="ch5-4">5.4 trajectory_planner_node と MoveIt2</h3>
-<p>計画の起点は「phase が TARGET_FOUND になった時」または「trajectory_status が aborted の時」。<code>build_planner()</code>（環境変数 <code>TOMATO_HARVEST_PLANNER_BACKEND</code> で <code>auto</code>/<code>geometric</code>/<code>moveit2</code> を切替、既定 auto は rclpy/moveit_msgs の import可否で自動選択）で得たプランナーが、pregrasp → grasp → pull（トマトをattachした軌道） → （pre_placeがあれば）approach → place の順にフルチェーンで計画する。<b>goal の中身・タイミング・切り替えの詳細は <a href="#ch5-5">5.5</a> を参照。</b></p>
+<p>計画の起点は「phase が TARGET_FOUND になった時」または「trajectory_status が aborted の時」。<code>build_planner()</code>が実運用の<code>MoveIt2ServiceBridgePlanner</code>を構築し、pregrasp → grasp → pull（トマトをattachした軌道） → （pre_placeがあれば）approach → place の順にフルチェーンで計画する。<b>goal の中身・タイミング・切り替えの詳細は <a href="#ch5-5">5.5</a> を参照。</b></p>
 <div class="warn">
 <b>MoveIt2 サービス名が設計文書と異なる</b><span class="tag gap">乖離</span><br>
 実装（<code>moveit_service_bridge.py</code>）が呼び出すサービス名は既定で <code>/plan_kinematic_path</code> と <code>/apply_planning_scene</code>（環境変数 <code>TOMATO_HARVEST_MOVEIT_SERVICE</code> / <code>TOMATO_HARVEST_MOVEIT_SCENE_SERVICE</code> で変更可）。設計文書が言う <code>/move_group/get_motion_plan</code> とはサービス名が一致しない（メッセージ型自体は <code>GetMotionPlan</code> 相当で同じ）。
@@ -611,7 +611,7 @@ sequenceDiagram
 <p>逆に言うと、<b>フェーズが進むたびに計画し直すことはない</b>。1回の計画で収穫サイクル全区間の軌道をまとめて作り、以降は実行側がそれを順番に消費する。</p>
 
 <h4>5.5.3 目標姿勢はどう決まるか（幾何オフセット）</h4>
-<p>MoveIt2 に渡す目標姿勢そのものは MoveIt2 が決めるのではなく、<code>pregrasp_planner.py</code> の <code>MoveItStylePreGraspPlanner</code> がトマト推定位置（target_estimate）とトレイ位置（scene_snapshot）から固定オフセットで算出する。姿勢はすべて roll=180°（グリッパー真下向き）。</p>
+<p>MoveIt2 に渡す目標姿勢そのものは MoveIt2 が決めるのではなく、<code>harvest_pose_planner.py</code> の <code>HarvestPoseWaypointPlanner</code> がトマト推定位置（target_estimate）とトレイ位置（scene_snapshot）から固定オフセットで算出する。姿勢はすべて roll=180°（グリッパー真下向き）。</p>
 <table>
 <thead><tr><th>姿勢</th><th>基準</th><th>オフセット（既定値）</th><th>意味</th></tr></thead>
 <tbody>
@@ -684,7 +684,6 @@ flowchart TD
 <table>
 <thead><tr><th>環境変数</th><th>既定値</th><th>意味</th></tr></thead>
 <tbody>
-<tr><td><code>TOMATO_HARVEST_PLANNER_BACKEND</code></td><td><code>auto</code></td><td><code>moveit2</code> / <code>geometric</code> の強制切替。auto は import 可否で自動判定</td></tr>
 <tr><td><code>TOMATO_HARVEST_MOVEIT_SERVICE</code></td><td><code>/plan_kinematic_path</code></td><td>計画サービス名</td></tr>
 <tr><td><code>TOMATO_HARVEST_MOVEIT_SCENE_SERVICE</code></td><td><code>/apply_planning_scene</code></td><td>planning scene サービス名</td></tr>
 <tr><td><code>TOMATO_HARVEST_MOVEIT_GROUP</code> / <code>_EE_LINK</code></td><td><code>panda_arm</code> / <code>panda_hand</code></td><td>計画グループとエンドエフェクタ link</td></tr>

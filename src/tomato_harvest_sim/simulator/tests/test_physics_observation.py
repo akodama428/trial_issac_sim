@@ -184,6 +184,12 @@ class FormatObservationLineTest(unittest.TestCase):
             finger_midpoint_z_m=0.555,
             tomato_center_z_m=0.540,
             tray_contact_force_n=3.25,
+            hold_active=True,
+            hold_elapsed_steps=120,
+            hold_slip_m=0.0015,
+            grasp_joint_create_count=0,
+            geometry_fallback_count=0,
+            teleport_restore_count=0,
         )
 
         self.assertTrue(line.startswith("[PhysicsObs] "))
@@ -203,6 +209,12 @@ class FormatObservationLineTest(unittest.TestCase):
         self.assertAlmostEqual(float(fields["tomato_z"]), 0.540)
         self.assertAlmostEqual(float(fields["grasp_dz"]), 0.015)
         self.assertAlmostEqual(float(fields["trayF"]), 3.25)
+        self.assertEqual(fields["hold"], "1")
+        self.assertEqual(fields["hold_steps"], "120")
+        self.assertAlmostEqual(float(fields["hold_slip"]), 0.0015)
+        self.assertEqual(fields["joint_count"], "0")
+        self.assertEqual(fields["fallback_count"], "0")
+        self.assertEqual(fields["teleport_count"], "0")
 
 
 def test_matching_contact_impulse_sums_only_selected_pairs() -> None:

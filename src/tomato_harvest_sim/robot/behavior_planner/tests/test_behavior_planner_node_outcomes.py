@@ -71,6 +71,29 @@ class MovingToPlaceOutcomeTest(unittest.TestCase):
         self.assertIsNone(self.outcome(TomatoStatus.DETACHED, None, self.place_pose))
 
 
+class FrictionHoldEvaluationTest(unittest.TestCase):
+    def test_only_detaching_success_is_deferred_in_evaluation_mode(self) -> None:
+        from tomato_harvest_sim.robot.behavior_planner.node import (
+            should_defer_detaching_success,
+        )
+
+        self.assertTrue(
+            should_defer_detaching_success(
+                HarvestTaskPhase.DETACHING, evaluation_enabled=True
+            )
+        )
+        self.assertFalse(
+            should_defer_detaching_success(
+                HarvestTaskPhase.MOVING_TO_PLACE, evaluation_enabled=True
+            )
+        )
+        self.assertFalse(
+            should_defer_detaching_success(
+                HarvestTaskPhase.DETACHING, evaluation_enabled=False
+            )
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
 

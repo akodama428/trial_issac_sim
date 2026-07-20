@@ -142,6 +142,12 @@ def format_observation_line(
     finger_midpoint_z_m: float = 0.0,
     tomato_center_z_m: float = 0.0,
     tray_contact_force_n: float = 0.0,
+    hold_active: bool = False,
+    hold_elapsed_steps: int = 0,
+    hold_slip_m: float = 0.0,
+    grasp_joint_create_count: int = 0,
+    geometry_fallback_count: int = 0,
+    teleport_restore_count: int = 0,
 ) -> str:
     """1 物理ステップ分の観測値を、プロットスクリプトが機械解析できる1行に整形する。
 
@@ -167,7 +173,13 @@ def format_observation_line(
         f"finger_z={finger_midpoint_z_m:.4f} "
         f"tomato_z={tomato_center_z_m:.4f} "
         f"grasp_dz={finger_midpoint_z_m - tomato_center_z_m:.4f}"
-        f" trayF={tray_contact_force_n:.4f}"
+        f" trayF={tray_contact_force_n:.4f} "
+        f"hold={int(hold_active)} "
+        f"hold_steps={hold_elapsed_steps} "
+        f"hold_slip={hold_slip_m:.6f} "
+        f"joint_count={grasp_joint_create_count} "
+        f"fallback_count={geometry_fallback_count} "
+        f"teleport_count={teleport_restore_count}"
     )
 
 

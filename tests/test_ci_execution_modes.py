@@ -72,3 +72,9 @@ def test_optional_e2e_rosbag_starts_before_robot_stack() -> None:
     assert "/joint_trajectory_controller/joint_trajectory" in container_source
     assert "/joint_trajectory_controller/controller_state" in container_source
     assert 'kill -TERM "${BAG_PID}"' in container_source
+
+
+def test_friction_hold_evaluation_environment_is_forwarded() -> None:
+    launcher_source = RUN_E2E.read_text(encoding="utf-8")
+
+    assert "TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS" in launcher_source
