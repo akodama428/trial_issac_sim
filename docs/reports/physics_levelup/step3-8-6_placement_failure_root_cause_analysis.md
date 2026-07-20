@@ -578,7 +578,7 @@ ScenePlacementConfig
 各consumerは必要なsub-configだけを受け取る。
 
 ```text
-MoveItStylePreGraspPlanner <- ReleasePoseConfig
+HarvestPoseWaypointPlanner <- ReleasePoseConfig
 ReleaseReadinessEvaluator  <- ReleaseReadyConfig
 GripperStateObserver       <- GripperOpenConfig
 PlacementGeometry          <- SceneGeometryConfig + ContainmentConfig
@@ -608,7 +608,7 @@ escape margin >= boundary margin
 
 | 現在値 | 現在位置 | 対応 |
 |---|---|---|
-| `0.15` place offset | `pregrasp_planner.py` constructor default | `placement.release_pose.vertical_offset_m`へ移設 |
+| `0.15` place offset | `harvest_pose_planner.py` constructor default | `placement.release_pose.vertical_offset_m`へ移設 |
 | `0.10` hover offset | 同上 | `placement.release_pose.hover_offset_m`へ移設 |
 | `0.05` place到達許容 | `behavior_planner/node.py` | `placement.release_ready.position_tolerance_m`へ移設 |
 | `0.18` release距離 | `physics_harvest.py` | **削除**。tomato内包・接触・速度判定へ置換 |

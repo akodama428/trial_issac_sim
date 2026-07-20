@@ -240,7 +240,6 @@ class TestRobotMsg(unittest.TestCase):
             MotionPlanner,
             MoveIt2PlannerBridge,
             MoveIt2PlanningResult,
-            PlannerBackendInfo,
         )
         self.assertIsNotNone(MotionPlanner)
 

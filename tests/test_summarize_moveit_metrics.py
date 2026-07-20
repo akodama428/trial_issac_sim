@@ -24,6 +24,7 @@ def test_summary_calculates_required_step0_metrics(tmp_path: Path) -> None:
         'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_pregrasp","success":true,"latency_ms":30.0}\n'
         'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_pregrasp","success":true,"latency_ms":50.0}\n'
         'MOVEIT_METRIC {"event":"suffix_replan_completed","phase":"moving_to_grasp","success":false,"latency_ms":99.0}\n'
+        'MOVEIT_METRIC {"event":"phase_plan_completed","phase":"detaching","success":true,"latency_ms":12.0}\n'
         'MOVEIT_METRIC {"event":"plan_adopted","producer_kind":"global_planner","reason":"adopted_initial"}\n'
         'MOVEIT_METRIC {"event":"plan_adopted","producer_kind":"global_planner","reason":"adopted_newer_revision"}\n'
         'MOVEIT_METRIC {"event":"plan_adopted","producer_kind":"unknown","reason":"adopted_newer_producer_instance"}\n'
@@ -49,6 +50,12 @@ def test_summary_calculates_required_step0_metrics(tmp_path: Path) -> None:
         "moving_to_place": {
             "successful_count": 1,
             "latency_ms": {"mean": 42.5, "min": 42.5, "max": 42.5},
+        },
+    }
+    assert summary["phase_plan"] == {
+        "detaching": {
+            "successful_count": 1,
+            "latency_ms": {"mean": 12.0, "min": 12.0, "max": 12.0},
         },
     }
     assert summary["phase_abort"] == {

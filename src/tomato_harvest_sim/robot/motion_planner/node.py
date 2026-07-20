@@ -18,10 +18,13 @@ from tomato_harvest_sim.robot.motion_planner.state_aggregation import (
     PlannerStateAggregator,
 )
 from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
-    SUFFIX_REPLAN_PHASES,
-    SuffixReplanGate,
-    evaluate_suffix_update,
-    should_plan_home_on_entry,
+    PHASE_ENTRY_PLANNING_PHASES,
+    PhasePlanRetryMemory,
+    PhasePlanningGate,
+    evaluate_phase_plan_update,
+    memory_after_phase_plan_attempt,
+    should_retry_missing_phase_plan,
+    should_plan_phase_on_entry,
 )
 
 # ABORT/STALL/SCENE_CHANGE trigger の再評価を /trajectory_status の受信のみに
@@ -31,6 +34,8 @@ from tomato_harvest_sim.robot.motion_planner.phase_suffix_replan import (
 # minimum_interval に一度でも阻まれた abort が二度と再評価されず、
 # 復旧不能なデッドロックになる。この周期timerが取りこぼしを拾い直す。
 _REPLAN_TRIGGER_POLL_INTERVAL_SEC = 0.3
+_PHASE_PLAN_RETRY_INTERVAL_SEC = 1.0
+_ROBOT_BASE_FRAME_ID = "panda_link0"
 
 
 def main() -> None:
@@ -68,12 +73,12 @@ def main() -> None:
     class TrajectoryPlannerNode(Node):  # type: ignore[misc]
         def __init__(self) -> None:
             super().__init__("trajectory_planner_node")
-            planner, info = build_planner()
-            self._planner = planner
+            self._planner = build_planner()
             self._pub = self.create_publisher(String, HARVEST_MOTION_PLAN_TOPIC, 10)
             self._state = PlannerStateAggregator()
             self._trigger_memory = TriggerMemory()
-            self._suffix_replan_gate = SuffixReplanGate()
+            self._phase_planning_gate = PhasePlanningGate()
+            self._phase_plan_retry_memory = PhasePlanRetryMemory()
             self._latest_plan = None
             self._plan_revision = 0  # publish 済み plan の単調増加版数 (Step 1 契約)
             self._producer_instance_id = uuid.uuid4().hex
@@ -96,10 +101,8 @@ def main() -> None:
             self._state.update_phase(phase)
             if phase is HarvestTaskPhase.TARGET_FOUND:
                 self._try_plan(trigger="target_found")
-            # 直行home軌道は衝突を考慮しないため、進入時に衝突考慮済みの
-            # home区間計画へ能動的に置き換える (Issue #32)。
-            if should_plan_home_on_entry(previous_phase, phase):
-                self._try_suffix_plan(trigger="home_entry")
+            if should_plan_phase_on_entry(previous_phase, phase):
+                self._try_phase_plan(trigger="phase_entry")
 
         def _on_estimate(self, msg: String) -> None:
             self._state.update_target_estimate(target_estimate_from_json(msg.data))
@@ -154,6 +157,7 @@ def main() -> None:
             self._evaluate_replan_trigger()
 
         def _evaluate_replan_trigger(self) -> None:
+            self._retry_missing_phase_plan()
             state = self._state.snapshot()
             now_sec = time.monotonic()
             decision = evaluate_replan_trigger(
@@ -180,66 +184,65 @@ def main() -> None:
                     action="observe_only_under_servo",
                 ))
                 return
-            if state.phase in SUFFIX_REPLAN_PHASES:
-                self._try_suffix_plan(trigger=decision.trigger.value)
-                return
-            self._try_plan(trigger=decision.trigger.value)
+            self._try_phase_plan(trigger=decision.trigger.value)
 
-        def _try_suffix_plan(self, *, trigger: str) -> None:
+        def _retry_missing_phase_plan(self) -> None:
+            """phase-entry計画の全試行失敗後も、永久停止せず再計画する。"""
+            state = self._state.snapshot()
+            if not should_retry_missing_phase_plan(
+                phase=state.phase,
+                plan=self._latest_plan,
+                memory=self._phase_plan_retry_memory,
+                now_sec=time.monotonic(),
+            ):
+                return
+            self._try_phase_plan(trigger="phase_entry_retry")
+
+        def _try_phase_plan(self, *, trigger: str) -> None:
             state = self._state.snapshot()
             if (
-                state.phase not in SUFFIX_REPLAN_PHASES
+                state.phase not in PHASE_ENTRY_PLANNING_PHASES
                 or state.joint_state is None
                 or state.scene_snapshot is None
-                or state.target_estimate is None
                 or self._latest_plan is None
             ):
                 return
             phase = state.phase
-            if not self._suffix_replan_gate.try_begin():
+            completion_event = (
+                "phase_plan_completed"
+                if trigger.startswith("phase_entry")
+                else "suffix_replan_completed"
+            )
+            if not self._phase_planning_gate.try_begin():
                 self.get_logger().info(metric_line(
-                    "suffix_replan_suppressed", phase=phase.value,
+                    "phase_plan_suppressed", phase=phase.value,
                     reason="planner_in_flight", trigger=trigger,
                 ))
                 return
             started_at = time.perf_counter()
             try:
-                from tomato_harvest_sim.msg.contracts import Pose3D, TfTreeSnapshot
-                zero = Pose3D(0, 0, 0, 0, 0, 0)
-                tf_tree = TfTreeSnapshot(
-                    robot_base_frame_id="panda_link0",
-                    camera_frame_id="fixed_camera_frame",
-                    target_frame_id="target_tomato_frame",
-                    robot_base_pose=zero,
-                    camera_pose=zero,
-                    target_pose=state.target_estimate.target_world_pose,
-                )
-                plan_from_phase = getattr(self._planner, "plan_from_phase", None)
-                candidate = (
-                    plan_from_phase(
-                        phase,
-                        self._latest_plan,
-                        state.joint_state,
-                        tf_tree,
-                        state.scene_snapshot,
-                    )
-                    if plan_from_phase is not None else None
+                candidate = self._planner.plan_phase_trajectory(
+                    phase,
+                    self._latest_plan,
+                    state.joint_state,
+                    _ROBOT_BASE_FRAME_ID,
+                    state.scene_snapshot,
                 )
                 latency_ms = (time.perf_counter() - started_at) * 1000.0
                 if candidate is None:
                     self.get_logger().info(metric_line(
-                        "suffix_replan_completed", phase=phase.value,
+                        completion_event, phase=phase.value,
                         success=False, trigger=trigger,
                         latency_ms=round(latency_ms, 3),
                     ))
                     return
-                decision = evaluate_suffix_update(
+                decision = evaluate_phase_plan_update(
                     phase=phase,
                     current_plan=self._latest_plan,
                     candidate_plan=candidate,
                 )
                 self.get_logger().info(metric_line(
-                    "suffix_replan_completed",
+                    completion_event,
                     phase=phase.value,
                     success=decision.adopted,
                     reason=decision.reason,
@@ -251,11 +254,18 @@ def main() -> None:
                     return
                 self._publish_plan(candidate, trigger=trigger, phase=phase)
             finally:
-                self._suffix_replan_gate.finish()
+                self._phase_plan_retry_memory = (
+                    memory_after_phase_plan_attempt(
+                        phase=phase,
+                        now_sec=time.monotonic(),
+                        retry_interval_sec=_PHASE_PLAN_RETRY_INTERVAL_SEC,
+                    )
+                )
+                self._phase_planning_gate.finish()
 
         def _try_plan(self, *, trigger: str) -> None:
             state = self._state.snapshot()
-            if state.target_estimate is None or state.joint_state is None:
+            if state.target_estimate is None:
                 return
             # snapshot未着なら計画しない (Issue #37)。合成ゼロsceneでの計画は
             # tray依存のplace姿勢をゴミ化し (goal sampling失敗 99999)、実際の
@@ -269,23 +279,13 @@ def main() -> None:
                 ))
                 return
 
-            from tomato_harvest_sim.msg.contracts import Pose3D
-            _p = Pose3D(0, 0, 0, 0, 0, 0)
             scene_snapshot = state.scene_snapshot
-
-            tf_tree_snapshot = type("T", (), {
-                "robot_base_frame_id": "panda_link0",
-                "camera_frame_id": "fixed_camera_frame",
-                "target_frame_id": "target_tomato_frame",
-                "robot_base_pose": _p,
-                "camera_pose": _p,
-                "target_pose": state.target_estimate.target_world_pose,
-            })()
             phase = state.phase.value if state.phase is not None else "unknown"
             started_at = time.perf_counter()
             try:
                 plan = self._planner.plan(
-                    state.target_estimate, state.joint_state, tf_tree_snapshot, scene_snapshot
+                    state.target_estimate,
+                    scene_snapshot,
                 )
             except Exception:
                 latency_ms = (time.perf_counter() - started_at) * 1000.0

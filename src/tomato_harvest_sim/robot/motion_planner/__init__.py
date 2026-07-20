@@ -1,4 +1,8 @@
-from tomato_harvest_sim.robot.msg.planner import MotionPlanner, MoveIt2PlannerBridge, MoveIt2PlanningResult, PlannerBackendInfo
+from tomato_harvest_sim.robot.msg.planner import (
+    MotionPlanner,
+    MoveIt2PlannerBridge,
+    MoveIt2PlanningResult,
+)
 from tomato_harvest_sim.robot.motion_planner.moveit_service import (
     ISAAC_PANDA_URDF,
     MoveItServiceManager,
@@ -7,7 +11,9 @@ from tomato_harvest_sim.robot.motion_planner.moveit_service import (
 )
 from tomato_harvest_sim.robot.motion_planner.moveit_service_bridge import MoveIt2ServiceBridgePlanner, build_planner
 from tomato_harvest_sim.robot.motion_planner.node import main
-from tomato_harvest_sim.robot.motion_planner.pregrasp_planner import MoveItStylePreGraspPlanner
+from tomato_harvest_sim.robot.motion_planner.harvest_pose_planner import (
+    HarvestPoseWaypointPlanner,
+)
 from tomato_harvest_sim.robot.motion_planner.ros_python import ensure_ros_python_modules_available
 
 __all__ = [
@@ -17,8 +23,7 @@ __all__ = [
     "MoveIt2PlanningResult",
     "MoveIt2ServiceBridgePlanner",
     "MoveItServiceManager",
-    "MoveItStylePreGraspPlanner",
-    "PlannerBackendInfo",
+    "HarvestPoseWaypointPlanner",
     "build_move_group_parameters",
     "build_planner",
     "ensure_ros_python_modules_available",

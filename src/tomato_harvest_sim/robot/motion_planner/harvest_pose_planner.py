@@ -2,11 +2,9 @@ from __future__ import annotations
 
 from tomato_harvest_sim.msg.contracts import (
     HarvestMotionPlan,
-    JointStateSnapshot,
     Pose3D,
     SceneSnapshot,
     TargetEstimate,
-    TfTreeSnapshot,
 )
 from tomato_harvest_sim.simulator.scene_config import (
     ReleasePoseConfig,
@@ -14,7 +12,9 @@ from tomato_harvest_sim.simulator.scene_config import (
 )
 
 
-class MoveItStylePreGraspPlanner:
+class HarvestPoseWaypointPlanner:
+    """収穫対象とtrayのposeから、各phaseの目標pose・waypointを生成する。"""
+
     def __init__(
         self,
         *,
@@ -46,11 +46,8 @@ class MoveItStylePreGraspPlanner:
     def plan(
         self,
         target_estimate: TargetEstimate,
-        joint_state: JointStateSnapshot,
-        tf_tree: TfTreeSnapshot,
         scene_snapshot: SceneSnapshot,
     ) -> HarvestMotionPlan:
-        del joint_state, tf_tree
         target_pose = target_estimate.target_world_pose
         tray_pose = scene_snapshot.tray_pose
         pregrasp_pose = Pose3D(
@@ -118,7 +115,7 @@ class MoveItStylePreGraspPlanner:
             0.0,
         )
         return HarvestMotionPlan(
-            planner_name="moveit2_pregrasp_demo",
+            planner_name="harvest_pose_waypoint_planner",
             target_pose=target_pose,
             pregrasp_pose=pregrasp_pose,
             grasp_pose=grasp_pose,

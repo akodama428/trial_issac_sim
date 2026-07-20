@@ -20,7 +20,7 @@ from tomato_harvest_sim.msg.contracts import (
     PhaseMotionPlan,
     Pose3D,
 )
-from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD
+from tomato_harvest_sim.msg.topics import DEFAULT_JOINT_NAMES
 
 
 @dataclass(frozen=True)
@@ -142,7 +142,8 @@ def build_motion_command(
     """フェーズ・計画・現在関節状態から MotionCommand を生成する。
 
     アーキテクチャ仕様のフェーズ別出力仕様に従い、joint_trajectory と
-    gripper_closed を決定する。joint_trajectory は常に非 null。
+    gripper_closed を決定する。移動phaseでは、同じphaseの開始時に生成された
+    trajectory planが届くまでValueErrorを返して実行を開始しない。
 
     Args:
         phase: 現在のharvestフェーズ。
@@ -151,9 +152,47 @@ def build_motion_command(
         grasp_direct_jtc: Trueならgrasp系phaseのpose trackingを無効化し
             direct JTC実行へ切り替える (Issue #59 A/B実験のB条件)。
     """
+    if not phase_plan_is_ready_for_execution(phase, plan):
+        raise ValueError(f"phase trajectory plan is not ready: {phase.value}")
     return _arm_only_command(_build_phase_motion_command(
         phase, plan, current_joints, grasp_direct_jtc=grasp_direct_jtc,
     ))
+
+
+def phase_plan_is_ready_for_execution(
+    phase: HarvestTaskPhase,
+    plan: HarvestMotionPlan,
+) -> bool:
+    """現在phase用に生成された実行trajectoryが採用済みか判定する。
+
+    HOLD phaseは新しいtrajectoryを必要としない。FOLLOW_TRAJECTORY phaseでは
+    `planned_from_phase`の一致と、対応trajectoryの存在を両方要求する。
+    """
+    spec = PHASE_COMMAND_TABLE.get(phase)
+    if spec is None:
+        return False
+    if spec.motion_kind is not MotionKind.FOLLOW_TRAJECTORY:
+        return True
+    if plan.planned_from_phase is not phase or spec.trajectory_field is None:
+        return False
+    trajectory = getattr(plan, spec.trajectory_field)
+    return isinstance(trajectory, JointTrajectory) and bool(trajectory.points)
+
+
+def should_defer_phase_plan(
+    plan: HarvestMotionPlan,
+    *,
+    rejection_reason: str,
+) -> bool:
+    """phase通知より先に届いた実行planを、phase更新まで保留するか判定する。"""
+    phase = plan.planned_from_phase
+    if rejection_reason not in {
+        "rejected_phase_mismatch",
+        "rejected_current_phase_unknown",
+    } or phase is None:
+        return False
+    spec = PHASE_COMMAND_TABLE.get(phase)
+    return spec is not None and spec.motion_kind is MotionKind.FOLLOW_TRAJECTORY
 
 
 def _build_phase_motion_command(
@@ -169,49 +208,6 @@ def _build_phase_motion_command(
         raise ValueError(f"build_motion_command: unsupported phase {phase!r}")
     if grasp_direct_jtc and phase in GRASP_SERVO_PHASES:
         spec = replace(spec, terminal_pose_tracking=False)
-    if phase is HarvestTaskPhase.RETURNING_HOME:
-        # abort復旧 (suffix replan) が刻んだ衝突考慮済みのhome区間trajectoryが
-        # あれば優先する (Issue #32)。無ければ従来どおりhome定数への直行軌道を使う。
-        if plan.home_joint_trajectory is not None:
-            return _make_command(spec, None, plan.home_joint_trajectory, plan)
-        home_positions_by_name = dict(zip(
-            DEFAULT_JOINT_NAMES, DEFAULT_JOINT_POSITIONS_RAD, strict=True
-        ))
-        home_trajectory = JointTrajectory(
-            joint_names=current_joints.joint_names,
-            points=(
-                JointTrajectoryPoint(
-                    positions_rad=current_joints.positions_rad,
-                    time_from_start_sec=0.0,
-                ),
-                JointTrajectoryPoint(
-                    positions_rad=tuple(
-                        home_positions_by_name.get(name, position)
-                        for name, position in zip(
-                            current_joints.joint_names,
-                            current_joints.positions_rad,
-                            strict=True,
-                        )
-                    ),
-                    time_from_start_sec=10.0,
-                ),
-            ),
-        )
-        return MotionCommand(
-            command_name=spec.command_name,
-            planner_name="direct",
-            target_pose=None,
-            gripper_closed=False,
-            phase_motion_plan=PhaseMotionPlan(
-                phase_id=spec.phase_id,
-                phase_goal_pose=None,
-                active_waypoints=(),
-                joint_trajectory=home_trajectory,
-            ),
-            motion_kind=spec.motion_kind,
-            terminal_pose_tracking=spec.terminal_pose_tracking,
-        )
-
     goal_pose = getattr(plan, spec.pose_field) if spec.pose_field is not None else None
     if spec.motion_kind is MotionKind.HOLD:
         return _make_stop_command(spec, goal_pose, current_joints)
@@ -285,6 +281,7 @@ def main() -> None:
             super().__init__("motion_command_node")
             self._phase: HarvestTaskPhase | None = None
             self._plan: HarvestMotionPlan | None = None
+            self._pending_plan: HarvestMotionPlan | None = None
             self._joint_state: JointStateSnapshot | None = None
             self._grasp_direct_jtc = grasp_direct_jtc_enabled()
             self.get_logger().info(metric_line(
@@ -304,11 +301,22 @@ def main() -> None:
                 self._phase = HarvestTaskPhase(msg.data)
             except ValueError:
                 return
+            if (
+                self._pending_plan is not None
+                and self._pending_plan.planned_from_phase is self._phase
+            ):
+                pending = self._pending_plan
+                self._pending_plan = None
+                self._consider_plan(pending)
+                return
             self._try_publish()
 
         def _on_plan(self, msg: String) -> None:
             from tomato_harvest_sim.msg.serialization import harvest_motion_plan_from_json
             candidate = harvest_motion_plan_from_json(msg.data)
+            self._consider_plan(candidate)
+
+        def _consider_plan(self, candidate: HarvestMotionPlan) -> None:
             decision = evaluate_plan_arbitration(
                 candidate=candidate,
                 current_plan=self._plan,
@@ -332,7 +340,13 @@ def main() -> None:
                 ),
             ))
             if not decision.adopted:
+                if should_defer_phase_plan(
+                    candidate,
+                    rejection_reason=decision.reason,
+                ):
+                    self._pending_plan = candidate
                 return
+            self._pending_plan = None
             self._plan = candidate
             self._try_publish()
 
@@ -344,6 +358,18 @@ def main() -> None:
 
         def _try_publish(self) -> None:
             if self._phase is None or self._plan is None or self._joint_state is None:
+                return
+            if not phase_plan_is_ready_for_execution(self._phase, self._plan):
+                self.get_logger().info(metric_line(
+                    "motion_command_deferred",
+                    phase=self._phase.value,
+                    reason="phase_plan_not_ready",
+                    plan_revision=self._plan.plan_revision,
+                    planned_from_phase=(
+                        self._plan.planned_from_phase.value
+                        if self._plan.planned_from_phase is not None else None
+                    ),
+                ))
                 return
             try:
                 cmd = build_motion_command(

@@ -10,6 +10,57 @@ updated: 2026-06-27
 # 調査目的
 以下の構成で、トマトをロボットハンドで収穫するシミュレータを構築できるかを、公式一次情報を中心に整理する。
 
+## Phase開始時計画のGRASP停止回復（2026-07-20）
+
+### 確認済みの事実
+
+- GUI再現ログでは`MOVING_TO_GRASP`進入時のMoveIt計画が3回ともerror code
+  99999で失敗し、その後は同phaseに留まったまま再計画されなかった。
+- move_groupは`Unable to sample any valid states for goal tree`を記録している。
+  grasp goalでは左右fingerがworld側の`target_tomato`および簡略化したstem形状へ
+  到達するが、現行PlanningSceneはこの意図的な接触を許可していない。
+- MoveIt公式Planning Scene資料では、Allowed Collision Matrix (ACM)はrobot部位と
+  world objectを含む指定ペアの衝突をcollision worldから無視させる機構である。
+- MoveIt公式Planning Scene ROS APIのPanda例でも、把持物をattachする際は
+  `panda_hand`と左右fingerを`touch_links`として指定している。
+
+### 設計への反映（推論）
+
+- world tomatoへの接触を全phaseで許可せず、`MOVING_TO_GRASP`計画時だけ
+  gripper linkとtarget tomato・stemのACMペアを許可する。
+- OMPLの確率的計画が一度のphase-entry試行群で全失敗しても永久停止しないよう、
+  phaseに対応するtrajectoryが未生成の間だけ、間隔を空けて最新joint stateから
+  phase計画を再試行する。trajectory採用後、またはphase遷移後は旧phaseの再試行を止める。
+
+### 一次情報
+
+- MoveIt Planning Scene / Allowed Collision Matrix:
+  https://moveit.picknik.ai/main/doc/examples/planning_scene/planning_scene_tutorial.html
+- MoveIt Planning Scene ROS API / attached object touch links:
+  https://moveit.picknik.ai/humble/doc/examples/planning_scene_ros_api/planning_scene_ros_api_tutorial.html
+
+## Step 3-14 RETURNING_HOMEのtray回避（2026-07-19）
+
+### 確認済みの事実
+
+- MoveItのPlanning Sceneはrobot geometry、robot state、world geometryを保持し、world collision objectにはbox等のprimitiveを使用できる。現行実装もtrayをbaseと4壁の5 boxとして`/apply_planning_scene`へ適用している。
+- 現行`RETURNING_HOME`はphase進入時に最新joint stateから固定home関節goalへのOMPL計画を起動する。計画前にはtrayを含むPlanningSceneを再適用し、実artifactでも`home_entry`計画成功・publish・adoptを確認できる。
+- MoveItのcollision判定にはworld側だけでなくrobot link側のcollision geometryが必要である。現行launchは`panda_link7`、`panda_hand`、左右fingerへ独自primitiveを追加するが、Isaac USDの実collision形状から生成しておらず、両モデルの一致を検証するtestもない。
+- OMPLの既定motion validatorはedgeを離散状態へ分けてcollision checkする。細い障害物では`longest_valid_segment_fraction`等の検査間隔が粗いと衝突を見落としうる。現行設定値は0.01だが、trayリブに対するswept-path検証はない。
+
+### 設計への反映（推論）
+
+- 「trayがMoveItで未考慮」ではなく、「登録・計画経路は存在するが、PlanningSceneとPhysXの幾何一致、および生成trajectory全点の衝突余裕を観測していない」ことを主な調査ギャップとする。
+- 実装前に`/monitored_planning_scene`のobject ID・pose・寸法、MoveIt robot collision geometry、計画trajectory各点のstate validity/minimum distance、PhysX contact pairを同一runで保存し、false-negativeの発生箇所を確定する。
+- 恒久対策は、配置姿勢からhomeへ直接計画せず、tray wall上端より十分高いcollision-aware retreat poseを経由してからhomeへ向かう二段MoveIt計画を第一候補とする。retreat区間とhome区間の双方をPlanningSceneに対して検証し、幾何モデル差は単一設定源と保守的paddingで吸収する。
+
+### 一次情報
+
+- MoveIt Kinematics / Collision Checking: https://moveit.picknik.ai/main/doc/concepts/kinematics.html
+- MoveIt Planning Scene Monitor: https://moveit.picknik.ai/main/doc/concepts/planning_scene_monitor.html
+- MoveIt OMPL `longest_valid_segment_fraction`: https://moveit.picknik.ai/main/doc/examples/ompl_interface/ompl_interface_tutorial.html
+- MoveIt PlanningScene API (`is_path_valid`, collision check): https://moveit.picknik.ai/main/doc/api/python_api/_autosummary/moveit.core.planning_scene.html
+
 ## Step 3-8-6 physics配置判定対策（2026-07-17）
 
 ### 確認済みの事実
