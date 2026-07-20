@@ -131,7 +131,11 @@ class MoveIt2ServiceBridgePlanner(MotionPlanner):
                 scene_snapshot=scene_snapshot,
                 plan=prior_plan,
             )
-            if result.success and result.joint_trajectory is not None:
+            if (
+                result.success
+                and result.joint_trajectory is not None
+                and result.joint_trajectory.points
+            ):
                 # 目標pose・waypointと他phaseの軌道は維持し、今回のphaseに
                 # 対応するJointTrajectoryだけを更新した新しいplanを返す。
                 return replace(

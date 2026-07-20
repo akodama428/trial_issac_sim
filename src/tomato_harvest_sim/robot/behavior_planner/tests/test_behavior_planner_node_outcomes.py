@@ -75,22 +75,35 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class ExecutionStatusValueTest(unittest.TestCase):
-    """JSON化されたexecution_status (Issue #32 abort診断) と旧plain文字列の両方を読む。"""
+class ExecutionStatusObservationTest(unittest.TestCase):
+    """Issue #58でabort理由をtask state machineまで保持する。"""
 
     def setUp(self) -> None:
-        from tomato_harvest_sim.robot.behavior_planner import execution_status_value
-        self.value = execution_status_value
-
-    def test_plain_status_string_is_passed_through(self) -> None:
-        self.assertEqual(self.value("succeeded"), "succeeded")
-        self.assertEqual(self.value(" aborted \n"), "aborted")
-
-    def test_json_status_field_is_extracted(self) -> None:
-        self.assertEqual(
-            self.value('{"status": "aborted", "max_joint_error_rad": 0.18}'),
-            "aborted",
+        from tomato_harvest_sim.robot.behavior_planner import (
+            execution_status_observation,
         )
+        self.observe = execution_status_observation
 
-    def test_json_without_status_field_is_treated_as_unknown(self) -> None:
-        self.assertEqual(self.value('{"foo": 1}'), "unknown")
+    def test_plain_status_preserves_backward_compatibility(self) -> None:
+        observation = self.observe(" aborted ")
+        self.assertEqual(observation.status, "aborted")
+        self.assertIsNone(observation.abort_reason)
+
+    def test_json_status_field_is_preserved(self) -> None:
+        observation = self.observe(
+            '{"status": "aborted", "max_joint_error_rad": 0.18}'
+        )
+        self.assertEqual(observation.status, "aborted")
+        self.assertIsNone(observation.abort_reason)
+
+    def test_json_abort_reason_is_preserved(self) -> None:
+        observation = self.observe(
+            '{"status":"aborted","abort_reason":"missing_trajectory"}'
+        )
+        self.assertEqual(observation.status, "aborted")
+        self.assertEqual(observation.abort_reason, "missing_trajectory")
+
+    def test_json_without_status_is_unknown(self) -> None:
+        observation = self.observe('{"abort_reason":"missing_trajectory"}')
+        self.assertEqual(observation.status, "unknown")
+        self.assertEqual(observation.abort_reason, "missing_trajectory")

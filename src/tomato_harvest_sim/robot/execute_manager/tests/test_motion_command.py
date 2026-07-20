@@ -284,6 +284,24 @@ class TestMotionCommandLogic(unittest.TestCase):
                     )
                 )
 
+    def test_detaching_empty_trajectory_is_not_executable(self) -> None:
+        from tomato_harvest_sim.robot.execute_manager.motion_command import (
+            phase_plan_is_ready_for_execution,
+        )
+
+        phase = HarvestTaskPhase.DETACHING
+        plan = replace(
+            _make_plan_for_phase(phase),
+            pull_joint_trajectory=JointTrajectory(
+                joint_names=("panda_joint1",),
+                points=(),
+            ),
+        )
+
+        self.assertFalse(phase_plan_is_ready_for_execution(phase, plan))
+        with self.assertRaisesRegex(ValueError, "phase trajectory plan is not ready"):
+            self.build(phase, plan, _make_joint_state())
+
     def test_hold_phase_does_not_require_new_trajectory_plan(self) -> None:
         from tomato_harvest_sim.robot.execute_manager.motion_command import (
             phase_plan_is_ready_for_execution,

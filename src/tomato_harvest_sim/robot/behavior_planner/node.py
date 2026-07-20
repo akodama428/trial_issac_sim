@@ -15,8 +15,43 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from tomato_harvest_sim.msg.contracts import HarvestTaskPhase, TomatoStatus
+
+
+@dataclass(frozen=True)
+class ExecutionStatusObservation:
+    """実行状態とtask policyに必要なabort分類を保持する。"""
+
+    status: str
+    abort_reason: str | None = None
+
+
+def execution_status_observation(raw: str) -> ExecutionStatusObservation:
+    """plain/JSON形式のexecution statusを正規化する。
+
+    Args:
+        raw: execution adapterがpublishしたstatus文字列。
+
+    Returns:
+        状態名と、JSONに含まれる場合はabort理由を保持する観測値。
+    """
+    import json
+
+    text = raw.strip()
+    if not text.startswith("{"):
+        return ExecutionStatusObservation(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return ExecutionStatusObservation(text)
+    if not isinstance(data, dict):
+        return ExecutionStatusObservation(text)
+    status = str(data.get("status", "unknown")).strip() or "unknown"
+    raw_reason = data.get("abort_reason")
+    reason = str(raw_reason).strip() if raw_reason is not None else None
+    return ExecutionStatusObservation(status, reason or None)
 
 
 def _pose_error_m(a: object, b: object) -> float:
@@ -24,27 +59,6 @@ def _pose_error_m(a: object, b: object) -> float:
     dy = a.y - b.y
     dz = a.z - b.z
     return math.sqrt(dx * dx + dy * dy + dz * dz)
-
-
-def execution_status_value(raw: str) -> str:
-    """execution_statusのraw値からstatus文字列を取り出す。
-
-    servo_execution_adapterはabort診断のためstatusをJSONで報告することがある (Issue #32)。
-    旧来のplain文字列 ("succeeded"等) とJSON形式の両方を受け付け、
-    phase遷移判定に使うstatus値だけを返す。
-    """
-    import json
-
-    text = raw.strip()
-    if not text.startswith("{"):
-        return text
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return text
-    if isinstance(data, dict):
-        return str(data.get("status", "unknown")).strip() or "unknown"
-    return text
 
 
 def detaching_outcome(tomato_status: TomatoStatus) -> HarvestTaskPhase | None:
@@ -176,11 +190,12 @@ def main() -> None:
             self._apply_transition(advance(self._machine, PlanAdopted()))
 
         def _on_execution_status(self, msg: String) -> None:
-            self._execution_status = execution_status_value(msg.data)
+            observation = execution_status_observation(msg.data)
+            self._execution_status = observation.status
             if self._execution_status == "succeeded":
                 self._on_trajectory_succeeded()
             elif self._execution_status == "aborted":
-                self._on_trajectory_aborted()
+                self._on_trajectory_aborted(observation.abort_reason)
 
         # ------------------------------------------------------------------
         # Trajectory completion handlers
@@ -190,7 +205,7 @@ def main() -> None:
             """軌道実行成功 → 移動フェーズを次フェーズへ進める。"""
             self._apply_transition(advance(self._machine, ExecutionSucceeded()))
 
-        def _on_trajectory_aborted(self) -> None:
+        def _on_trajectory_aborted(self, reason: str | None) -> None:
             """軌道実行中断 → フェーズは維持し、再計画の完了を待つ。
 
             再計画は trajectory_planner_node が /trajectory_status の "aborted" を
@@ -198,7 +213,9 @@ def main() -> None:
             motion_command_node が古い plan で即座にコマンドを再生成し、
             実行系の "aborted" と往復する高速ループになるため何もしない。
             """
-            self._apply_transition(advance(self._machine, ExecutionAborted()))
+            self._apply_transition(
+                advance(self._machine, ExecutionAborted(reason))
+            )
 
         # ------------------------------------------------------------------
         # Scene-snapshot-driven step
