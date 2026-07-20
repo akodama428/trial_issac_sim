@@ -154,7 +154,7 @@ caption { text-align: left; font-weight: 600; padding: 4px 0; caption-side: top;
 <tr><td class="num">3-4</td><td><code>test_serialization_roundtrip_motion_command</code></td><td>command_name="move_to_pregrasp"、gripper_closed=True の MotionCommand を JSON 化 → 復元する</td><td>復元後の command_name と gripper_closed が元の値と一致する</td></tr>
 <tr><td class="num">3-5</td><td><code>test_serialization_roundtrip_target_estimate</code></td><td>world pose (0.1, 0.2, 0.3)、confidence 0.95 の TargetEstimate を JSON 化 → 復元する</td><td>復元後の pose.x が 0.1、confidence が 0.95（浮動小数点許容誤差内）と一致する</td></tr>
 <tr><td class="num">3-6</td><td><code>test_robot_msg_perception_exports_target_estimator</code></td><td><code>robot.msg.perception</code> から TargetEstimator を import する</td><td>import が成功する</td></tr>
-<tr><td class="num">3-7</td><td><code>test_robot_msg_planner_exports_motion_planner</code></td><td><code>robot.msg.planner</code> から MotionPlanner / MoveIt2PlannerBridge / MoveIt2PlanningResult / PlannerBackendInfo を import する</td><td>import が成功する</td></tr>
+<tr><td class="num">3-7</td><td><code>test_robot_msg_planner_exports_motion_planner</code></td><td><code>robot.msg.planner</code> から MotionPlanner / MoveIt2PlannerBridge / MoveIt2PlanningResult を import する</td><td>import が成功する</td></tr>
 </tbody>
 </table>
 </div>
@@ -345,7 +345,7 @@ caption { text-align: left; font-weight: 600; padding: 4px 0; caption-side: top;
 <tr><td class="num">7-4</td><td><code>test_moveit_target_pose_is_shifted_from_runtime_tool_pose</code></td><td>tool pose (0.42, 0, 0.54, roll 180°) と link→tool オフセット (0, 0, 0.0584) を与える</td><td>MoveIt 目標 pose が (0.42, 0, 0.5984) になる（panda_hand link 基準への正しいシフト）</td></tr>
 <tr><td class="num">7-5</td><td><code>test_default_end_effector_link_is_panda_hand</code></td><td>既定構成で MoveIt2ServiceBridgePlanner を生成する</td><td>end effector link が "panda_hand"</td></tr>
 <tr><td class="num">7-6</td><td><code>test_orientation_constraint_is_enabled_by_default</code></td><td>同上</td><td>orientation constraint が有効</td></tr>
-<tr><td class="num">7-7</td><td><code>test_geometric_backend_can_be_forced</code></td><td>環境変数 <code>TOMATO_HARVEST_PLANNER_BACKEND=geometric</code> を設定して <code>build_planner()</code> を呼ぶ</td><td>backend 名="geometric_fallback"、moveit2_enabled=False（明示切替が効く）</td></tr>
+<tr><td class="num">7-7</td><td><code>test_build_planner_returns_the_runtime_moveit_planner</code></td><td><code>build_planner()</code>を呼ぶ</td><td>実運用の<code>MoveIt2ServiceBridgePlanner</code>を直接返す</td></tr>
 <tr><td class="num">7-8</td><td><code>test_moveit2_service_bridge_marks_plan_when_service_validation_succeeds</code></td><td>4 フェーズすべて成功する検証スタブを注入して <code>plan()</code> を呼ぶ（標準 scene / target / joint state / tf を入力）</td><td>planner_name="moveit2_service_bridge"、スタブが 1 回だけ呼ばれ、pregrasp 軌道の終端値がスタブの返した軌道と一致し、planning_scene_object_ids が伝搬する</td></tr>
 <tr><td class="num">7-9</td><td><code>test_moveit2_service_bridge_falls_back_when_service_validation_fails</code></td><td>常に失敗（service_unavailable）を返すスタブを注入する</td><td>planner_name="moveit2_service_bridge_fallback"、pregrasp 軌道は None（幾何 fallback へ委譲）</td></tr>
 <tr><td class="num">7-10</td><td><code>test_partial_result_preserves_pregrasp_grasp_pull_when_place_fails</code></td><td>pregrasp/grasp/pull 成功・place のみ失敗する部分成功スタブを注入する</td><td>planner_name="moveit2_service_bridge_partial" で pregrasp / grasp / pull 軌道が保持され、place 軌道のみ None（部分前進が可能）</td></tr>

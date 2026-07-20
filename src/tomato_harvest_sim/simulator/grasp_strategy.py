@@ -23,7 +23,9 @@ class FrictionGraspConfig:
     maximum_slip_m: float
 
 
-def _relative_position(hand: Pose3D, tomato: Pose3D) -> tuple[float, float, float]:
+def relative_position_in_hand_frame(
+    hand: Pose3D, tomato: Pose3D
+) -> tuple[float, float, float]:
     """world差分をhand local frameへ回し、剛体回転と実滑りを分離する。"""
     x, y, z = tomato.x - hand.x, tomato.y - hand.y, tomato.z - hand.z
     roll, pitch, yaw = (math.radians(value) for value in (hand.roll, hand.pitch, hand.yaw))
@@ -37,7 +39,9 @@ def _relative_position(hand: Pose3D, tomato: Pose3D) -> tuple[float, float, floa
     return x, y, z
 
 
-def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+def distance_between_positions(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b, strict=True)))
 
 
@@ -57,14 +61,17 @@ class FrictionGraspStrategy:
 
     def observe(self, gripper_closed: bool, left_force_n: float, right_force_n: float,
                 hand_pose: Pose3D, tomato_pose: Pose3D, dt_sec: float) -> GraspDecision:
-        relative_position = _relative_position(hand_pose, tomato_pose)
+        relative_position = relative_position_in_hand_frame(hand_pose, tomato_pose)
         if not gripper_closed:
             was_held = self._held_relative_position is not None
             self.reset()
             return GraspDecision.RELEASED if was_held else GraspDecision.NONE
 
         if self._held_relative_position is not None:
-            if _distance(relative_position, self._held_relative_position) > self._config.maximum_slip_m:
+            if (
+                distance_between_positions(relative_position, self._held_relative_position)
+                > self._config.maximum_slip_m
+            ):
                 self.reset()
                 return GraspDecision.LOST
             self._previous_relative_position = relative_position
@@ -72,7 +79,12 @@ class FrictionGraspStrategy:
 
         relative_speed = 0.0
         if self._previous_relative_position is not None and dt_sec > 0.0:
-            relative_speed = _distance(relative_position, self._previous_relative_position) / dt_sec
+            relative_speed = (
+                distance_between_positions(
+                    relative_position, self._previous_relative_position
+                )
+                / dt_sec
+            )
         self._previous_relative_position = relative_position
         qualifies = (
             left_force_n >= self._config.minimum_force_n

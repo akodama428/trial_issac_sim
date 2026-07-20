@@ -1,15 +1,18 @@
 この文書の冒頭には、リポジトリ直下から `codex` フォルダまでの相対パスを必ず記載すること。
 `codex_relative_path: ./.codex`
 
-この文書中の `docs/`、`agents/`、`skills/` は、すべて上記の相対パス配下、すなわち `codex` フォルダ内に配置されるものとして扱う。
+この文書中の `docs/`、`agents/`、`skills/` は、原則として上記の相対パス配下、すなわち `codex` フォルダ内に配置されるものとして扱う。
+ただし、調査・分析・検証結果を保存する `docs/reports/` は例外としてリポジトリ直下の `./docs/reports/` を指す。
+`<codex_relative_path>/docs/` は仕様・状態管理文書、`./docs/reports/` は課題単位の詳細レポートの保存先として区別すること。
 
 この文書は、このリポジトリ全体を進めるためのオーケストレーション方針を定義する。
 
 ## 基本方針
 - このリポジトリでは、`<codex_relative_path>/docs/` 配下の文書に仕様を記載する。
 - 仕様変更前、実装前には、必ず `<codex_relative_path>/docs/MASTER.md` を読む。
-- 今回の作業では新規開発を主目的とするため、設計・実装・レビュー前には、必ず `<codex_relative_path>/docs/RESEARCH.md` を読んで外部調査と前提条件を揃える。
-- 与えられた課題に対しては、まず Web の一次情報を調査し、その結果を `<codex_relative_path>/docs/RESEARCH.md` へ整理してから、要件定義・設計・実装へ進む。
+- 今回の作業では新規開発を主目的とするため、設計・実装・レビュー前には、必ず `<codex_relative_path>/docs/RESEARCH.md` と `./docs/reports/` 配下の関連レポートを読んで外部調査と前提条件を揃える。
+- 与えられた課題に対しては、まず Web の一次情報を調査し、その結果を `./docs/reports/` 配下の課題に適したサブフォルダへ独立したレポートとして保存してから、要件定義・設計・実装へ進む。
+- `<codex_relative_path>/docs/RESEARCH.md` は、プロジェクト全体に共通する調査方針、長期的な共通前提、`./docs/reports/` 配下の調査レポート索引を管理する。課題単位の詳細調査結果を追記し続ける保存先として使用しない。
 - 今回の作業では、`<codex_relative_path>/docs/USERS_GUIDE.md` で利用者視点の操作と期待体験を先に定義し、その内容を最小実装で試す `<codex_relative_path>/docs/POC.md` を作成して、使い勝手を先に検証する。
 - 今回の作業では、`<codex_relative_path>/docs/REQUIREMENTS.md` まで整理した後、期待挙動と受け入れ条件をテストで担保するために `<codex_relative_path>/docs/TESTING.md` を先に整備してから実装へ進む。
 - タスク実行時は、`<codex_relative_path>/skills/` 配下のスキルを確認し、該当するスキルがあればそれを使う。
@@ -33,7 +36,7 @@
 - `<codex_relative_path>/docs/MASTER.md`
   - 全体の状態管理を担う
 - `<codex_relative_path>/docs/RESEARCH.md`
-  - 新規開発前の外部調査、参考実装、技術制約を記載する
+  - プロジェクト全体に共通する調査方針、共通前提、`./docs/reports/` 配下の調査レポート索引を記載する
 - `<codex_relative_path>/docs/USERS_GUIDE.md`
   - 利用者向けの利用手順・操作方法を記載する
 - `<codex_relative_path>/docs/POC.md`
@@ -87,9 +90,31 @@ updated: 2026-06-17
 
 ## 各ワークフローの実行方法
 ### 事前調査
-- 新規開発の事前調査を行う場合や、`<codex_relative_path>/docs/RESEARCH.md` を作成または更新する場合は、まず `<codex_relative_path>/agents/web-researcher.md` の方針に従って Web の一次情報を収集する。
+- 新規開発の事前調査を行う場合は、まず `<codex_relative_path>/agents/web-researcher.md` の方針に従って Web の一次情報を収集する。
+- 調査結果は `<codex_relative_path>/docs/RESEARCH.md` へ直接蓄積せず、`./docs/reports/` 配下の既存サブフォルダから課題に最も近い分類を選び、独立した Markdown レポートとして保存する。
+- 適切な既存サブフォルダがない場合は、対象機能または技術領域を表す新しいサブフォルダを `./docs/reports/` 配下へ作成する。レポートのファイル名は、step番号、issue番号、調査対象が判別できる名前にする。
+- `<codex_relative_path>/docs/RESEARCH.md` は、プロジェクト全体の共通前提が変わった場合、または新しい調査レポートへの索引追加が必要な場合だけ更新する。
 - 調査では、確認済みの事実と推測を分離し、参照した URL、確認日、対象バージョンを記載する。
 - 特に Isaac Sim と Franka を扱う場合は、NVIDIA 公式ドキュメント、Isaac Lab 公式ドキュメント、Franka Robotics 公式ドキュメントと公式 GitHub を優先する。
+
+### 調査レポートのアーキテクチャ図
+- `./docs/reports/` 配下へ調査・分析・設計・検証レポートを生成する場合は、タイトルとfrontmatter等の基本メタデータの直後に、最初の本文セクションとして Mermaid の全体アーキテクチャ図を記載する。
+- 全体アーキテクチャ図には、調査対象の前後を含む主要モジュールとデータフローまたは依存関係を記載し、変更予定または変更済みのモジュールを色付きで明示する。
+- 変更モジュールには、原則として次の Mermaid class を使用する。
+
+```mermaid
+flowchart TD
+    INPUT["入力"] --> CHANGED["変更モジュール"]
+    CHANGED --> OUTPUT["出力"]
+
+    classDef changed fill:#ffe3e3,stroke:#c92a2a,stroke-width:3px,color:#3b0a0a;
+    class CHANGED changed;
+```
+
+- 全体アーキテクチャ図の次に、変更モジュールごとの詳細変更アーキテクチャ図を Mermaid で記載する。詳細図には、変更対象のクラス、関数、状態、入出力、主要分岐、外部依存のうち、変更内容を理解するために必要な要素を含める。
+- 複数モジュールを変更する場合は、モジュールごとに詳細図を分けるか、境界と責務が判別できるsubgraphで分離する。
+- 調査時点で変更対象が未確定の場合は、変更候補を色付きで示して「変更候補」と明記する。コードや仕様を変更しない純粋な調査レポートでは、全体図に「変更モジュールなし」と明記し、調査対象を変更済みと誤認させる色付けを行わない。
+- アーキテクチャ図より前に、調査結果、結論、詳細分析を記載してはいけない。
 
 ### 既存モジュール理解が必要な場合
 - 新規開発であっても、既存モジュールの実装内容を解説する場合は、`<codex_relative_path>/skills/explain_code/SKILL.md` を使う。
