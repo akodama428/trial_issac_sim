@@ -41,8 +41,15 @@ def phase_planning_specs(
         else (direct_pregrasp,)
     )
     place_targets: tuple[PlanningTarget, ...] = (
-        *plan.place_waypoints[:1],
-        plan.place_pose,
+        plan.place_waypoints or (plan.place_pose,)
+    )
+    # place_waypointsは「上空→設置点」の順で保持する。設置点は現在位置なので
+    # 除外し、残りを逆順に辿ってからhomeへ移動する。
+    retreat_targets = tuple(reversed(plan.place_waypoints[:-1]))
+    return_home_sequences: tuple[tuple[PlanningTarget, ...], ...] = (
+        ((*retreat_targets, home_joint_state()),)
+        if retreat_targets
+        else ()
     )
     return (
         PhasePlanningSpec(
@@ -76,7 +83,7 @@ def phase_planning_specs(
         ),
         PhasePlanningSpec(
             phase=HarvestTaskPhase.RETURNING_HOME,
-            target_sequences=((home_joint_state(),),),
+            target_sequences=return_home_sequences,
             attach_tomato=False,
             allow_gripper_target_contact=False,
             failure_reason="home_plan_failed",

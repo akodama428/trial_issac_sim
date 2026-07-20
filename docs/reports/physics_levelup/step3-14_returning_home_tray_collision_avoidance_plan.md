@@ -1,735 +1,953 @@
-# Step 3-14 RETURNING_HOME trayリブ接触の原因調査・実装計画（Issue #52）
+# Step 3-14 RETURNING_HOME trayリブ接触回避の原因調査・実装計画（Issue #52）
 
-**ステータス**: 原因調査・実装計画完了（実装未着手）
+**ステータス**: 実装・物理E2E評価完了（物理接触力は10/10で0、厳格なcontact report 0件は未達）
 
 **作成日**: 2026-07-19
 
-**更新日**: 2026-07-20（全移動phaseの開始時計画アーキテクチャを反映、Issue #52実装は未着手）
+**全面改訂日**: 2026-07-20
 
 **対象issue**: [#52](https://github.com/akodama428/trial_issac_sim/issues/52)
 
-**前提レポート**:
-[Step 3-10 RETURNING_HOME退避時のアーム不安定化・固着の原因調査](step3-10_returning_home_arm_freeze_investigation.md)
+**対象ベースライン**: `agent/pre-issue52-motion-planner-refactor` / `1b117e5`
 
-## 0. 結論
+**関連レポート**:
 
-現行コードではtrayはMoveIt PlanningSceneへ登録されており、`RETURNING_HOME`でもMoveItが
-trayを含むsceneに対してhome復帰軌道を生成している。したがって、今回の直接原因を
-「trayが障害物として一切登録されていない」「RETURNING_HOMEがMoveItを使っていない」と
-結論づけることはできない。
+- [Step 3-14 現行motion_plannerアーキテクチャ](step3-14_current_motion_planner_arch.md)
+- [Step 3-10 RETURNING_HOME退避時のアーム不安定化・固着の原因調査](step3-10_returning_home_arm_freeze_investigation.md)
 
-確認できた経路は次のとおりである。
+---
 
-1. trayは`place_tray_base`と4個の`place_tray_wall_*`、合計5個のboxとして
-   `/apply_planning_scene`へ送られる。
-2. `PLACED → RETURNING_HOME`進入時に共通の`phase_entry` planが起動する。
-3. plannerはPlanningSceneを再適用してから、最新joint stateをstart、固定home関節構成をgoalとして
-   OMPLへ`GetMotionPlan`を要求する。
-4. 変更前の手動GUI artifactでも、旧`home_entry`計画の成功、publish、adoptを複数cycleで確認できる。
+## 0. 改訂後の結論
 
-一方、**MoveItが衝突なしと判定した軌道でPhysX上のgripperとtrayリブが接触する理由は、
-現在の証跡だけでは確定できない**。最有力は次のモデル・検証ギャップである。
-
-- MoveIt用gripper collision modelはlaunch時に追加する独自primitiveであり、Isaac USDの実collision
-  shapeを正本としていない。
-- trayも同じ寸法値から作られているものの、Isaac側とMoveIt側で別々にbox配置式を実装している。
-- `planning_scene_object_ids`は「登録しようとしたID」を示すだけで、move_group内部の最終pose・寸法、
-  start stateの接触pair、trajectory全点のminimum distanceを証明しない。
-- OMPLはedge上を離散的にcollision checkするため、細いリブと小さいfingerの組合せでは検査分解能も
-  実測対象にする必要がある。
-- 現行artifactにはMoveItの衝突距離とPhysX contact pointを同一時刻で比較できるtopicがない。
-
-よって実装は、先にPlanningSceneとPhysXのfalse-negativeを再現・可視化し、その結果を反映した
-collision modelを用いて、`RETURNING_HOME`を
-**release位置 → tray上方のretreat waypoint → home**の二段MoveIt計画へ変更する。
-単なる固定関節補間やcollision checkを迂回するCartesian直線指令は採用しない。
-
-## 1. 調査対象と問い
-
-Issue #52では、ほぼ100%の再現率で最後の`RETURNING_HOME`中にgripperとtrayリブが接触する現象を扱う。
-Step 3-10では、失敗runの`panda_leftfinger`と`PlaceTray/WallRight`の持続接触が約39〜48件/s、
-成功runが約2〜3件/sであり、接触wedgeが追従不能の主因であることまで特定した。
-
-本Stepで答える問いは次の3点である。
-
-1. trayのbase・リブはMoveIt PlanningSceneへ障害物として登録されているか。
-2. `RETURNING_HOME`の実行軌道は、そのPlanningSceneを使ったMoveIt計画か。
-3. 1と2が真なら、なぜMoveIt計画済み軌道がPhysX上で接触するのか。また、どこを変更すべきか。
-
-## 2. 調査条件
-
-- 調査日: 2026-07-19
-- 対象: repository HEAD `7b873a1`
-- ROS 2 / MoveIt: Jazzy系、OMPL `RRTConnect`
-- simulator: Isaac Sim 6.0系 / PhysX
-- 調査方法:
-  - Issue #52本文・コメントの確認
-  - PlanningScene生成、MoveIt request、phase遷移、tray生成、robot collision URDFの静的解析
-  - 既存unit testとartifact logの確認
-  - MoveIt公式一次情報との照合
-- 本Stepではコード実装と新規E2Eは行わない。
-
-## 3. 既存artifact
-
-以下はローカルworkspace内のartifactへの相対リンクである。`.artifacts`は通常Git管理外なので、
-GitHub上ではなく同じworkspaceを保持する環境で参照する。
-
-- [手動GUI robot log](../../../.artifacts/manual-gui/robot_node.log)
-  - 複数cycleで`PLACED → RETURNING_HOME`
-  - `trigger=home_entry`の`suffix_replan_completed success=true`
-  - 新planのpublish/adopt
-  - `RETURNING_HOME → complete`
-- [手動GUI simulator/controller統合log](../../../.artifacts/manual-gui/run_ros2_components.log)
-  - PhysX materialとsolver設定の適用先として左右fingerとtray各wallを確認できる
-  - contact debug logを含むが、現状はtomato-finger中心で、RETURNING_HOMEの
-    gripper-tray contact point・normal・impulseをphase付きで抽出できない
-- [手動GUI rosbag metadata](../../../.artifacts/manual-gui/home_divergence_bag_20260718_010824/metadata.yaml)
-  - joint command/state、JTC controller state、phaseを含む既存bag
-  - MoveIt PlanningScene geometryとPhysX contact pairは記録対象外
-- [Step 3-13 position-velocity E2E robot log](../../../.artifacts/issue61-step3-13/position-velocity-1600/e2e/robot_node.log)
-  - `home_entry` plan成功後に`RETURNING_HOME → complete`した比較用run
-- [Step 3-13 position-velocity rosbag metadata](../../../.artifacts/issue61-step3-13/position-velocity-1600/e2e/home_divergence_bag/metadata.yaml)
-
-Step 3-10が参照したdamping前後の10姿勢matrixは`/tmp`に保存されており、現在の
-`.artifacts`配下には残っていない。そのため本StepではStep 3-10の集計値を既知のベースラインとして
-使用し、実装評価時には新しいIssue #52専用artifactへ再取得する。
-
-## 4. 現行実装の確認
-
-### 4.1 入出力、振る舞い
-
-#### 入力
-
-- `SceneSnapshot.tray_pose`: trayのworld pose。現行設定は
-  `(x, y, z)=(0.35, -0.35, 0.45)m`、roll/pitch/yawは0。
-- `tray_inner_size_m`: `(0.22, 0.16, 0.05)m`。
-- `tray_wall_thickness_m`: `0.012m`。
-- `TRAY_COLLISION_MARGIN_M`: MoveIt側だけで追加する`0.015m`の保守margin。
-- `JointStateSnapshot`: `RETURNING_HOME`計画開始時の実関節角。
-- `home_joint_state()`: 固定home関節goal。
-
-#### 出力
-
-- `/apply_planning_scene`: tray base、4 wall、branch、stem、tomato状態の差分。
-- `/plan_kinematic_path`: start joint stateからhome joint goalへのMotionPlanRequest。
-- `HarvestMotionPlan.home_joint_trajectory`: MoveItが返したcollision-aware trajectory。
-- 実行時JTC trajectory: ServoExecutionAdapterからdispatchされるhome trajectory。
-
-#### 現行処理
-
-1. `trajectory_planner_node`が`RETURNING_HOME`へのphase変化を検出する。
-2. `should_plan_phase_on_entry()`が全移動phase共通の`phase_entry` planを一度起動する。
-3. `MoveIt2ServiceBridgePlanner.plan_phase_trajectory()`が最新joint stateを取得する。
-4. `Ros2MoveIt2PlannerBridge.plan_phase_trajectory()`がtrayを含むPlanningSceneを適用する。
-5. 固定home関節goalをOMPLへ渡す。
-6. 成功した`home_joint_trajectory`をpublishし、execute managerが新revisionを採用する。
-
-### 4.2 trayは障害物判定されているか
-
-**コード上はYesである。**
-
-`_build_planning_scene_request()`はbranch/stemへ続けて`_tray_collision_objects()`を追加する。
-trayは次の5 objectで構成される。
-
-| MoveIt object ID | 形状 | 対応するIsaac prim |
-| --- | --- | --- |
-| `place_tray_base` | box | `/World/PlaceTray/Base` |
-| `place_tray_wall_front` | box | `/World/PlaceTray`のx正側wall |
-| `place_tray_wall_back` | box | `/World/PlaceTray`のx負側wall |
-| `place_tray_wall_left` | box | `/World/PlaceTray`のy正側wall |
-| `place_tray_wall_right` | box | `/World/PlaceTray`のy負側wall |
-
-ただしIsaac側の`WallFront/Back`はy側、`WallLeft/Right`はx側であり、MoveIt object IDの方位名とは
-入れ替わっている。yaw=0の現行sceneでは5 boxの集合としては同じ四周を表すため、
-名前の入れ替わりだけで衝突漏れにはならない。しかしcontact logとのpair対応を誤読しやすく、
-将来の回転tray対応も含めて共通のside定義へ統一すべきである。
-
-### 4.3 RETURNING_HOMEでMoveItに考慮されているか
-
-**Yesである。**
-
-`plan_phase_trajectory(RETURNING_HOME)`は次の順序を明示している。
+Issue #52では、新しいplanner基盤や`RETURNING_HOME`専用executorを追加しない。
+現在のリファクタで導入済みの次の共通経路をそのまま利用する。
 
 ```text
-_apply_phase_planning_scene(attach_tomato=False)
-  → /apply_planning_scene success
-  → _plan_joint_goal(current_joint_state, home_joint_state)
-  → /plan_kinematic_path
-  → home_joint_trajectory
+PhasePlanningSpec.target_sequences
+  → Ros2MoveIt2PlannerBridge._plan_configured_phase()
+  → MoveItGoalPlanner._plan_phase()
+  → targetごとのMoveIt計画
+  → concatenate_trajectories()
 ```
 
-PlanningScene適用が失敗した場合は`planning_scene_unavailable`となり、home計画を続行しない。
-変更前の手動GUI logでも旧`home_entry`計画が約17msで成功し、そのrevisionが
-`planned_from_phase=returning_home`として採用されている。
+変更の中心は、`RETURNING_HOME`の目標列を次のように変更することである。
 
-### 4.4 robot側collision geometry
+```text
+変更前:
+  phase開始時の最新joint state → home_joint_state
 
-`move_group.launch.py`はkinematic URDFへ計画用primitiveを動的に追加する。
+変更後:
+  phase開始時の最新joint state
+    → place進入時に使用した鉛直waypoint列を逆順に退避
+    → pre_place_pose
+    → home_joint_state
+```
 
-| link | MoveIt用collision primitive |
+実装時の物理E2Eで、`place_pose → pre_place_pose`を1本のjoint-space区間にすると、
+終端poseは安全でも途中のfingerが一度下降してリブへ接触することが分かった。
+このため`HarvestPoseWaypointPlanner`は、place直上100 mmを既定5 mm間隔の
+21 poseへ分割する。`MOVING_TO_PLACE`は上から下へ、`RETURNING_HOME`は
+設置点を除いて下から上へ同じ`place_waypoints`を使用する。
+
+実装前に確認すべき点は「trayがPlanningSceneへ入っているか」だけではない。
+move_groupが実際に保持するscene、MoveIt参照軌道、PhysX実軌道・接触を同一runで照合し、
+次の境界を切り分ける。
+
+1. PlanningScene上のtrayとIsaac USD上のtrayが一致しているか。
+2. MoveIt参照軌道が全区間でcollision-freeか。
+3. 参照軌道はcollision-freeでも、追従誤差によって実機体がtrayへ接触していないか。
+4. `pre_place_pose`がgripper全体をtrayリブ上端から十分に離す退避点になっているか。
+
+最初に`phase_policy.py`だけを変更した後、Stage 5の物理E2E結果に基づいて
+`HarvestPoseWaypointPlanner`の共通place/retreat waypoint生成式も変更した。
+最終的な評価と未達条件は「15. 実装・評価結果」に記載する。
+
+---
+
+## 1. 背景と調査対象
+
+Issue #52の現象は、収穫物をtrayへ置いた後、最後の`RETURNING_HOME`で
+gripperまたはfingerがtrayのリブへ接触し、ほぼ100%再現するというものである。
+
+Step 3-10では失敗runで`panda_leftfinger`と`PlaceTray/WallRight`の持続接触が
+約39〜48件/s、成功runで約2〜3件/sだった。これは接触が単なる一瞬のタッチではなく、
+関節追従を妨げるwedgeになり得ることを示す。ただし当時の10姿勢matrixは`/tmp`保存であり、
+現在のworkspaceに再利用可能なartifactとして残っていない。
+
+本Stepで回答する問いは次のとおりである。
+
+1. trayのbaseと4つのリブは、move_groupが使用するPlanningSceneへ登録されているか。
+2. `RETURNING_HOME`の軌道はPlanningSceneを使ってMoveItが生成しているか。
+3. それでもPhysX上で接触する場合、sceneモデル、経路検査、追従のどこに差があるか。
+4. 現行共通phase plannerを崩さず、どの目標列を与えれば接触を回避できるか。
+5. 回避できなかった場合に危険な直接home復帰へ戻らない失敗処理になっているか。
+
+---
+
+## 2. 今回のスコープ
+
+### 2.1 実装対象
+
+- `RETURNING_HOME`を鉛直retreat waypoint列→`home_joint_state`の順序付き目標列へ変更する。
+- `pre_place_pose`がtray上方の安全な退避点か、scene寸法と実軌道で検証する。
+- move_groupの実PlanningSceneとACMを保存し、tray障害物の適用を確認する。
+- MoveIt参照軌道を高密度に検査し、collision-free判定の抜けを確認する。
+- PhysXのgripper/hand/finger対tray接触をphase付きで集計する。
+- unit、integration、物理E2Eの合格条件をartifactへ残す。
+
+### 2.2 非対象
+
+- `MotionPlanningCoordinator`、`PolicyRegistry`、`RecipeExecutor`等の新規planner階層。
+- `RETURNING_HOME`専用のtrajectory executor。
+- JTC、`ServoExecutionAdapter`、`IsaacFrankaDriver`の制御則変更。
+- MoveItを迂回する手書き関節補間や無検査Cartesian直線移動。
+- trayとの衝突をAllowed Collision Matrixで許可する対応。
+- effort command interfaceへの変更。
+- Issue #61で不採用としたeffortモード切替の再導入。
+
+---
+
+## 3. 現行リファクタ後アーキテクチャの確認
+
+### 3.1 初期計画とphase計画
+
+現在のplannerは、初期計画時に全phaseの`JointTrajectory`を生成しない。
+
+| タイミング | 入力 | 生成物 |
+| --- | --- | --- |
+| `TARGET_FOUND` | target estimate、scene snapshot | pose、waypointのみ |
+| 各移動phase進入時 | 最新joint state、base frame、scene snapshot、pose plan | 現在phaseの`JointTrajectory`のみ |
+
+`RETURNING_HOME`もphase進入時点の最新joint stateから計画される。
+したがって、古い初期関節角から計画していることは今回の直接原因ではない。
+
+### 3.2 phaseごとの差分は設定表へ集約済み
+
+`moveit_bridge/phase_policy.py`の`PhasePlanningSpec`が次を保持する。
+
+- `phase`
+- `target_sequences`
+- `attach_tomato`
+- `allow_gripper_target_contact`
+- `failure_reason`
+- 必要なphaseだけのjoint fallback成功理由
+
+`MOVING_TO_PLACE`はすでに次の順序付き目標を共通`_plan_phase()`へ渡している。
+
+```text
+pre_place_pose → place_pose
+```
+
+`RETURNING_HOME`だけが現在、次の単一区間である。
+
+```text
+home_joint_state
+```
+
+したがってIssue #52で必要なのは新しい処理方式ではなく、
+既存の`target_sequences`へ帰路の退避点を設定することである。
+
+### 3.3 共通`_plan_phase()`がすでに備える処理
+
+`MoveItGoalPlanner._plan_phase()`は、順序付きtarget列に対して次を行う。
+
+1. phase用PlanningSceneを適用する。
+2. phase開始時の最新joint stateを最初のstart stateにする。
+3. `Pose3D` targetはseeded IK、失敗時はpose goal recoveryで計画する。
+4. `JointStateSnapshot` targetはIKを行わずjoint goalとして計画する。
+5. 各区間の終端joint stateを次区間のstart stateにする。
+6. 成功した区間trajectoryを`concatenate_trajectories()`で連結する。
+7. 一区間でも失敗した場合はphase計画全体を失敗にする。
+
+この処理は複数のretreat pose→`home_joint_state`をそのまま表現できる。
+
+### 3.4 phase計画失敗時の現在の復旧
+
+`MoveIt2ServiceBridgePlanner.plan_phase_trajectory()`はphase trajectoryを最大3回計画する。
+trajectoryがまだ無い場合、`trajectory_planner_node`は一定間隔後にphase計画を再試行する。
+`motion_command_node`は現在phaseに一致するtrajectoryが届くまで実行commandを出さない。
+
+Issue #52ではこの再試行を維持し、退避区間の失敗時に
+`current → home`へ短絡するfallbackを追加しない。安全経路を作れない場合は停止して再計画する。
+
+---
+
+## 4. tray障害物と原因仮説
+
+### 4.1 コードから確認済みの事実
+
+trayはMoveIt PlanningScene上で次の5個のboxとして生成される。
+
+| MoveIt object ID | 対応物 |
 | --- | --- |
-| `panda_link7` | 半径0.055mのsphere |
-| `panda_hand` | `0.08 x 0.08 x 0.06m`のbox、z=-0.03m |
-| `panda_leftfinger` | `0.018 x 0.018 x 0.05m`のbox、z=+0.025m |
-| `panda_rightfinger` | 同上 |
+| `place_tray_base` | tray底面 |
+| `place_tray_wall_front` | リブ1 |
+| `place_tray_wall_back` | リブ2 |
+| `place_tray_wall_left` | リブ3 |
+| `place_tray_wall_right` | リブ4 |
 
-したがって「fingerのcollision geometryが完全に無い」とも言えない。しかしこれらは
-Isaac USDのcollision shapeやworld AABBから生成された値ではなく、コードに手入力された近似である。
-実fingerの形状、origin、姿勢、開口量、contact offsetを包含するかを検証した証跡がない。
+`RETURNING_HOME`のPlanningSceneではtomatoのgripper接触許可を解除し、
+trayとの接触を許可しない。`RETURNING_HOME`はtray scene適用後にMoveItへ
+joint goalを要求している。このため、コード上は次の2仮説を棄却できる。
 
-## 5. 原因分析
+- trayがPlanningScene requestへまったく追加されていない。
+- `RETURNING_HOME`がMoveItを使わず直接JTCへhomeを送っている。
 
-### 5.1 確認済み事実
+ただし、requestへ追加したことだけではmove_group内部の最終sceneを証明しない。
+`/monitored_planning_scene`または同等の取得結果で、実object pose、寸法、ACMを保存する必要がある。
 
-- tray 5 objectはPlanningScene requestに含まれる。
-- `RETURNING_HOME`はtray scene適用後のMoveIt/OMPL計画を使う。
-- 実行時にはPhysXでfinger-tray持続接触が過去runで観測されている。
-- 現行MoveIt robot/tray geometryとIsaac USD collision geometryの一致を検証するtestはない。
-- 現行artifactはtrajectory中のMoveIt minimum distance/contact pairを保持しない。
+### 4.2 現在値から見た退避高さの予備計算
 
-### 5.2 現時点の原因仮説
+現行設定は次のとおりである。
 
-| 優先度 | 仮説 | 現時点の判定 | 確認方法 |
+| 項目 | 値 |
+| --- | ---: |
+| tray基準z | `0.45 m` |
+| tray内高さ | `0.05 m` |
+| wall厚さ | `0.012 m` |
+| MoveIt collision margin | `0.015 m` |
+| place TCP z | `0.45 + 0.15 = 0.60 m` |
+| pre-place TCP z | `0.60 + 0.10 = 0.70 m` |
+
+MoveItで膨張させたwall上端は現行式では概算`0.521 m`であり、
+pre-place TCPとのz差は約`0.179 m`である。
+これは退避点候補として十分な可能性が高いが、TCP位置だけでは安全を証明できない。
+finger先端、hand、link7のcollision geometryをFKした最下端と、
+tray wall上端との距離を計測して最終判断する。
+
+### 4.3 原因仮説と検証順
+
+| 優先度 | 仮説 | 現時点 | 検証 |
 | --- | --- | --- | --- |
-| 1 | MoveItのgripper primitiveが実USD collision shapeを過小近似 | **最有力、未確定** | 同一joint stateでMoveIt contact/distanceとPhysX contact/AABBを比較 |
-| 2 | tray boxのpose・寸法・side定義がIsaac実形状とずれる | **有力、未確定** | `/monitored_planning_scene`とUSD world transform/AABBを数値比較 |
-| 3 | collision-freeなstartでもOMPL edgeの離散検査間をfingerがリブを横切る | **可能性あり** | trajectoryを高密度補間し全state validityを検査、分解能A/B |
-| 4 | 計画はcollision-freeだが追従誤差で実軌跡がリブ側へ外れる | **可能性あり** | reference/actual双方をFKし、各々のtray最小距離を比較 |
-| 5 | start stateが既に接触・penetration状態である | **可能性あり** | `RETURNING_HOME`進入直前のGetStateValidityとPhysX contactを比較 |
-| 6 | trayがPlanningSceneへ未登録 | **コード上棄却** | object IDだけでなくmonitored sceneを取得して最終確認 |
-| 7 | `RETURNING_HOME`が非MoveIt直行軌道を使う | **現行コード上棄却** | `phase_entry` publish/adoptとdispatch revisionを同一runで照合 |
+| 1 | release位置からhomeへの単一区間がtray側方へ抜ける | 最有力 | 現行trajectoryのFKとPhysX contact時刻を重ねる |
+| 2 | MoveItとIsaacのgripper collision geometryが一致しない | 有力 | 同一joint stateで両方のAABB/最小距離を比較 |
+| 3 | tray boxのpose・寸法・名称対応がIsaacとずれる | 有力 | monitored sceneとUSD world transformを比較 |
+| 4 | OMPLの離散edge検査が細いリブとの交差を見落とす | 可能性あり | trajectoryを高密度補間してstate validityを検査 |
+| 5 | 参照軌道は安全だが追従誤差でactual pathがtrayへ寄る | 可能性あり | reference/actual両方のFKとcontactを比較 |
+| 6 | `RETURNING_HOME`開始時点ですでに接触している | 可能性あり | phase進入直前のPhysX contactとGetStateValidityを比較 |
+| 7 | trayが未登録 | request生成上は棄却 | move_group実scene取得で最終確認 |
 
-最終原因は仮説1〜5を同一runで比較するまで断定しない。特に、MoveIt計画が正しくてもJTC/PhysXの
-actual pathが計画pathから外れれば接触は起こりうるため、referenceだけのstate validityでは不十分である。
+### 4.4 公式仕様との照合
 
-## 6. 公式仕様との照合
+確認日: 2026-07-20
 
-確認日は2026-07-19。
-
-- MoveIt PlanningSceneはrobot geometry、robot state、world geometryを保持する。
-- collision checkingは主にFCLが担い、world objectにはbox等のprimitiveを使用できる。
-- Allowed Collision Matrixで許可されたpairは検査されない。現行SRDFにfinger-tray許可はないが、
-  runtime ACMも診断時に保存する。
-- OMPLの既定motion validatorはedgeを離散化してstate collisionを調べる。細い障害物では
-  `longest_valid_segment_fraction`や`maximum_waypoint_distance`が粗いと見落としうる。
-- PlanningSceneの`is_path_valid`はtrajectory各stateのcollision avoidance/feasibility検証に使える。
+- MoveItのPlanningSceneはrobot state、robot geometry、world geometryを保持し、
+  planning requestのcollision checkingに使用される。
+- PlanningSceneへ追加したcollision objectとattached objectは、通常のmotion planningで考慮される。
+- OMPLのedge collision checkingは離散的であり、
+  `longest_valid_segment_fraction`と`maximum_waypoint_distance`が検査密度へ影響する。
+- PlanningSceneのpath validity機能はtrajectory中のstateがcollision-freeかを検証できる。
+- Planning Scene Monitorはmove_groupが監視・公開するsceneの確認に使用できる。
 
 一次情報:
 
-- [MoveIt Kinematics / Collision Checking](https://moveit.picknik.ai/main/doc/concepts/kinematics.html)
+- [MoveIt Motion Planning](https://moveit.picknik.ai/main/doc/concepts/motion_planning.html)
+- [MoveIt Planning Scene tutorial](https://moveit.picknik.ai/main/doc/examples/planning_scene/planning_scene_tutorial.html)
+- [MoveIt OMPL planner collision checking resolution](https://moveit.picknik.ai/main/doc/examples/ompl_interface/ompl_interface_tutorial.html)
 - [MoveIt Planning Scene Monitor](https://moveit.picknik.ai/main/doc/concepts/planning_scene_monitor.html)
-- [MoveIt OMPL Planner / Longest Valid Segment Fraction](https://moveit.picknik.ai/main/doc/examples/ompl_interface/ompl_interface_tutorial.html)
 - [MoveIt PlanningScene API](https://moveit.picknik.ai/main/doc/api/python_api/_autosummary/moveit.core.planning_scene.html)
-- [MoveIt Visualizing Collisions](https://moveit.picknik.ai/main/doc/examples/visualizing_collisions/visualizing_collisions_tutorial.html)
+- [MoveIt `PlanningScene::isPathValid`](https://github.com/moveit/moveit2/blob/main/moveit_core/planning_scene/include/moveit/planning_scene/planning_scene.hpp)
 
-## 7. 全体アーキテクチャ
+---
 
-赤・太枠がIssue #52で変更する範囲、緑が既存利用、灰が対象外である。色だけに依存しないよう、
-変更boxには`[変更]`、新規boxには`[新規]`を付ける。
+## 5. 改訂後の全体アーキテクチャ
 
-```mermaid
-flowchart TB
-    classDef changed fill:#ffe3e3,stroke:#c92a2a,stroke-width:3px,color:#3b0a0a;
-    classDef existing fill:#d3f9d8,stroke:#2b8a3e,stroke-width:1.5px,color:#0b3d18;
-    classDef outscope fill:#e9ecef,stroke:#6c757d,stroke-width:1.5px,color:#212529;
-
-    BP["Behavior Planner<br/>PLACED → RETURNING_HOME"]:::existing
-    SNAP["SceneSnapshot<br/>tray pose / geometry"]:::existing
-
-    subgraph PLANNER["trajectory_planner_node / MoveIt bridge"]
-        ENTRY["共通phase_entry trigger"]:::existing
-        GEOM["[変更] Canonical tray collision geometry<br/>Isaac/MoveIt共通定義"]:::changed
-        SCENE["PlanningScene apply<br/>tray base + 4 walls"]:::existing
-        RETREAT["[新規] tray-exit retreat goal生成<br/>wall top + clearance"]:::changed
-        PLAN1["[変更] MoveIt segment 1<br/>current → retreat"]:::changed
-        PLAN2["[変更] MoveIt segment 2<br/>retreat → home"]:::changed
-        VALID["[新規] path validity / clearance検証<br/>reference + actual diagnostics"]:::changed
-        CONCAT["[変更] 2 segment連結<br/>home_joint_trajectory"]:::changed
-    end
-
-    EXEC["ServoExecutionAdapter / JTC<br/>計画軌道を実行"]:::existing
-    HWI["IsaacSimHardwareInterface<br/>command/state transport"]:::outscope
-
-    subgraph SIM["Isaac Sim / PhysX"]
-        USD["Franka USD collision shape<br/>tray rigid collision"]:::existing
-        CONTACT["[変更] phase付きcontact観測<br/>pair / point / normal / impulse"]:::changed
-    end
-
-    ART["Issue #52 artifact<br/>PlanningScene + trajectory + contact"]:::changed
-
-    BP --> ENTRY
-    SNAP --> GEOM
-    GEOM --> SCENE
-    ENTRY --> SCENE
-    SCENE --> RETREAT --> PLAN1 --> PLAN2 --> VALID --> CONCAT
-    CONCAT --> EXEC --> HWI --> USD
-    USD --> CONTACT
-    VALID --> ART
-    CONTACT --> ART
-```
-
-## 8. 変更箇所アーキテクチャ
-
-### 8.1 現行構造の複雑化リスク
-
-現行`trajectory_planner_node`はROS callback、state集約、trigger判定、planner起動、plan revision付与、
-publishを同じnode classで扱う。一方、phaseごとの具体的な計画手順は
-`Ros2MoveIt2PlannerBridge.plan_phase_trajectory()`の`if phase is ...`連鎖に集まっている。
-
-Issue #52の処理をこの連鎖へ直接追加すると、`RETURNING_HOME`分岐だけが次を所有する。
-
-- tray retreat poseの計算
-- PlanningScene適用
-- pose goal計画
-- segment終端joint stateの取得
-- home joint goal計画
-- trajectory連結
-- path validity / clearance検証
-- segment別failure reasonとfallback判断
-
-この構造では、次に別phaseへwaypointや検証を追加すると同じprivate method群が増える。
-問題は「RETURNING_HOMEが特別なこと」ではなく、**phaseごとに異なる計画手順と、
-全phase共通のMoveIt実行手順が分離されていないこと**である。
-
-したがってStep 3-14では、nodeへreturn-home専用plannerを埋め込まず、以下の境界を設ける。
-
-1. nodeは「いつ計画するか」とROS I/Oだけを担当する。
-2. phase policyは「どのscene profileで、どのgoalを、どの順に計画するか」を
-   `PlanningRecipe`として宣言する。
-3. generic executorはrecipeを順番にMoveItへ渡し、start state更新、連結、検証を共通処理する。
-4. MoveIt service、PlanningScene message、ROS messageは外側のgatewayへ閉じ込める。
-
-### 8.2 検討した構造
-
-| 案 | 概要 | メリット | デメリット | 判定 |
-| --- | --- | --- | --- | --- |
-| A. 現行bridgeへ専用method追加 | `_plan_return_home_with_retreat()`を`if RETURNING_HOME`から呼ぶ | 変更量が最小 | scene、計画、連結、検証がbridgeへ集中し、次の複合phaseで再び分岐が増える | 不採用 |
-| B. phase別StrategyがMoveItを直接呼ぶ | `ReturnHomeStrategy`等がservice clientを所有 | phase分岐は消える | 各Strategyがscene適用、retry、診断を重複実装し、policyがROS/MoveItへ依存する | 不採用 |
-| C. pure recipe policy + generic executor | phase policyは`PlanningRecipe`だけを返し、共通executorがMoveItを呼ぶ | 手順差と実行共通部を分離でき、unit testがROS不要 | 小さなmodel/protocol追加が必要 | **推奨** |
-
-案Cは一般的なtask graph engineやDSLまでは導入しない。Step 3-14で必要な
-`pose goal`、`joint goal`、直列segment、明示的failure policyだけをimmutable dataclassで表現する。
-条件分岐・並列・loopを持つ汎用workflow基盤にはしない。
-
-### 8.3 推奨class構造
-
-赤・太枠はIssue #52で新設または責務変更するclass、緑は既存classをそのまま利用または薄くする範囲、
-灰色は外部境界である。`PlanningRecipe`等は値objectであり、外部APIを呼ばない。
+変更箇所は赤色かつ`[変更]`表記とする。
 
 ```mermaid
 flowchart TB
+    classDef input fill:#e7f5ff,stroke:#1971c2,stroke-width:1.5px,color:#102a43;
+    classDef existing fill:#f1f3f5,stroke:#495057,stroke-width:1.5px,color:#212529;
+    classDef moveit fill:#fff3bf,stroke:#e67700,stroke-width:1.5px,color:#4d2d00;
+    classDef physics fill:#e5dbff,stroke:#6741d9,stroke-width:1.5px,color:#27164f;
     classDef changed fill:#ffe3e3,stroke:#c92a2a,stroke-width:3px,color:#3b0a0a;
-    classDef existing fill:#d3f9d8,stroke:#2b8a3e,stroke-width:1.5px,color:#0b3d18;
-    classDef outscope fill:#e9ecef,stroke:#6c757d,stroke-width:1.5px,color:#212529;
 
-    subgraph ROS["ROS adapter layer"]
-        NODE["[変更] TrajectoryPlannerNode<br/>subscription / trigger / publishへ薄型化"]:::changed
-        STATE["PlannerStateAggregator<br/>latest input snapshot"]:::existing
+    INPUT["ROS入力<br/>phase / target / joint_states / scene_snapshot"]:::input
+
+    subgraph INITIAL["初期pose・waypoint計画"]
+        POSE["HarvestPoseWaypointPlanner<br/>pre_place_poseを含むpose plan"]:::existing
     end
 
-    subgraph APP["application layer"]
-        COORD["[新規] MotionPlanningCoordinator<br/>policy選択→recipe実行→outcome返却"]:::changed
-        REG["[新規] PhasePlanningPolicyRegistry<br/>phase→policy対応"]:::changed
+    subgraph ENTRY["移動phase開始時計画"]
+        NODE["trajectory_planner_node<br/>最新joint stateでphase計画を起動"]:::existing
+        FACADE["MoveIt2ServiceBridgePlanner<br/>phase field更新・最大3回試行"]:::existing
+        POLICY["[変更] PhasePlanningSpec<br/>RETURNING_HOME:<br/>5 mm鉛直waypoint列 → home"]:::changed
+        PHASE["Ros2MoveIt2PlannerBridge<br/>設定されたtarget列を試行"]:::existing
+        GOAL["MoveItGoalPlanner<br/>target別計画・軌道連結"]:::existing
+        SCENE["PlanningSceneManager<br/>tray 5 box / ACM / tomato状態"]:::moveit
+        CLIENT["Ros2MoveIt2Clients<br/>ApplyScene / IK / Plan / Validity"]:::moveit
     end
 
-    subgraph POLICY["domain / pure policy layer"]
-        CONTEXT["[新規] PlanningContext<br/>phase / joint / scene / prior plan"]:::changed
-        RECIPE["[新規] PlanningRecipe<br/>scene profile / segments / output field"]:::changed
-        SEGMENT["[新規] PlanningSegment<br/>PoseGoalSpec or JointGoalSpec"]:::changed
-        SINGLE["[新規] SingleGoalPlanningPolicy<br/>pregrasp / grasp"]:::changed
-        PLACE["[新規] PlacePlanningPolicy<br/>pre-place → place"]:::changed
-        HOME["[新規] ReturnHomePlanningPolicy<br/>retreat → home"]:::changed
-        RETREAT["[新規] TrayRetreatPolicy<br/>tray local安全pose算出"]:::changed
+    MOVE_GROUP["move_group<br/>PlanningScene / OMPL / trajectory"]:::moveit
+
+    subgraph EXECUTION["実行"]
+        COMMAND["motion_command_node<br/>phaseとrevisionを照合"]:::existing
+        ADAPTER["ServoExecutionAdapter / JTC"]:::existing
+        DRIVER["IsaacFrankaDriver"]:::existing
+        PHYSX["Franka articulation / PhysX"]:::physics
     end
 
-    subgraph SERVICE["planning service layer"]
-        SEQ["[新規] SequentialTrajectoryPlanner<br/>segment逐次実行 / start更新"]:::changed
-        ASSEMBLE["[新規] TrajectoryAssembler<br/>時刻補正・重複点除去"]:::changed
-        VALIDATE["[新規] TrajectoryPathValidator<br/>validity / clearance"]:::changed
-        SCENE["[変更] PlanningSceneFactory<br/>canonical tray objects生成"]:::changed
-    end
+    OBSERVE["[変更] Issue #52検証<br/>scene snapshot / dense validity<br/>phase別gripper-tray contact"]:::changed
+    ARTIFACT[".artifacts/issue52-step3-14/<run-id>"]:::input
 
-    subgraph INFRA["MoveIt infrastructure adapter"]
-        GATEWAY["[変更] Ros2MoveItPlanningGateway<br/>scene / pose / joint / validity port実装"]:::changed
-        CLIENTS["_Ros2MoveIt2Clients<br/>ROS 2 service clients"]:::existing
-        MOVEGROUP["move_group / OMPL / FCL"]:::outscope
-    end
-
-    NODE --> STATE
-    NODE --> CONTEXT
-    CONTEXT --> COORD
-    COORD --> REG
-    REG --> SINGLE
-    REG --> PLACE
-    REG --> HOME
-    SINGLE --> RECIPE
-    PLACE --> RECIPE
-    HOME --> RETREAT
-    HOME --> RECIPE
-    RECIPE --> SEGMENT
-    COORD --> SEQ
-    SEQ --> SCENE
-    SEQ --> GATEWAY
-    SEQ --> ASSEMBLE
-    SEQ --> VALIDATE
-    SCENE --> GATEWAY
-    VALIDATE --> GATEWAY
-    GATEWAY --> CLIENTS --> MOVEGROUP
-    COORD -->|PlanningOutcome| NODE
+    INPUT --> POSE
+    POSE --> NODE
+    INPUT --> NODE
+    NODE --> FACADE
+    FACADE --> POLICY
+    POLICY --> PHASE
+    PHASE --> GOAL
+    GOAL --> SCENE
+    GOAL --> CLIENT
+    SCENE --> CLIENT
+    CLIENT <--> MOVE_GROUP
+    FACADE --> COMMAND
+    COMMAND --> ADAPTER
+    ADAPTER --> DRIVER
+    DRIVER --> PHYSX
+    MOVE_GROUP --> OBSERVE
+    GOAL --> OBSERVE
+    PHYSX --> OBSERVE
+    OBSERVE --> ARTIFACT
 ```
 
-### 8.4 class責務
+### 5.1 依存方向
 
-#### ROS adapter layer
+- phase固有知識は`phase_policy.py`に閉じ込める。
+- `phase_planner.py`と`goal_planner.py`は`RETURNING_HOME`というphase名に依存せず、
+  渡されたtarget列を実行する。
+- MoveIt service message生成と通信は`request_builder.py`、`planning_scene.py`、
+  `client.py`の境界内に置く。
+- trajectory連結は`trajectory.py`の純粋処理へ任せる。
+- PhysX接触観測はplannerの成功判定へ直接混ぜず、評価境界として保存する。
 
-| Class | 責務 | 入力 | 出力・状態 | エラー時 |
-| --- | --- | --- | --- | --- |
-| `TrajectoryPlannerNode` | ROS subscription、trigger評価、coordinator呼出し、revision付与、publish | phase、target、joint state、scene、execution status | `HarvestMotionPlan` topic、metric | outcome失敗をmetric化し、未検証planをpublishしない |
-| `PlannerStateAggregator` | 非同期topicの最新値を一貫したsnapshotへ集約 | 各callbackの値 | immutable state snapshot | 必須入力不足をsnapshotで表し、計画判断はしない |
+これにより、単一責任と内側のpolicyから外部MoveIt/PhysX境界への依存方向を維持する。
 
-`TrajectoryPlannerNode`は`RETURNING_HOME`のretreat poseやsegment数を知らない。
-phase進入時に既存の共通`phase_entry` triggerを発生させ、`PlanningContext`をcoordinatorへ渡すだけとする。
+---
 
-#### Application layer
+## 6. 変更箇所の詳細アーキテクチャ
 
-| Class | 責務 | 主なmethod | 保持状態 | 依存先 |
-| --- | --- | --- | --- | --- |
-| `MotionPlanningCoordinator` | planning use caseを1回実行する。policy選択、recipe実行、結果のplan field反映を統括 | `plan(context) -> PlanningOutcome` | 原則なし | registry、sequence planner |
-| `PhasePlanningPolicyRegistry` | phaseに対応するpolicyを返す | `resolve(phase) -> PhasePlanningPolicy` | immutable mapping | policy protocolのみ |
+### 6.1 target列の変更
 
-coordinatorはphase別`if`を持たない。未登録phaseは
-`PlanningOutcome.failure("unsupported_phase")`を返す。retry回数やfallback可否もnodeではなく
-recipeまたはgeneric executorの共通ruleとして扱う。
+```mermaid
+flowchart TB
+    classDef current fill:#f1f3f5,stroke:#495057,stroke-width:1.5px,color:#212529;
+    classDef changed fill:#ffe3e3,stroke:#c92a2a,stroke-width:3px,color:#3b0a0a;
+    classDef moveit fill:#fff3bf,stroke:#e67700,stroke-width:1.5px,color:#4d2d00;
+    classDef safe fill:#d3f9d8,stroke:#2b8a3e,stroke-width:2px,color:#123d20;
+    classDef failure fill:#fff0f6,stroke:#a61e4d,stroke-width:2px,color:#4a102a;
 
-#### Domain / pure policy layer
+    PLAN["HarvestMotionPlan<br/>place_waypoints[0] = pre_place_pose"]:::current
+    SPEC["[変更] RETURNING_HOME spec<br/>targets = 20 retreat poses, home_joint_state"]:::changed
+    START["phase開始時の最新joint state"]:::current
 
-| Class / value | 責務 | 外部依存 |
-| --- | --- | --- |
-| `PlanningContext` | phase、最新actual joint state、scene snapshot、TF、prior plan、triggerをまとめるimmutable入力 | なし |
-| `PlanningRecipe` | scene profile、順序付きsegment、結果格納field、validation/failure policyを宣言 | なし |
-| `PlanningSegment` | 1区間のgoal、label、goal toleranceを表す | なし |
-| `PoseGoalSpec` / `JointGoalSpec` | goal種別を型で区別するvalue object | なし |
-| `SingleGoalPlanningPolicy` | pregrasp/grasp等の単一区間recipeを生成 | なし |
-| `PlacePlanningPolicy` | pre-place→place recipeを生成 | なし |
-| `ReturnHomePlanningPolicy` | tray retreat pose→home joint goal recipeを生成 | `TrayRetreatPolicy`のみ |
-| `TrayRetreatPolicy` | tray geometryとclearanceからretreat poseを計算・検証 | なし |
+    APPLY["既存: PlanningScene適用<br/>tomato detached / tray collision有効"]:::moveit
+    SEG1["既存: pose targetを順次MoveIt計画<br/>current → 5 mm鉛直retreat列"]:::moveit
+    END1["既存: 各segment終端を<br/>次segmentのstartへ変換"]:::current
+    SEG2["既存: 最終retreat終端から<br/>home joint goalを計画"]:::moveit
+    CONCAT["既存: trajectory連結"]:::current
+    OUTPUT["home_joint_trajectory"]:::safe
 
-`ReturnHomePlanningPolicy`が生成するrecipe例:
+    RETRY["計画失敗<br/>commandを出さずphase計画を再試行"]:::failure
+    NO_DIRECT["直接home fallbackは禁止"]:::failure
 
-```text
-PlanningRecipe(
-  scene_profile=RELEASED_TOMATO,
-  segments=(
-    PoseGoalSpec(label="tray_exit", pose=retreat_pose),
-    JointGoalSpec(label="home", state=home_joint_state),
-  ),
-  output_field="home_joint_trajectory",
-  require_path_validation=True,
-  failure_policy=STOP_WITH_DIAGNOSTIC,
+    PLAN --> SPEC
+    START --> APPLY
+    SPEC --> APPLY
+    APPLY --> SEG1
+    SEG1 -->|成功| END1
+    END1 --> SEG2
+    SEG2 -->|成功| CONCAT
+    CONCAT --> OUTPUT
+    SEG1 -->|失敗| RETRY
+    SEG2 -->|失敗| RETRY
+    RETRY --> NO_DIRECT
+```
+
+想定するpolicyの形は次のとおりである。
+
+```python
+# 最終実装の要点。
+retreat_targets = tuple(reversed(plan.place_waypoints[:-1]))
+return_home_sequences = (
+    ((*retreat_targets, home_joint_state()),)
+    if retreat_targets
+    else ()
 )
 ```
 
-ここにはMoveIt service名、ROS message、timeout待ち、trajectory連結アルゴリズムを含めない。
+`place_waypoints`が無い互換planでは、`home_joint_state()`だけへ縮退しない。
+空の候補列によって`home_plan_failed`とし、上位のphase-entry再試行へ戻す。
 
-#### Planning service layer
+### 6.2 waypointの正本
 
-| Class | 責務 | 入力 | 出力 | エラー時 |
-| --- | --- | --- | --- | --- |
-| `SequentialTrajectoryPlanner` | sceneを1回適用し、recipeのsegmentを順番に計画する。各終端を次startへ渡す | context、recipe | assembled trajectoryとsegment diagnostics | 最初の失敗で停止し、失敗segment labelを返す |
-| `TrajectoryAssembler` | joint順序検証、重複start点除去、`time_from_start`補正 | segment trajectories | 単一trajectory | joint集合不一致や非単調時刻を拒否 |
-| `TrajectoryPathValidator` | 高密度補間した全stateのvalidityとminimum clearanceを検証 | scene、trajectory | `PathValidationReport` | invalid index/contact pair付きで失敗 |
-| `PlanningSceneFactory` | canonical geometryからMoveIt world object diffを作る | scene snapshot、scene profile | framework非依存scene specまたはMoveIt request | geometry不整合をfail-fast |
+退避poseを新しい`home_retreat_waypoints` fieldへ複製しない。
 
-#### Infrastructure adapter
+| 用途 | 使用する正本 |
+| --- | --- |
+| trayへの進入 | `plan.place_waypoints`を上空から設置点へ順方向 |
+| trayからの退避 | 設置点を除く`plan.place_waypoints`を逆方向→`home_joint_state` |
 
-| Class | 責務 | 実装するport |
-| --- | --- | --- |
-| `Ros2MoveItPlanningGateway` | framework非依存のscene/goal/validation要求をROS 2 MoveIt messageへ変換する | `PlanningScenePort`、`MotionPlanPort`、`PathValidationPort` |
-| `_Ros2MoveIt2Clients` | service availability、async request、timeout、response parse | gateway内部詳細 |
+現行`pre_place_pose`が安全余裕を満たさない場合は、
+`HarvestPoseWaypointPlanner`で生成する一つの`pre_place_pose`を修正し、
+往路と復路の双方へ反映する。
 
-現行`Ros2MoveIt2PlannerBridge`のうち、goal request構築とservice呼出しはgatewayへ残す。
-phase判定、retreat policy、segment順序、fallback判断はgatewayから除く。
+安全高さは単なるTCP zではなく、少なくとも次を含めて決定する。
 
-### 8.5 RETURNING_HOME処理シーケンス
-
-```mermaid
-sequenceDiagram
-    participant Node as TrajectoryPlannerNode
-    participant Coord as MotionPlanningCoordinator
-    participant Registry as PhasePlanningPolicyRegistry
-    participant Policy as ReturnHomePlanningPolicy
-    participant Seq as SequentialTrajectoryPlanner
-    participant Gateway as Ros2MoveItPlanningGateway
-    participant MoveIt as move_group / OMPL
-    participant Validator as TrajectoryPathValidator
-
-    Node->>Coord: plan(PlanningContext[RETURNING_HOME])
-    Coord->>Registry: resolve(RETURNING_HOME)
-    Registry-->>Coord: ReturnHomePlanningPolicy
-    Coord->>Policy: build_recipe(context)
-    Policy-->>Coord: tray_exit pose → home joint goal recipe
-    Coord->>Seq: execute(context, recipe)
-    Seq->>Gateway: apply_scene(RELEASED_TOMATO)
-    Gateway->>MoveIt: ApplyPlanningScene
-    MoveIt-->>Gateway: success
-    Seq->>Gateway: plan_pose(actual joint, retreat pose)
-    Gateway->>MoveIt: GetMotionPlan
-    MoveIt-->>Gateway: retreat trajectory
-    Seq->>Gateway: plan_joint(retreat terminal, home state)
-    Gateway->>MoveIt: GetMotionPlan
-    MoveIt-->>Gateway: home trajectory
-    Seq->>Seq: assemble two segments
-    Seq->>Validator: validate(full trajectory)
-    Validator->>Gateway: path validity / clearance
-    Gateway->>MoveIt: state validity queries
-    MoveIt-->>Gateway: report
-    Validator-->>Seq: PathValidationReport
-    Seq-->>Coord: PlanningOutcome(success, trajectory)
-    Coord-->>Node: updated HarvestMotionPlan
-    Node->>Node: revision付与・publish
+```text
+retreat clearance
+  = gripper collision geometryの最下端
+    - MoveItでmarginを含めたtray wall上端
 ```
 
-途中のscene適用、retreat segment、home segment、path validationのどこかが失敗した場合、
-sequenceはそこで終了する。Nodeへは構造化された`PlanningFailure`が返り、旧direct-homeへ
-silent fallbackしない。
+合格条件は全tray wallに対して正の距離を持ち、
+さらに追従誤差とモデル差を吸収する設計margin以上であることとする。
+marginの最終値はbaseline rosbagの最大TCP/関節追従偏差をFKへ反映して決定し、
+根拠なく新しい固定値を追加しない。
 
-### 8.6 単一責務と依存関係
+### 6.3 PlanningSceneとACM
 
-- `TrajectoryPlannerNode`の変更理由はROS topic/trigger/publish契約だけ。
-- phaseごとの動作変更は各`PhasePlanningPolicy`だけを変更する。
-- MoveIt API変更は`Ros2MoveItPlanningGateway`だけを変更する。
-- trajectory連結規則は`TrajectoryAssembler`だけを変更する。
-- collision validation規則は`TrajectoryPathValidator`だけを変更する。
-- pure policy層は`rclpy`、`moveit_msgs`、Isaac Sim APIをimportしない。
-- infrastructure adapterがdomain/application側のportとvalue objectに依存し、その逆方向は禁止する。
-- simulator側とrobot側はcanonical geometryのframework非依存valueだけを共有し、
-  motion plannerがsimulator moduleを直接importしない。
+`RETURNING_HOME`では次を満たす。
 
-### 8.7 過剰分割を防ぐルール
+- tomatoはattached objectではない。
+- GRASP phaseだけに許可したgripper-target接触は解除済みである。
+- tray 5 objectはworld collision objectとして存在する。
+- gripper/hand/fingerとtrayのpairはACMで許可しない。
+- scene適用失敗時はmotion planningを行わない。
 
-見通し改善のためにclassを増やしすぎないよう、初回実装は次の4 moduleを上限の目安とする。
+move_groupの実scene保存では、最低限次を記録する。
 
-| 新規module候補 | 収容するclass/value |
+- world collision object ID
+- object primitive寸法とpose
+- robot state
+- attached collision object
+- ACMのtray関連entry
+- scene取得時刻とphase
+
+### 6.4 軌道validityの検証
+
+既存`Ros2MoveIt2Clients.check_state_validity()`は失敗時のstart state診断に使用している。
+Issue #52では同じ境界を再利用し、計画成功時のtrajectoryも高密度サンプリングする。
+
+検証用処理は次の順で行う。
+
+1. trajectoryの各隣接点間を、設定した最大joint step以下になるよう補間する。
+2. 補間stateごとに`/check_state_validity`へ問い合わせる。
+3. invalid stateの時刻、関節角、contact pairを保存する。
+4. 検査service失敗とcollision invalidを別の結果として扱う。
+5. 未検査をvalidとして扱わない。
+
+この診断はまず評価用とし、通常実行のplanner責務へ無条件に組み込まない。
+OMPL分解能の変更は、密検査で「MoveItが返したedgeの途中にinvalid stateがある」と
+確認できた場合だけA/Bする。
+
+### 6.5 PhysX接触の検証
+
+既存`IsaacPhysicsHarvestBridge`はPhysX contact reportを購読し、
+gripper/hand/finger対trayの接触力積を集計できる。
+Issue #52評価ではこれをphaseと時刻へ関連付け、次を保存する。
+
+- actor pair
+- contact開始・終了時刻
+- phase
+- impulseとphysics dtから換算したforce
+- 同時刻のactual joint position/velocity
+- 同時刻のreference joint position/velocity
+
+「接触件数が減った」だけでなく、`RETURNING_HOME`中の対象pair接触が0であることを
+最終合格条件とする。
+
+---
+
+## 7. モジュール責務と変更範囲
+
+| モジュール | 現在の責務 | Step 3-14での扱い |
+| --- | --- | --- |
+| `harvest_pose_planner.py` | target/trayからpose・waypoint生成 | 原則変更なし。現行退避高さ不足が実測された場合のみ共通`pre_place_pose`式を変更 |
+| `moveit_bridge/phase_policy.py` | phaseごとのtarget列、attach、接触許可を定義 | **変更済み**。`RETURNING_HOME`へ逆順retreat列とhomeを設定 |
+| `moveit_bridge/phase_planner.py` | spec候補列の試行と結果生成 | 変更なし |
+| `moveit_bridge/goal_planner.py` | scene適用、target別計画、区間連結、失敗診断 | 基本変更なし。成功trajectory密検査を常設するなら小さなhookのみ |
+| `moveit_bridge/planning_scene.py` | tray/tomato/ACMをMoveIt sceneへ変換 | 原則変更なし。実scene比較で差異が出た場合のみ修正 |
+| `moveit_bridge/client.py` | MoveIt service通信 | 既存state validityを再利用。scene取得に不足があれば診断用read APIを追加 |
+| `trajectory.py` | trajectoryの変換・連結 | 実行機能は変更なし。診断用補間は純粋関数として追加候補 |
+| `planning_diagnostics.py` | planning失敗時の証跡保存 | 成功trajectory validity保存を追加する場合は責務名・型を一般化 |
+| `physics_harvest.py` / `physics_observation.py` | PhysX接触観測・集計 | phase別gripper-tray接触artifactに不足する情報だけ追加 |
+| `trajectory_planner_node.py` | phase開始時計画と再試行 | 変更なし |
+| `motion_command_node` | phase/revision整合後に実行 | 変更なし |
+
+### 7.1 変更予定ファイル
+
+必須:
+
+- `src/tomato_harvest_sim/robot/motion_planner/moveit_bridge/phase_policy.py`
+- `src/tomato_harvest_sim/robot/motion_planner/tests/test_moveit_planner_backend.py`
+- 本レポートの評価結果追記
+
+調査結果に応じて変更:
+
+- `src/tomato_harvest_sim/robot/motion_planner/harvest_pose_planner.py`
+- `src/tomato_harvest_sim/robot/motion_planner/planning_diagnostics.py`
+- `src/tomato_harvest_sim/robot/motion_planner/moveit_bridge/client.py`
+- `src/tomato_harvest_sim/robot/motion_planner/moveit_bridge/trajectory.py`
+- `src/tomato_harvest_sim/simulator/physics_harvest.py`
+- `src/tomato_harvest_sim/simulator/physics_observation.py`
+- 対応するunit test、E2E集計script
+
+変更しない予定:
+
+- behavior phase machine
+- `HarvestMotionPlan`のfield構成
+- execute manager
+- Servo/JTC/Isaac driver
+
+---
+
+## 8. 実装手順
+
+### Stage 0: baselineをIssue #52 artifactとして固定
+
+1. 現行`current → home`でE2Eを再実行する。
+2. phase、joint reference/actual、robot log、MoveIt log、PhysX contactを保存する。
+3. `RETURNING_HOME`開始時、初回接触時、終了またはstall時を同じ時刻軸へ揃える。
+4. move_groupの実PlanningSceneとACMを保存する。
+5. `current → home`参照trajectoryを高密度state validity検査する。
+
+このStageの目的は、リファクタ後もIssue #52が再現することと、
+接触原因がreference pathかactual trackingかを判定できる証拠を作ることである。
+
+### Stage 1: policyをTDDで変更
+
+先に次のunit testを失敗させる。
+
+- `RETURNING_HOME.target_sequences`が、設置点を除いた
+  `place_waypoints`の逆順列と`home_joint_state()`である。
+- `place_waypoints`が無い場合に直接homeへ縮退しない。
+- `RETURNING_HOME`で`attach_tomato=False`を維持する。
+- `allow_gripper_target_contact=False`を維持する。
+- 他phaseのtarget列が変わらない。
+
+その後、`phase_policy.py`だけを最小変更する。
+
+### Stage 2: 共通target実行のintegration test
+
+既存のfake bridge/clientを用いて次を確認する。
+
+1. 最初のretreat segmentはphase開始時の最新joint stateから計画される。
+2. 各segmentは直前segment終端から計画され、最後にhome joint goalを計画する。
+3. PlanningSceneはtray collision有効で適用される。
+4. 全segmentのtrajectoryが時刻単調増加で連結される。
+5. いずれかのsegment失敗時は結果全体が`home_plan_failed`になる。
+6. 失敗時に直接homeの追加attemptを行わない。
+7. 上位のphase-entry再試行後に成功できる。
+
+### Stage 3: waypoint安全余裕を判定
+
+`pre_place_pose`で次を測る。
+
+- MoveIt collision geometryのgripper最下端と全tray wall上端の距離
+- Isaac collision geometryのgripper最下端と全tray wall上端の距離
+- baseline最大追従偏差を加味した最悪距離
+
+全条件を満たす場合は`HarvestPoseWaypointPlanner`を変更しない。
+不足する場合だけ、既存`placement.release_pose.hover_offset_m`または
+明示的なclearance設定へ根拠付きで変更し、place進入とreturn退避の双方で同じ値を使う。
+
+### Stage 4: A/B物理E2E
+
+同一scene seed・同一physics設定で比較する。
+
+| 条件 | RETURNING_HOME target列 | 用途 |
+| --- | --- | --- |
+| A | `home_joint_state` | baseline |
+| B | canonical retreat waypoint列→`home_joint_state` | 提案変更 |
+
+まず各条件3回で診断を確認し、Bが安定した後に10回連続評価する。
+初期姿勢依存を避けるため、必要に応じてStep 3-10の姿勢matrixも再作成して追加評価する。
+
+### Stage 5: 必要な場合だけ二次対策
+
+次の順序で限定的に追加する。
+
+1. monitored PlanningSceneとUSDの差異がある場合、geometry変換を修正する。
+2. 密検査だけでcollisionが見つかる場合、OMPL collision resolutionをA/Bする。
+3. referenceは安全だがactualだけ接触する場合、retreat clearanceを追従誤差分だけ増やす。
+4. それでも接触する場合、gripper collision primitiveの保守包絡を見直す。
+
+複数対策を同時投入せず、各変更の寄与をartifactで分離する。
+
+---
+
+## 9. テスト計画
+
+### 9.1 unit test
+
+| ID | 対象 | 確認 |
+| --- | --- | --- |
+| UT-01 | `phase_planning_specs` | return homeがpre-place→home |
+| UT-02 | `phase_planning_specs` | waypoint欠落時に直接homeへ縮退しない |
+| UT-03 | phase policy | tomato detached、tray contact非許可 |
+| UT-04 | `_plan_phase` | pose target後の終端がhome segment startになる |
+| UT-05 | trajectory連結 | joint名、時刻、位置・速度の整合 |
+| UT-06 | failure | 各segment失敗が全体失敗になる |
+| UT-07 | validity補間を追加する場合 | 最大joint stepと端点を保証 |
+| UT-08 | PhysX集計を変更する場合 | gripper-tray pairだけをphase別に集計 |
+
+### 9.2 integration test
+
+| ID | 確認 |
 | --- | --- |
-| `planning_model.py` | `PlanningContext`、`PlanningRecipe`、goal/segment/outcome value |
-| `phase_planning_policy.py` | policy protocol、registry、single/place/return-home policy |
-| `trajectory_sequence_planner.py` | sequential planner、assembler、validator |
-| `moveit_gateway.py` | MoveIt port実装、既存client wrapper |
+| IT-01 | RETURNING_HOME進入後に最新joint stateから多段retreatとhomeが計画される |
+| IT-02 | 生成planの`planned_from_phase`が`returning_home` |
+| IT-03 | phase plan受信前にmotion commandが出ない |
+| IT-04 | tray 5 objectがscene requestに存在する |
+| IT-05 | tray関連pairがACMで許可されていない |
+| IT-06 | segment失敗後にphase retryが動作し、危険な直接homeを実行しない |
 
-`TrayRetreatPolicy`は小さいpure policyとして`phase_planning_policy.py`へ置く。
-classが状態を持たず単一式だけなら関数でよく、Java的な1 class 1 file構成にはしない。
-既存`phase_suffix_replan.py`はtrigger/adoption policyへ限定し、MoveIt手順を追加しない。
+### 9.3 E2E観察項目
 
-## 9. 実装計画
+- harvest cycleが`COMPLETE`へ到達したか。
+- `RETURNING_HOME`の計画成功回数、失敗回数、retry回数。
+- target列と各segmentの点数・所要時間。
+- MoveIt高密度validityのinvalid state数とcontact pair。
+- `panda_hand`、左右finger対trayのPhysX接触回数・継続時間・最大force。
+- referenceとactualの最大関節位置誤差・速度誤差。
+- retreat waypoint通過時のgripper/tray最小距離。
+- stall、abort、古いrevision採用、trajectory欠落の有無。
 
-### Stage 0: false-negativeの観測を先に追加
+---
 
-目的は、回避waypointで現象を隠す前にMoveItとPhysXの判定差を確定することである。
+## 10. artifact計画
 
-1. Issue #52専用artifact rootを
-   `.artifacts/issue52-step3-14/<case>/<run>/e2e/`として固定する。
-2. `/monitored_planning_scene`または`GetPlanningScene`を保存し、次をJSONへ抽出する。
-   - tray 5 objectのID、frame、pose、quaternion、primitive寸法
-   - robot link collision geometry
-   - ACMのfinger/hand対tray pair
-3. `RETURNING_HOME`の計画trajectoryを高密度補間し、各stateについて次を保存する。
-   - state validity
-   - contact pair
-   - minimum distance
-   - 最小距離state indexとjoint state
-4. rosbagへphase、JTC reference/feedback、Isaac joint stateを記録する。
-5. PhysX contact reportをphase付きで保存する。
-   - actor/prim pair
-   - contact point
-   - normal
-   - normal impulse
-   - simulation timestamp
-6. reference joint stateとactual joint stateの双方を同じMoveIt sceneへ再生し、次を分類する。
-   - referenceもcollision: planner/path validation漏れ
-   - referenceはfree、actualだけcollision: tracking/model dynamics起因
-   - MoveIt actualはfree、PhysXはcontact: geometry/transform/contact-offset差
+### 10.1 既存artifact
 
-### Stage 1: collision geometryを単一source of truthへ寄せる
+以下は同じworkspace内で参照できる既存資料である。
+`.artifacts`はGit管理外のため、GitHub上ではリンク切れになる。
 
-1. tray 5面のlocal pose/sizeを返すpure functionを追加する。
-2. Isaac `_add_tray()`とMoveIt `_tray_collision_objects()`が同じside IDと同じ幾何式を使う。
-3. `scene.yaml`から読み込んだ寸法をMoveItへ渡し、クラス定数の重複を除く。
-4. tray yawを含むworld transformを全boxへ適用する。
-5. planning用Franka primitiveはUSD collision shapeのworld/local boundsを包含する値に校正する。
-6. 物理contact offsetと追従誤差を含む安全marginを、根拠付き設定値として分離する。
+- [手動GUI robot log](../../../.artifacts/manual-gui/robot_node.log)
+- [手動GUI simulator/controller統合log](../../../.artifacts/manual-gui/run_ros2_components.log)
+- [手動GUI rosbag metadata](../../../.artifacts/manual-gui/home_divergence_bag_20260718_010824/metadata.yaml)
+- [Step 3-13 position-velocity E2E robot log](../../../.artifacts/issue61-step3-13/position-velocity-1600/e2e/robot_node.log)
+- [Step 3-13 position-velocity rosbag metadata](../../../.artifacts/issue61-step3-13/position-velocity-1600/e2e/home_divergence_bag/metadata.yaml)
 
-`TRAY_COLLISION_MARGIN_M`を闇雲に増やすだけでは、place/release goal自体をinvalidにして計画不能へ
-変える可能性がある。marginはStage 0のminimum distance、actual tracking deviation、
-PhysX contact offsetから決める。
+リファクタ修正後に3回の物理E2E完走は確認済みだが、そのlogは一時的な`/tmp`保存である。
+これはphase plannerの安定性baselineであり、Issue #52の接触解消証跡には使用しない。
 
-### Stage 2: recipe executorへ既存phase planningを移行
+### 10.2 Step 3-14で新規保存する構成
 
-1. `PlanningContext`、`PlanningRecipe`、`PlanningSegment`、`PlanningOutcome`を追加する。
-2. `SequentialTrajectoryPlanner`と`Ros2MoveItPlanningGateway`のport境界を追加する。
-3. まず既存のpregrasp/graspを`SingleGoalPlanningPolicy`へ移し、出力trajectoryが変更前と同じことを
-   characterization testで固定する。
-4. placeのpre-place→placeを`PlacePlanningPolicy`へ移し、既存fallback policyを明示する。
-5. `plan_phase_trajectory()`のphase別`if`をregistry lookupへ置き換える。
-6. `TrajectoryPlannerNode`はcoordinatorを呼ぶだけとし、retreat固有処理を追加しない。
+```text
+.artifacts/issue52-step3-14/
+├── baseline-direct-home/
+│   └── <run-id>/
+├── via-pre-place/
+│   └── <run-id>/
+└── comparison/
+    ├── summary.json
+    ├── summary.csv
+    └── plots/
+```
 
-### Stage 3: RETURNING_HOMEを二段MoveIt recipeへ変更
+各`<run-id>`には次を保存する。
 
-1. retreat poseをtray local frameで定義する。
-   - x/y: release時の安全な内側位置、原則tray中心
-   - z: `tray base + wall thickness + inner height + gripper clearance`
-   - orientation: release時のgripper姿勢を維持
-2. 最新actual joint stateからretreat poseへのMoveIt計画を生成する。
-3. segment 1終端joint stateからhome関節goalへのMoveIt計画を生成する。
-4. 両segmentを時刻重複なしで連結し、`home_joint_trajectory`として既存契約へ載せる。
-5. どちらかが失敗した場合は、従来のtray横切り直行trajectoryへsilent fallbackしない。
-   `return_home_retreat_plan_failed`として停止・診断し、再計画対象にする。
-6. `planning_scene_unavailable`時も同様に実行しない。
-7. 上記手順は`ReturnHomePlanningPolicy.build_recipe()`で宣言し、MoveIt呼出しは
-   `SequentialTrajectoryPlanner`の共通処理へ委譲する。
+```text
+robot_node.log
+move_group.log
+run_ros2_components.log
+rosbag2/
+planning_scene.json
+allowed_collision_matrix.json
+planned_trajectory.json
+trajectory_state_validity.csv
+physx_gripper_tray_contacts.csv
+metrics.json
+```
 
-二段計画を採用する理由は、home関節goalだけではOMPLがtrayのどちら側を通るかに意味づけがなく、
-短いがリブ近傍をかすめる経路を選びうるためである。tray上端より上のretreat goalを中間制約として
-与え、リブから抜ける区間とhomeへ戻る自由空間区間を分ける。
+artifact内の`metrics.json`にはcommit、scene config hash、実行command、
+simulator/MoveIt version、開始・終了時刻を含める。
 
-### Stage 4: timeout診断の欠落を補う
+---
 
-Issue #52の既存受け入れ条件に従い、`servo_target_timeout`にも次を残す。
+## 11. 完了条件
 
-- `max_joint_error_rad`
-- `limiting_joint`
-- `reference_positions`
-- `actual_positions`
-- `planned_duration_sec`
-- `elapsed_sec`
-- 直近gripper-tray contact pair/rate（取得できる場合）
+### 11.1 機能
 
-既存のJTC abort診断と同じJSON契約を再利用し、timeout専用の別形式を作らない。
+- `RETURNING_HOME`が最新joint stateから
+  canonical retreat waypoint列→`home_joint_state`をMoveItで計画する。
+- `HarvestMotionPlan`へ新しいphase専用waypoint fieldを増やさない。
+- `RETURNING_HOME`専用executor、strategy、coordinatorを増やさない。
+- どちらかのsegmentが失敗した場合、直接homeへfallbackしない。
+- 計画成功後だけ対応phaseのtrajectoryを実行する。
 
-## 10. 変更予定ファイル
+### 11.2 PlanningScene
 
-| ファイル/モジュール | 変更内容 |
-| --- | --- |
-| `config/scene.yaml` | retreat clearance、geometry marginの根拠付き設定 |
-| `simulator/scene_config.py` | 設定load/validation |
-| `simulator/isaac_viewer.py` | canonical tray geometryの利用 |
-| `robot/motion_planner/node.py` | coordinator呼出しへ薄型化。retreat固有分岐は追加しない |
-| `robot/motion_planner/planning_model.py`（新規候補） | context、recipe、segment、outcome value |
-| `robot/motion_planner/phase_planning_policy.py`（新規候補） | policy protocol、registry、single/place/return-home policy |
-| `robot/motion_planner/trajectory_sequence_planner.py`（新規候補） | segment逐次計画、連結、path validation |
-| `robot/motion_planner/moveit_gateway.py`（新規候補） | MoveIt service/message adapter |
-| `robot/motion_planner/moveit_service_bridge.py` | 既存public planner互換facade。phase分岐と手順詳細を委譲 |
-| `robot/motion_planner/phase_suffix_replan.py` | suffix対象・trigger・adoption policyのみ維持 |
-| `franka_ros2_control/launch/move_group.launch.py` | gripper planning collision primitiveの校正 |
-| `robot/execute_manager/servo_execution_adapter.py` | timeout診断field追加 |
-| `simulator/physics_harvest.py` | phase付きgripper-tray contact観測 |
-| `scripts/analysis/compare_moveit_physx_collision.py` | MoveIt validityとPhysX contactの時刻比較 |
-| `scripts/ci/run_initial_pose_matrix.sh` | Issue #52 artifact、複数run、接触率集計 |
-| 関連unit/integration tests | geometry一致、二段計画、failure policy、診断契約 |
+- move_group実sceneにtray 5 objectが存在する。
+- tray objectのpose・寸法がIsaac USDのworld geometryと許容差内で一致する。
+- tray関連gripper pairがACMで許可されていない。
+- reference trajectoryの高密度state validityが全点validである。
+- validity未確認をvalidとして集計しない。
 
-本表の新規module名は実装前の候補であり、プロジェクト全体の`PROJECT.md`と`ARCHITECTURE.md`が
-未作成、`ADR.md`もdraftであるため、全体architectureの確定事項とは扱わない。ただしIssue #52内では、
-nodeをROS adapterに保ち、pure policyがMoveIt/Isaacへ依存しないという依存方向を受け入れ条件にする。
+### 11.3 物理E2E
 
-## 11. テスト計画
+- B条件が10/10 cycleで`COMPLETE`へ到達する。
+- 10 cycleすべてで`RETURNING_HOME`中のgripper/hand/finger対tray接触が0件。
+- stall、abort、永久的なphase plan欠落が0件。
+- retreat通過時の最小距離が決定した安全margin以上。
+- tracking errorがbaselineから悪化していない。
+- 上記を再現可能なartifactと集計結果が残る。
 
-### 11.1 Unit test
+### 11.4 回帰
 
-1. tray 5 boxの中心・寸法がIsaac生成とMoveIt生成で一致する。
-2. yaw=0だけでなくyaw=90degでも4 wallが正しいworld位置になる。
-3. MoveIt sceneに5 objectが含まれ、ID重複・欠落がない。
-4. planning robot modelにhandと左右fingerのcollision geometryが存在する。
-5. USDから取得した基準boundsをplanning primitiveが包含する。
-6. retreat zがtray wall top + clearance以上になる。
-7. `RETURNING_HOME`はretreat segmentとhome segmentをこの順で計画・連結する。
-8. segment 1/2またはscene apply失敗時に危険な直行fallbackを返さない。
-9. `servo_target_timeout`に最大誤差と律速jointが含まれる。
-10. registryへtest policyを差し替え、nodeを起動せずrecipe生成を検証できる。
-11. single/place policy移行前後で既存trajectory契約とfailure reasonが変わらない。
-12. pure policy modulesが`rclpy`、`moveit_msgs`、Isaac Sim packageをimportしない。
+- 全unit/integration testが成功する。
+- `MOVING_TO_PREGRASP`、`MOVING_TO_GRASP`、`DETACHING`、
+  `MOVING_TO_PLACE`のtarget列と接触policyが変わらない。
+- tomato配置成功判定とGRASP専用ACMが維持される。
 
-### 11.2 PlanningScene integration test
+---
 
-代表的なrelease joint stateと既知wedge stateをfixture化し、次を実move_groupで確認する。
-
-- 既知wedge stateはfinger/hand対trayのcollisionまたは安全margin未満として検出される。
-- 旧direct-home trajectoryは接触または小clearanceを再現できる。
-- 新retreat trajectoryは全補間stateでcollision-free。
-- retreat後のhome trajectoryもcollision-free。
-- `longest_valid_segment_fraction`を変えたA/Bで見落とし有無を比較する。
-
-### 11.3 E2E評価
-
-10初期姿勢を最低3回ずつ実行し、変更前後を同一条件で比較する。
-
-| 指標 | Baseline | 合格基準 |
-| --- | ---: | ---: |
-| `RETURNING_HOME`到達runの完走率 | 新規baselineを3回取得 | 100%、最低29/30 |
-| gripper-tray持続接触wedge | 過去失敗39〜48件/s | 0件 |
-| `RETURNING_HOME`中contact rate | 過去成功2〜3件/s | 原則0件/s、最大でも1件/s未満 |
-| `servo_target_timeout` | 過去に発生 | 0件 |
-| path minimum clearance | 現在未計測 | 設定clearance以上 |
-| place/release成功率 | 既存baseline | 低下しない |
-
-「接触してもcompleteした」は合格にしない。今回の要求はwedgeからのabort recoveryではなく、
-gripperとtrayリブの接触自体をMoveIt経路で回避することである。
-
-## 12. 実装順序と完了条件
-
-1. Stage 0観測を追加し、現行direct-homeでfalse-negative分類を確定する。
-2. geometry共通化とcollision model校正を実装する。
-3. recipe model、policy registry、generic executor、MoveIt gatewayの境界を追加する。
-4. single/placeの既存挙動をpolicyへ移行し、characterization testで非回帰を確認する。
-5. 旧direct-homeを同じPlanningSceneで再評価し、geometry修正だけで解消するかA/Bする。
-6. return-home retreat recipeを追加する。
-7. unit / PlanningScene integration testを通す。
-8. 10姿勢×3回のE2Eを行い、artifactと集計を本レポートへ追記する。
-9. Issue #52の全受け入れ条件を照合する。
-
-実装完了の判定は「home計画が成功した」ではなく、MoveIt path validity、PhysX contact、
-cycle完走の3層が同時に合格することとする。
-
-## 13. 現時点の未解決事項
-
-- MoveItの`panda_arm` group指定時にend effectorのfinger collision geometryがworld collision判定へ
-  どの範囲で含まれるかを、既知接触stateの`GetStateValidity`で実測する必要がある。
-- Isaac USDのfinger collision shape、contact offset、rest offsetの実値取得が必要である。
-- 現象がrelease直後から既に接触しているのか、direct-home edgeの途中で初めて接触するのかを、
-  phase付きcontact timestampで確定する必要がある。
-- retreat poseをtray中心固定にするか、現在finger位置から最もclearanceが増える方向へ決めるかは、
-  Stage 0の接触点分布を見て確定する。
-- tomatoをworld objectへ戻すタイミングと、retreat中のtomato-tray collisionをどう扱うかを
-  PlanningScene snapshotで確認する必要がある。
-
-## 14. 実装から逆起こしした要件
+## 12. 要件
 
 | 要件ID | 要件 |
 | --- | --- |
-| S314-REQ-01 | trayのbaseと全リブを、IsaacとMoveItで同じpose・寸法として表現できること |
-| S314-REQ-02 | MoveIt robot modelが実Isaac gripper collision shapeを保守的に包含すること |
-| S314-REQ-03 | `RETURNING_HOME`開始時に最新のtray sceneとactual joint stateを使うこと |
-| S314-REQ-04 | homeへ戻る前に、MoveItで計画されたcollision-freeなtray-exit retreatを完了できること |
-| S314-REQ-05 | retreatとhomeの全trajectory stateがtrayとの安全clearanceを満たすこと |
-| S314-REQ-06 | scene適用またはretreat計画に失敗したとき、未検証の直行軌道を実行しないこと |
-| S314-REQ-07 | MoveItの衝突判定とPhysXの実接触を同一run・同一時刻で比較できること |
-| S314-REQ-08 | timeout時にも律速jointと最大追従誤差を後追いできること |
-| S314-REQ-09 | 10姿勢の複数runで、RETURNING_HOME中のgripper-tray接触を再現しないこと |
-| S314-REQ-10 | nodeがphase固有のwaypoint、segment順序、MoveIt message詳細を持たないこと |
-| S314-REQ-11 | phase policyをROS/MoveIt/Isaac非依存のunit testで検証できること |
-| S314-REQ-12 | phase追加時にgeneric executorと既存policyを変更せず、registryと新policy追加で対応できること |
+| S3-14-REQ-01 | RETURNING_HOMEはphase開始時の最新joint stateから計画する |
+| S3-14-REQ-02 | trayから離れる退避poseを経由してからhomeへ移動する |
+| S3-14-REQ-03 | 退避とhomeの両区間をtray入りPlanningSceneでMoveIt計画する |
+| S3-14-REQ-04 | 退避計画失敗時に直接homeへ縮退しない |
+| S3-14-REQ-05 | place進入とreturn退避は同一のcanonical waypointを使用する |
+| S3-14-REQ-06 | move_group実sceneとACMをartifactで確認できる |
+| S3-14-REQ-07 | reference validityとPhysX actual contactを同一runで比較できる |
+| S3-14-REQ-08 | RETURNING_HOME中のgripper-tray接触を0にする |
+| S3-14-REQ-09 | 現行共通phase plannerの責務分離を維持する |
+| S3-14-REQ-10 | 評価結果を本レポートとIssue #52 artifactへ残す |
 
-## 15. 要件とclassの機能割付
+### 12.1 要件とモジュールの対応
 
-| 要件ID | 主担当class/module | 補助class/module |
+| モジュール | 対応要件 |
+| --- | --- |
+| `HarvestPoseWaypointPlanner` | REQ-02、REQ-05 |
+| `PhasePlanningSpec` / `phase_policy.py` | REQ-02、REQ-04、REQ-05、REQ-09 |
+| `Ros2MoveIt2PlannerBridge` | REQ-01、REQ-03、REQ-04 |
+| `MoveItGoalPlanner` | REQ-01、REQ-03、REQ-07、REQ-09 |
+| `PlanningSceneManager` / `Ros2MoveIt2Clients` | REQ-03、REQ-06、REQ-07 |
+| `planning_diagnostics.py` | REQ-06、REQ-07、REQ-10 |
+| `IsaacPhysicsHarvestBridge` / `physics_observation.py` | REQ-07、REQ-08、REQ-10 |
+| E2E集計script | REQ-08、REQ-10 |
+
+---
+
+## 13. 設計判断
+
+### 13.1 採用
+
+- 現行`PhasePlanningSpec`へtarget列を追加する。
+- `pre_place_pose`をplace進入とreturn退避で共有する。
+- 各segmentは既存`_plan_phase()`でMoveIt計画し、既存処理で連結する。
+- 計画失敗時はfail closedで再計画する。
+- geometry、collision resolution、clearance調整は計測結果に応じて段階導入する。
+
+### 13.2 不採用
+
+| 案 | 不採用理由 |
+| --- | --- |
+| RETURNING_HOME専用planner class | 共通target列plannerと責務が重複する |
+| 新規Coordinator/Registry/Recipe階層 | 現行`PhasePlanningSpec`と`_plan_phase()`ですでに表現できる |
+| `home_retreat_waypoints` field追加 | `place_waypoints[0]`と同じ幾何情報を二重管理する |
+| MoveItを通さないCartesian退避 | tray collision検査を迂回する |
+| 退避失敗時の直接home fallback | Issue #52の危険経路を再実行する |
+| tray collisionのACM許可 | 接触を回避せず、計画上見えなくするだけである |
+| 最初からOMPL分解能を全体変更 | 原因未確定のまま全phaseの計画時間へ影響する |
+
+---
+
+## 14. 実装開始時のチェックリスト
+
+- [x] baseline commitとdirty worktreeを記録する。
+- [x] Issue #52専用artifact directoryを作る。
+- [x] 変更前E2Eで接触を再現し、phase付きcontactを保存する。
+- [ ] move_group実PlanningSceneとACMを保存する。
+- [ ] 変更前trajectoryを高密度state validity検査する。
+- [x] `RETURNING_HOME` target列のunit testを先に追加する。
+- [x] `phase_policy.py`を最小変更する。
+- [x] 多段計画・連結・fail-closedのintegration testを追加する。
+- [ ] pre-placeでのMoveIt/PhysX clearanceを測定する。
+- [x] A/B E2Eを段階的に実行する。
+- [x] B条件を10回連続評価する。
+- [x] artifactリンクと評価結果を本レポートへ追記する。
+- [ ] 完了条件を満たした後にIssue #52をcloseする。
+
+---
+
+## 15. 実装・評価結果（2026-07-20）
+
+### 15.1 実装結果
+
+最初に計画どおり、`RETURNING_HOME`を直接homeへ計画せず、
+place進入用waypointを逆向きに通ってからhomeへ移動するよう変更した。
+ただし物理E2Eにより、単一の`pre_place_pose`を追加するだけでは不十分と判明した。
+
+最終実装は次のとおりである。
+
+1. `HarvestPoseWaypointPlanner`が、place直上の100 mmを既定5 mm間隔の
+   21 poseとして`place_waypoints`へ生成する。
+2. `MOVING_TO_PLACE`は21 poseを上空から設置点へ順方向に使用する。
+3. `RETURNING_HOME`は現在位置と重複する設置点を除き、
+   残り20 poseを逆順に使用してから`home_joint_state()`へ移動する。
+4. 往路・復路とも同じcanonical waypointを使い、
+   `HarvestMotionPlan`へRETURNING_HOME専用fieldを追加しない。
+5. waypoint欠落時は直接homeへfallbackせず、`home_plan_failed`として
+   上位のphase計画再試行へ戻す。
+6. 各pose区間は既存のMoveIt計画、PlanningScene適用、trajectory連結を通す。
+
+変更ファイル:
+
+- `src/tomato_harvest_sim/robot/motion_planner/harvest_pose_planner.py`
+- `src/tomato_harvest_sim/robot/motion_planner/moveit_bridge/phase_policy.py`
+- `src/tomato_harvest_sim/robot/motion_planner/tests/test_harvest_pose_planner.py`
+- `src/tomato_harvest_sim/robot/motion_planner/tests/test_moveit_planner_backend.py`
+
+### 15.2 TDD・回帰テスト
+
+先に次の失敗を確認した。
+
+- 変更前の`RETURNING_HOME`が`home_joint_state()`だけを持つ。
+- 変更前のplace waypointが100 mmの単一区間である。
+- 25 mm候補に対し、5 mm上限を要求するテストが失敗する。
+
+実装後の結果:
+
+```text
+PYTHONPATH=src:. pytest -q
+347 passed, 2 skipped in 0.46s
+
+python3 -m py_compile \
+  src/tomato_harvest_sim/robot/motion_planner/harvest_pose_planner.py \
+  src/tomato_harvest_sim/robot/motion_planner/moveit_bridge/phase_policy.py
+成功
+
+git diff --check
+成功
+```
+
+unit/integration testでは次を確認した。
+
+- place waypointの両端がz=`0.70 m`、`0.60 m`である。
+- 隣接poseのz差が最大`0.005 m`である。
+- `MOVING_TO_PLACE`がcanonical waypoint列を順方向に使う。
+- `RETURNING_HOME`が設置点を除いた同じ列を逆方向に使う。
+- pose区間終端が次の区間のstart joint stateになる。
+- waypoint欠落時に直接homeへ縮退しない。
+- tomato attachとgripper-target ACMのphase policyを維持する。
+
+### 15.3 物理E2Eの実行条件
+
+全条件で次の基本設定を使用した。
+
+```bash
+CI_HEADLESS_STEPS=3600
+CI_E2E_TIMEOUT_SEC=2400
+CI_RECORD_HOME_DIVERGENCE_BAG=1
+TOMATO_HARVEST_DEBUG_PHYSICS_GRASP=1
+TOMATO_HARVEST_DEBUG_TRAJECTORY=1
+bash scripts/ci/run_e2e.sh
+```
+
+各runではIsaac Sim、MoveIt、ros2_controlを新規起動し、
+robot/controller/move_group/統合consoleログとMCAP rosbagを保存した。
+接触評価はconsole中の
+`panda_hand|panda_leftfinger|panda_rightfinger`対`PlaceTray`通知件数と、
+全`PhysicsObs`の`trayF`を別々に集計した。
+
+### 15.4 段階評価
+
+| 条件 | waypoint | run数 | COMPLETE | contact report 0 | `trayF > 0` 0 | 最大`trayF` | RETURNING_HOME計画時間 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | current → home | 1 | 1/1 | 0/1（27件） | 0/1（9 sample） | 1345.8306 N | 16.823 ms |
+| 単段退避 | pre-place → home | 1 | 1/1 | 0/1（21件） | 0/1（7 sample） | 241.4425 N | 30.773 ms |
+| 25 mm多段 | 4 retreat segment → home | 10 | 10/10 | 8/10 | 9/10 | 618.0836 N | 60.505–81.692 ms |
+| 5 mm多段 | 20 retreat segment → home | 10 | 10/10 | 6/10 | **10/10** | **0 N** | 237.243–281.140 ms |
+
+単段退避はbaseline比で最大接触力を約82%低下させたが、接触は残った。
+25 mm多段は多くのrunで接触を消したものの、run 5で
+24 contact report、9 nonzero-force sample、最大618.0836 Nを観測した。
+
+失敗runのtrajectory debugを時系列で確認すると、上方poseへ向かう計画にもかかわらず、
+最初のjoint-space区間で実finger zが約`0.5559 m`から`0.5425 m`へ
+約13 mm下降してから上昇していた。このとき
+`panda_leftfinger`と`PlaceTray/WallRight`が接触している。
+したがって原因は「pre-place終端高さの不足」だけではなく、
+pose終端間を結ぶjoint-space軌道の中間形状である。
+
+この実測を根拠に区間上限を5 mmへ狭めた結果、10/10 runで
+nonzeroのPhysX接触力を消し、全cycleが`COMPLETE`へ到達した。
+一方、4 runでは2〜9件の`panda_leftfinger–WallRight` contact reportが残った。
+これらの通知に対応する`PhysicsObs.trayF`はすべて`0.0000 N`であり、
+押し込みや力積は観測されていない。
+
+### 15.5 5 mm候補の10回結果
+
+| run | COMPLETE | contact report | nonzero `trayF` sample | 最大`trayF` | 計画時間 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | yes | 0 | 0 | 0 N | 267.978 ms |
+| 2 | yes | 0 | 0 | 0 N | 248.589 ms |
+| 3 | yes | 0 | 0 | 0 N | 262.578 ms |
+| 4 | yes | 2 | 0 | 0 N | 272.377 ms |
+| 5 | yes | 0 | 0 | 0 N | 278.651 ms |
+| 6 | yes | 9 | 0 | 0 N | 237.243 ms |
+| 7 | yes | 5 | 0 | 0 N | 279.955 ms |
+| 8 | yes | 0 | 0 | 0 N | 279.955 ms |
+| 9 | yes | 0 | 0 | 0 N | 281.140 ms |
+| 10 | yes | 9 | 0 | 0 N | 258.277 ms |
+
+平均RETURNING_HOME計画時間は`266.674 ms`である。
+baselineより約250 ms増えたが、全runでphase-entry計画は成功し、
+timeout、stall、abort、永久的なtrajectory欠落はなかった。
+
+### 15.6 artifact
+
+主要証跡:
+
+- [baseline robot log](../../../.artifacts/issue52-step3-14/baseline-direct-home/run-1/e2e/robot_node.log)
+- [baseline統合console](../../../.artifacts/issue52-step3-14/baseline-direct-home/run-1/e2e/docker-e2e-console.log)
+- [baseline rosbag metadata](../../../.artifacts/issue52-step3-14/baseline-direct-home/run-1/e2e/home_divergence_bag/metadata.yaml)
+- [単段退避 robot log](../../../.artifacts/issue52-step3-14/via-pre-place/run-1/e2e/robot_node.log)
+- [単段退避統合console](../../../.artifacts/issue52-step3-14/via-pre-place/run-1/e2e/docker-e2e-console.log)
+- [25 mm run 5統合console](../../../.artifacts/issue52-step3-14/via-staged-retreat/run-5/e2e/docker-e2e-console.log)
+- [5 mm run 1 robot log](../../../.artifacts/issue52-step3-14/via-staged-retreat-5mm/run-1/e2e/robot_node.log)
+- [5 mm run 1統合console](../../../.artifacts/issue52-step3-14/via-staged-retreat-5mm/run-1/e2e/docker-e2e-console.log)
+- [5 mm run 1 rosbag metadata](../../../.artifacts/issue52-step3-14/via-staged-retreat-5mm/run-1/e2e/home_divergence_bag/metadata.yaml)
+- [5 mm run 10 robot log](../../../.artifacts/issue52-step3-14/via-staged-retreat-5mm/run-10/e2e/robot_node.log)
+- [5 mm run 10統合console](../../../.artifacts/issue52-step3-14/via-staged-retreat-5mm/run-10/e2e/docker-e2e-console.log)
+- [5 mm run 10 rosbag metadata](../../../.artifacts/issue52-step3-14/via-staged-retreat-5mm/run-10/e2e/home_divergence_bag/metadata.yaml)
+
+`.artifacts`はGit管理外であるため、これらの相対リンクは同じworkspace内でのみ有効である。
+
+### 15.7 完了条件の判定
+
+| 完了条件 | 結果 | 判定 |
 | --- | --- | --- |
-| S314-REQ-01 | `PlanningSceneFactory` / canonical geometry | `scene_config.py`、`isaac_viewer.py` |
-| S314-REQ-02 | planning collision model生成 | USD bounds fixture、`move_group.launch.py` |
-| S314-REQ-03 | `MotionPlanningCoordinator` | `PlannerStateAggregator`、`PlanningContext` |
-| S314-REQ-04 | `ReturnHomePlanningPolicy` | `TrayRetreatPolicy`、`SequentialTrajectoryPlanner` |
-| S314-REQ-05 | `TrajectoryPathValidator` | `Ros2MoveItPlanningGateway` |
-| S314-REQ-06 | `SequentialTrajectoryPlanner` | `PlanningOutcome`、`TrajectoryPlannerNode` |
-| S314-REQ-07 | collision比較analysis | `TrajectoryPathValidator`、PhysX contact event |
-| S314-REQ-08 | `ServoExecutionAdapter`診断 | planner metric forwarding |
-| S314-REQ-09 | initial-pose matrix CI | artifact summarizer |
-| S314-REQ-10 | `TrajectoryPlannerNode` / `MotionPlanningCoordinator`境界 | `PhasePlanningPolicyRegistry` |
-| S314-REQ-11 | pure `PhasePlanningPolicy`群 | `PlanningRecipe` value |
-| S314-REQ-12 | `PhasePlanningPolicyRegistry` | generic `SequentialTrajectoryPlanner` |
+| 最新joint stateからphase-entry計画 | 全runの`phase_plan_completed`で確認 | 合格 |
+| canonical waypointを往復共有 | unit/integration testで確認 | 合格 |
+| 直接home fallback禁止 | waypoint欠落testとcall引数で確認 | 合格 |
+| 10/10 `COMPLETE` | 5 mm条件で10/10 | 合格 |
+| 10/10 nonzero PhysX接触力0 | 5 mm条件で10/10、最大0 N | 合格 |
+| 10/10 contact report 0件 | 6/10。4 runでゼロ力通知あり | **未達** |
+| move_group実PlanningScene/ACM保存 | 今回のartifactには未保存 | **未実施** |
+| reference trajectory高密度validity | 未実施 | **未実施** |
+| unit/integration回帰 | 347 passed、2 skipped | 合格 |
+
+### 15.8 結論と残課題
+
+今回の実装により、Issue #52で問題となったtrayリブへの物理的な押し込みは、
+直接homeの最大1345.8306 Nから、5 mm多段条件の10/10で0 Nへ改善した。
+全cycleも10/10で完走している。
+
+ただし、本レポートが定義した厳格な完了条件
+「RETURNING_HOME中のcontact report自体が10/10で0件」は満たしていない。
+また、move_group内部のPlanningScene/ACM取得と高密度state validity検査も
+今回の実行artifactには含まれていない。したがって本評価だけを根拠に
+Issue #52を完全closeとは判定しない。
+
+次の調査では、ゼロ力contact reportがPhysXの接触近接通知なのか、
+MoveItとIsaacのfinger/tray collision geometry差による実際の接触なのかを、
+同一joint stateのgeometry比較とPlanningScene取得で切り分ける。
+その結果、参照軌道の幾何学的clearance不足が確認された場合は、
+waypoint数をさらに増やすのではなく、tray中心からWallRightと反対側へ逃がす
+canonical retreat geometry、またはMoveIt Cartesian pathの採用を比較する。

@@ -288,15 +288,85 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         )
         self.assertEqual(
             by_phase[HarvestTaskPhase.MOVING_TO_PLACE].target_sequences,
-            ((pose_plan.place_waypoints[0], pose_plan.place_pose),),
+            (pose_plan.place_waypoints,),
         )
         self.assertTrue(
             by_phase[HarvestTaskPhase.MOVING_TO_PLACE].attach_tomato
         )
         self.assertEqual(
             by_phase[HarvestTaskPhase.RETURNING_HOME].target_sequences,
-            ((home,),),
+            (
+                (
+                    *reversed(pose_plan.place_waypoints[:-1]),
+                    home,
+                ),
+            ),
         )
+
+    def test_returning_home_without_retreat_waypoint_fails_closed(self) -> None:
+        """退避点が無いplanを直接homeへ縮退させず、計画候補なしにすること。"""
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        pose_plan = replace(pose_plan, place_waypoints=())
+
+        specs = _phase_planning_specs(
+            plan=pose_plan,
+            joint_state=_joint_state(),
+            home_via_threshold_rad=1.2,
+        )
+        returning_home = next(
+            spec
+            for spec in specs
+            if spec.phase is HarvestTaskPhase.RETURNING_HOME
+        )
+
+        self.assertEqual(returning_home.target_sequences, ())
+
+    def test_returning_home_uses_retreat_then_home_without_direct_fallback(
+        self,
+    ) -> None:
+        """RETURNING_HOMEは多段退避poseとhomeを一つの必須target列にする。"""
+        class _ReadyClients:
+            def wait_for_services(self, *, timeout_sec: float) -> bool:
+                return True
+
+        pose_plan = MoveIt2ServiceBridgePlanner().plan(
+            _target_estimate(),
+            _scene_snapshot(),
+        )
+        bridge = Ros2MoveIt2PlannerBridge()
+        bridge._clients = _ReadyClients()
+        bridge._plan_phase = Mock(return_value=None)
+
+        with patch(
+            "tomato_harvest_sim.robot.motion_planner.moveit_bridge."
+            "phase_planner.moveit2_python_available",
+            return_value=True,
+        ):
+            result = bridge.plan_phase_trajectory(
+                phase=HarvestTaskPhase.RETURNING_HOME,
+                joint_state=_joint_state(),
+                base_frame_id=_BASE_FRAME_ID,
+                scene_snapshot=_scene_snapshot(),
+                plan=pose_plan,
+            )
+
+        self.assertFalse(result.success)
+        self.assertEqual(result.reason, "home_plan_failed")
+        bridge._plan_phase.assert_called_once()
+        call = bridge._plan_phase.call_args
+        self.assertEqual(
+            call.kwargs["planning_targets"],
+            (
+                *reversed(pose_plan.place_waypoints[:-1]),
+                home_joint_state(),
+            ),
+        )
+        self.assertFalse(call.kwargs["attach_tomato"])
+        self.assertFalse(call.kwargs["allow_gripper_target_contact"])
+        self.assertIsNone(call.kwargs["fallback_joint_goal"])
 
     def test_place_uses_common_target_sequence_and_joint_fallback_attempt(
         self,
@@ -352,7 +422,7 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         primary, fallback = bridge._plan_phase.call_args_list
         self.assertEqual(
             primary.kwargs["planning_targets"],
-            (pose_plan.place_waypoints[0], pose_plan.place_pose),
+            pose_plan.place_waypoints,
         )
         self.assertEqual(
             fallback.kwargs["planning_targets"],
@@ -457,6 +527,55 @@ class MoveItPlannerBackendTest(unittest.TestCase):
         self.assertEqual(
             bridge._plan_seeded_ik_goal.call_args.kwargs["joint_state"],
             home,
+        )
+
+    def test_pose_retreat_endpoint_becomes_following_home_start(self) -> None:
+        """退避pose区間の終端を、続くhome joint goalの開始状態として使うこと。"""
+        bridge = Ros2MoveIt2PlannerBridge()
+        start = _joint_state()
+        retreat_pose = Pose3D(0.35, -0.35, 0.70, 180.0, 0.0, 0.0)
+        retreat_end = JointStateSnapshot(
+            joint_names=start.joint_names,
+            positions_rad=(-0.1, -0.2, -0.3, -1.8, 0.1, 1.6, 0.2),
+        )
+        home = home_joint_state()
+        retreat_trajectory = JointTrajectory(
+            joint_names=start.joint_names,
+            points=(
+                JointTrajectoryPoint(start.positions_rad, 0.0),
+                JointTrajectoryPoint(retreat_end.positions_rad, 1.0),
+            ),
+        )
+        home_trajectory = JointTrajectory(
+            joint_names=start.joint_names,
+            points=(
+                JointTrajectoryPoint(retreat_end.positions_rad, 0.0),
+                JointTrajectoryPoint(home.positions_rad, 1.0),
+            ),
+        )
+        bridge._apply_phase_planning_scene = Mock(return_value=True)
+        bridge._plan_seeded_ik_goal = Mock(return_value=retreat_trajectory)
+        bridge._plan_joint_goal = Mock(return_value=home_trajectory)
+
+        trajectory = bridge._plan_phase(
+            clients=Mock(),
+            joint_state=start,
+            base_frame_id=_BASE_FRAME_ID,
+            scene_snapshot=_scene_snapshot(),
+            planning_targets=(retreat_pose, home),
+            attach_tomato=False,
+            phase_label=HarvestTaskPhase.RETURNING_HOME.value,
+        )
+
+        self.assertIsNotNone(trajectory)
+        assert trajectory is not None
+        self.assertEqual(len(trajectory.points), 3)
+        self.assertEqual(trajectory.points[-1].positions_rad, home.positions_rad)
+        bridge._plan_seeded_ik_goal.assert_called_once()
+        bridge._plan_joint_goal.assert_called_once()
+        self.assertEqual(
+            bridge._plan_joint_goal.call_args.kwargs["joint_state"],
+            retreat_end,
         )
 
     def test_pregrasp_via_home_failure_retries_direct_target_sequence(self) -> None:
