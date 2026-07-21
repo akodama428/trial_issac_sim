@@ -49,6 +49,7 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
         self.assertFalse(
             IsaacPhysicsHarvestBridge._should_report_detached(
                 grasp_mode="physics",
+                detach_intent_active=True,
                 stem_break_observed=False,
                 stem_distance_m=0.1,
             )
@@ -71,6 +72,7 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
         self.assertTrue(
             IsaacPhysicsHarvestBridge._should_report_detached(
                 grasp_mode="physics",
+                detach_intent_active=True,
                 stem_break_observed=True,
                 stem_distance_m=0.0,
             )
@@ -80,8 +82,29 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
         self.assertTrue(
             IsaacPhysicsHarvestBridge._should_report_detached(
                 grasp_mode="success",
+                detach_intent_active=True,
                 stem_break_observed=False,
                 stem_distance_m=IsaacPhysicsHarvestBridge.DETACH_DISTANCE_M,
+            )
+        )
+
+    def test_success_mode_rejects_distance_detach_before_detaching_intent(self) -> None:
+        self.assertFalse(
+            IsaacPhysicsHarvestBridge._should_report_detached(
+                grasp_mode="success",
+                detach_intent_active=False,
+                stem_break_observed=False,
+                stem_distance_m=IsaacPhysicsHarvestBridge.DETACH_DISTANCE_M,
+            )
+        )
+
+    def test_physics_mode_rejects_joint_break_before_detaching_intent(self) -> None:
+        self.assertFalse(
+            IsaacPhysicsHarvestBridge._should_report_detached(
+                grasp_mode="physics",
+                detach_intent_active=False,
+                stem_break_observed=True,
+                stem_distance_m=0.0,
             )
         )
 
