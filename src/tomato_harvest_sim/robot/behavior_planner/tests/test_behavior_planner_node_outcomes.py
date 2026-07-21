@@ -93,6 +93,30 @@ class FrictionHoldEvaluationTest(unittest.TestCase):
             )
         )
 
+    def test_non_pull_evaluation_stays_in_grasp_evaluation(self) -> None:
+        from tomato_harvest_sim.robot.behavior_planner.node import (
+            should_defer_non_pull_execution_result,
+        )
+
+        self.assertTrue(
+            should_defer_non_pull_execution_result(
+                HarvestTaskPhase.GRASP_EVALUATION,
+                evaluation_enabled=True,
+            )
+        )
+        self.assertFalse(
+            should_defer_non_pull_execution_result(
+                HarvestTaskPhase.DETACHING,
+                evaluation_enabled=True,
+            )
+        )
+        self.assertFalse(
+            should_defer_non_pull_execution_result(
+                HarvestTaskPhase.GRASP_EVALUATION,
+                evaluation_enabled=False,
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

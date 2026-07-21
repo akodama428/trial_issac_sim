@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -130,6 +131,11 @@ class PhysicsTuningConfig:
     friction_grasp_minimum_force_n: float
     friction_grasp_maximum_relative_speed_m_s: float
     friction_grasp_maximum_slip_m: float
+    stem_joint_break_force_n: float
+    stem_joint_break_torque_nm: float
+    compliant_stem_enabled: bool
+    stem_length_m: float
+    stem_mass_kg: float
 
 
 _DISABLED_MATERIAL = PhysicsMaterialConfig(
@@ -158,6 +164,11 @@ _DISABLED_TUNING = PhysicsTuningConfig(
     friction_grasp_minimum_force_n=1.0,
     friction_grasp_maximum_relative_speed_m_s=0.02,
     friction_grasp_maximum_slip_m=0.005,
+    stem_joint_break_force_n=7.5,
+    stem_joint_break_torque_nm=50.0,
+    compliant_stem_enabled=False,
+    stem_length_m=0.06,
+    stem_mass_kg=0.005,
 )
 
 
@@ -201,6 +212,28 @@ def physics_tuning_from_payload(payload: dict[str, object]) -> PhysicsTuningConf
     friction_grasp = physics.get("friction_grasp", {})
     if not isinstance(friction_grasp, dict):
         friction_grasp = {}
+    stem_joint = physics.get("stem_joint", {})
+    if not isinstance(stem_joint, dict):
+        stem_joint = {}
+    stem_break_force_n = float(stem_joint.get("break_force_n", 7.5))
+    stem_break_torque_nm = float(stem_joint.get("break_torque_nm", 50.0))
+    compliant_stem_enabled = bool(stem_joint.get("compliant_stem_enabled", False))
+    stem_length_m = float(stem_joint.get("stem_length_m", 0.06))
+    stem_mass_kg = float(stem_joint.get("stem_mass_kg", 0.005))
+    if (
+        not math.isfinite(stem_break_force_n)
+        or not math.isfinite(stem_break_torque_nm)
+        or stem_break_force_n <= 0.0
+        or stem_break_torque_nm <= 0.0
+    ):
+        raise ValueError("stem joint break force and torque must be finite positive values")
+    if (
+        not math.isfinite(stem_length_m)
+        or not math.isfinite(stem_mass_kg)
+        or stem_length_m <= 0.0
+        or stem_mass_kg <= 0.0
+    ):
+        raise ValueError("compliant stem length and mass must be finite positive values")
     return PhysicsTuningConfig(
         enabled=enabled,
         tomato_material=_material_from_dict(physics["tomato_material"]),
@@ -223,6 +256,11 @@ def physics_tuning_from_payload(payload: dict[str, object]) -> PhysicsTuningConf
         friction_grasp_minimum_force_n=float(friction_grasp.get("minimum_force_n", 1.0)),
         friction_grasp_maximum_relative_speed_m_s=float(friction_grasp.get("maximum_relative_speed_m_s", 0.02)),
         friction_grasp_maximum_slip_m=float(friction_grasp.get("maximum_slip_m", 0.005)),
+        stem_joint_break_force_n=stem_break_force_n,
+        stem_joint_break_torque_nm=stem_break_torque_nm,
+        compliant_stem_enabled=compliant_stem_enabled,
+        stem_length_m=stem_length_m,
+        stem_mass_kg=stem_mass_kg,
     )
 
 

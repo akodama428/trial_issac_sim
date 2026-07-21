@@ -211,9 +211,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except KeyboardInterrupt:
         print("Interrupted by user. Closing Isaac review scene.", flush=True)
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        raise
     finally:
         if "isaac_joint_bridge" in locals() and isaac_joint_bridge is not None:
             isaac_joint_bridge.close()
+        if (
+            "artifacts" in locals()
+            and artifacts.physics_bridge is not None
+        ):
+            artifacts.physics_bridge.close()
         simulation_app.close()
     return 0
 
@@ -281,12 +291,14 @@ def _build_scene(plan: ReviewScenePlan, *, use_physx_harvest: bool) -> SceneBuil
                 ground_prim_path=plan.ground_prim_path,
                 tray_prim_path=plan.tray_prim_path,
                 tomato_prim_path=plan.tomato_prim_path,
-                stem_anchor_prim_path="/World/TomatoStemAnchor",
+                stem_anchor_prim_path=stem_physics_prim_path(plan),
                 stem_joint_prim_path="/World/TomatoStemJoint",
                 grasp_joint_prim_path="/World/TomatoGraspJoint",
                 hand_mount_prim_path=hand_mount_prim_path,
             ),
             initial_tomato_pose=plan.tomato_pose,
+            initial_stem_pose=plan.stem_pose,
+            tomato_radius_m=plan.tomato_radius_m,
         )
         physics_bridge.prepare_scene()
 
@@ -381,6 +393,11 @@ def _resolve_hand_mount_prim_path(stage: object, *, hand_mount_prim_suffix: str)
         tuple(prim.GetPath().pathString for prim in stage.Traverse()),
         hand_mount_prim_suffix=hand_mount_prim_suffix,
     )
+
+
+def stem_physics_prim_path(plan: ReviewScenePlan) -> str:
+    """物理stemと画面表示stemが同一primになるパスを返す。"""
+    return plan.stem_prim_path
 
 
 def _add_branch(stage: object, plan: ReviewScenePlan) -> None:

@@ -32,6 +32,11 @@ from tomato_harvest_sim.simulator.placement import (
     PlacementObservation,
 )
 from tomato_harvest_sim.simulator.scene_config import load_placement_config
+from tomato_harvest_sim.simulator.stem_break import (
+    StemBreakDecision,
+    StemBreakEventMatcher,
+    encoded_joint_path_parts,
+)
 
 
 @dataclass(frozen=True)
@@ -45,10 +50,17 @@ class PhysicsHarvestScenePaths:
     hand_mount_prim_path: str
 
 
+@dataclass(frozen=True)
+class CompliantStemJointFrames:
+    """枝側ピンとtomato側破断jointのローカル位置。"""
+
+    tomato_stem_local: tuple[float, float, float]
+    stem_tomato_local: tuple[float, float, float]
+    stem_pin_local: tuple[float, float, float]
+    world_pin: tuple[float, float, float]
+
+
 class IsaacPhysicsHarvestBridge:
-    # 実トマト離層の0.58〜2.46 Nに動的余裕を加える。
-    STEM_BREAK_FORCE_N = 7.5
-    STEM_BREAK_TORQUE_NM = 50.0
     TOMATO_MASS_KG = 0.03
     DETACH_DISTANCE_M = 0.02
     CONTACT_LATCH_GRACE_STEPS = 3
@@ -68,11 +80,18 @@ class IsaacPhysicsHarvestBridge:
         stage: object,
         scene_paths: PhysicsHarvestScenePaths,
         initial_tomato_pose: Pose3D,
+        initial_stem_pose: Pose3D | None = None,
+        tomato_radius_m: float = 0.01,
         physics_tuning: PhysicsTuningConfig | None = None,
     ) -> None:
         self._stage = stage
         self._scene_paths = scene_paths
         self._initial_tomato_pose = initial_tomato_pose
+        self._initial_stem_pose = initial_stem_pose or Pose3D(
+            initial_tomato_pose.x, initial_tomato_pose.y,
+            initial_tomato_pose.z + 0.04, 0.0, 0.0, 0.0,
+        )
+        self._tomato_radius_m = tomato_radius_m
         self._physics_tuning = physics_tuning or load_physics_tuning_config()
         self._last_cycle_id = 0
         self._pending_finger_contacts: set[str] = set()
@@ -83,6 +102,10 @@ class IsaacPhysicsHarvestBridge:
         self._grasp_joint_active = False
         self._detach_reported = False
         self._contact_subscription = None
+        self._simulation_event_subscription = None
+        self._stem_break_matcher = StemBreakEventMatcher(
+            self._scene_paths.stem_joint_prim_path
+        )
         self._pending_contact_impulses = FingerContactImpulses(left_ns=0.0, right_ns=0.0)
         self._pending_tray_contact_impulse_ns = 0.0
         self._pending_tomato_tray_contact_impulse_ns = 0.0
@@ -95,11 +118,13 @@ class IsaacPhysicsHarvestBridge:
         self._grasp_mode = "success"
         hold_steps = int(
             os.environ.get("TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS", "0")
+            or "0"
         )
         hold_minimum_lift_m = float(
             os.environ.get(
                 "TOMATO_HARVEST_FRICTION_HOLD_EVAL_MIN_LIFT_M", "0.1"
             )
+            or "0.1"
         )
         self._hold_evaluator = (
             FrictionHoldEvaluation(
@@ -135,11 +160,29 @@ class IsaacPhysicsHarvestBridge:
         self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallBack")
         self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallLeft")
         self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/WallRight")
-        self._define_stem_anchor()
+        self._define_stem_physics()
         self._define_tomato_physics()
         self._apply_physics_tuning()
-        self._create_stem_joint()
         self._subscribe_contact_reports()
+        self._subscribe_simulation_events()
+        self._create_stem_joint()
+
+    def close(self) -> None:
+        """PhysX event購読を解放し、bridgeのcallback寿命を終了する。"""
+        self._simulation_event_subscription = None
+        self._contact_subscription = None
+
+    @classmethod
+    def _should_report_detached(
+        cls,
+        *,
+        grasp_mode: str,
+        stem_break_observed: bool,
+        stem_distance_m: float,
+    ) -> bool:
+        if grasp_mode == "physics":
+            return stem_break_observed
+        return stem_distance_m >= cls.DETACH_DISTANCE_M
 
     def _apply_physics_tuning(self) -> None:
         """scene.yaml の physics セクションを適用する（enabled=False なら無適用）。"""
@@ -242,7 +285,15 @@ class IsaacPhysicsHarvestBridge:
             return
 
         if self._grasp_joint_active and not self._detach_reported:
-            if self._distance(self._world_pose(self._scene_paths.stem_anchor_prim_path), tomato_pose) >= self.DETACH_DISTANCE_M:
+            stem_distance = self._distance(
+                self._world_pose(self._stem_attachment_prim_path()),
+                tomato_pose,
+            )
+            if self._should_report_detached(
+                grasp_mode=self._grasp_mode,
+                stem_break_observed=self._stem_break_matcher.broken,
+                stem_distance_m=stem_distance,
+            ):
                 self._debug_log("[PhysicsHarvest] detach distance reached. Reporting DETACHED.")
                 self._detach_reported = True
                 controller.sync_tomato_physics(
@@ -287,8 +338,12 @@ class IsaacPhysicsHarvestBridge:
                 reason="friction_grasp_released_awaiting_settle",
             )
         if snapshot.tomato_status is TomatoStatus.HELD and not self._detach_reported:
-            stem_distance = self._distance(self._world_pose(self._scene_paths.stem_anchor_prim_path), tomato_pose)
-            if stem_distance >= self.DETACH_DISTANCE_M:
+            stem_distance = self._distance(self._world_pose(self._stem_attachment_prim_path()), tomato_pose)
+            if self._should_report_detached(
+                grasp_mode=self._grasp_mode,
+                stem_break_observed=self._stem_break_matcher.broken,
+                stem_distance_m=stem_distance,
+            ):
                 if self._hold_evaluator is not None:
                     self._hold_result = self._hold_evaluator.observe(
                         stem_distance_m=stem_distance,
@@ -358,6 +413,7 @@ class IsaacPhysicsHarvestBridge:
         self._recent_finger_contacts = set()
         self._recent_contact_grace_steps_remaining = 0
         self._detach_reported = False
+        self._stem_break_matcher.reset()
         self._placement_evaluator = None
         self._friction_strategy.reset()
         if self._hold_evaluator is not None:
@@ -369,7 +425,9 @@ class IsaacPhysicsHarvestBridge:
         self._geometry_fallback_count = 0
         self._teleport_restore_count = 0
         self._remove_grasp_joint()
-        self._set_world_pose(self._scene_paths.stem_anchor_prim_path, self._initial_tomato_pose)
+        self._set_world_pose(self._scene_paths.stem_anchor_prim_path, self._initial_stem_pose)
+        if self._physics_tuning.compliant_stem_enabled:
+            self._zero_rigid_body_velocity(self._scene_paths.stem_anchor_prim_path)
         self._set_world_pose(self._scene_paths.tomato_prim_path, self._initial_tomato_pose)
         self._zero_rigid_body_velocity(self._scene_paths.tomato_prim_path)
         self._create_stem_joint()
@@ -510,7 +568,7 @@ class IsaacPhysicsHarvestBridge:
         velocity = self._rigid_body_velocity(self._scene_paths.tomato_prim_path)
         speed = (velocity[0] ** 2 + velocity[1] ** 2 + velocity[2] ** 2) ** 0.5
         hand_pose = self._world_pose(self._scene_paths.hand_mount_prim_path)
-        stem_pose = self._world_pose(self._scene_paths.stem_anchor_prim_path)
+        stem_pose = self._world_pose(self._stem_attachment_prim_path())
         left_finger_pose = self._world_pose(self._left_finger_prim_path())
         right_finger_pose = self._world_pose(self._right_finger_prim_path())
         finger_gap = self._distance(left_finger_pose, right_finger_pose)
@@ -767,14 +825,21 @@ class IsaacPhysicsHarvestBridge:
     def _right_finger_prim_path(self) -> str:
         return self._scene_paths.hand_mount_prim_path.replace("panda_hand", "panda_rightfinger")
 
-    def _define_stem_anchor(self) -> None:
-        from pxr import Gf, UsdGeom
+    def _define_stem_physics(self) -> None:
+        """画面に表示されるstem prim自体を可動剛体として構成する。"""
+        from pxr import Gf, UsdGeom, UsdPhysics
 
-        anchor = UsdGeom.Xform.Define(self._stage, self._scene_paths.stem_anchor_prim_path)
-        anchor.AddTranslateOp().Set(
-            Gf.Vec3d(self._initial_tomato_pose.x, self._initial_tomato_pose.y, self._initial_tomato_pose.z)
+        stem_prim = self._stage.GetPrimAtPath(self._scene_paths.stem_anchor_prim_path)
+        if self._physics_tuning.compliant_stem_enabled:
+            UsdPhysics.RigidBodyAPI.Apply(stem_prim)
+            mass_api = UsdPhysics.MassAPI.Apply(stem_prim)
+            mass_api.CreateMassAttr(self._physics_tuning.stem_mass_kg)
+        attachment = UsdGeom.Xform.Define(
+            self._stage, self._stem_attachment_prim_path()
         )
-        UsdGeom.Imageable(anchor).MakeInvisible()
+        attachment.AddTranslateOp().Set(
+            Gf.Vec3d(0.0, 0.0, -self._physics_tuning.stem_length_m * 0.5)
+        )
 
     def _define_tomato_physics(self) -> None:
         from pxr import UsdPhysics
@@ -793,19 +858,113 @@ class IsaacPhysicsHarvestBridge:
         self._remove_joint(self._scene_paths.stem_joint_prim_path)
         joint = UsdPhysics.FixedJoint.Define(self._stage, self._scene_paths.stem_joint_prim_path)
         joint.CreateBody0Rel().SetTargets([Sdf.Path(self._scene_paths.tomato_prim_path)])
-        joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
-        joint.CreateLocalPos1Attr().Set(
-            Gf.Vec3f(
-                float(self._initial_tomato_pose.x),
-                float(self._initial_tomato_pose.y),
-                float(self._initial_tomato_pose.z),
+        if self._physics_tuning.compliant_stem_enabled:
+            frames = self._compliant_stem_joint_frames(
+                tomato_pose=self._initial_tomato_pose,
+                stem_pose=self._initial_stem_pose,
+                stem_length_m=self._physics_tuning.stem_length_m,
+                tomato_radius_m=self._tomato_radius_m,
             )
-        )
+            joint.CreateLocalPos0Attr().Set(Gf.Vec3f(*frames.tomato_stem_local))
+            joint.CreateBody1Rel().SetTargets([Sdf.Path(self._scene_paths.stem_anchor_prim_path)])
+            joint.CreateLocalPos1Attr().Set(Gf.Vec3f(*frames.stem_tomato_local))
+            self._create_stem_pin_joint()
+        else:
+            joint.CreateLocalPos0Attr().Set(Gf.Vec3f(0.0, 0.0, 0.0))
+            joint.CreateLocalPos1Attr().Set(
+                Gf.Vec3f(
+                    float(self._initial_tomato_pose.x),
+                    float(self._initial_tomato_pose.y),
+                    float(self._initial_tomato_pose.z),
+                )
+            )
         joint.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
         joint.CreateLocalRot1Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
-        joint.CreateBreakForceAttr(self.STEM_BREAK_FORCE_N)
-        joint.CreateBreakTorqueAttr(self.STEM_BREAK_TORQUE_NM)
+        joint.CreateCollisionEnabledAttr(False)
+        joint.CreateBreakForceAttr(self._physics_tuning.stem_joint_break_force_n)
+        joint.CreateBreakTorqueAttr(self._physics_tuning.stem_joint_break_torque_nm)
+        print(
+            "[StemJoint] "
+            f"path={self._scene_paths.stem_joint_prim_path} "
+            f"break_force_n={self._physics_tuning.stem_joint_break_force_n:.4f} "
+            f"break_torque_nm={self._physics_tuning.stem_joint_break_torque_nm:.4f}",
+            flush=True,
+        )
         self._detach_reported = False
+
+    def _create_stem_pin_joint(self) -> None:
+        """stem上端だけをworldへ球面拘束し、下端の回転追従を許す。"""
+        from pxr import Gf, Sdf, UsdPhysics
+
+        pin_path = self._stem_pin_joint_prim_path()
+        self._remove_joint(pin_path)
+        frames = self._compliant_stem_joint_frames(
+            tomato_pose=self._initial_tomato_pose,
+            stem_pose=self._initial_stem_pose,
+            stem_length_m=self._physics_tuning.stem_length_m,
+            tomato_radius_m=self._tomato_radius_m,
+        )
+        pin = UsdPhysics.SphericalJoint.Define(self._stage, pin_path)
+        pin.CreateBody0Rel().SetTargets([Sdf.Path(self._scene_paths.stem_anchor_prim_path)])
+        pin.CreateLocalPos0Attr().Set(Gf.Vec3f(*frames.stem_pin_local))
+        pin.CreateLocalPos1Attr().Set(Gf.Vec3f(*frames.world_pin))
+        pin.CreateLocalRot0Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+        pin.CreateLocalRot1Attr().Set(Gf.Quatf(1.0, 0.0, 0.0, 0.0))
+        pin.CreateCollisionEnabledAttr(False)
+
+    def _stem_pin_joint_prim_path(self) -> str:
+        return f"{self._scene_paths.stem_joint_prim_path}Pin"
+
+    def _stem_attachment_prim_path(self) -> str:
+        return f"{self._scene_paths.stem_anchor_prim_path}/TomatoAttachment"
+
+    @staticmethod
+    def _compliant_stem_joint_frames(
+        *, tomato_pose: Pose3D, stem_pose: Pose3D,
+        stem_length_m: float, tomato_radius_m: float,
+    ) -> CompliantStemJointFrames:
+        return CompliantStemJointFrames(
+            tomato_stem_local=(0.0, 0.0, tomato_radius_m),
+            stem_tomato_local=(0.0, 0.0, -stem_length_m * 0.5),
+            stem_pin_local=(0.0, 0.0, stem_length_m * 0.5),
+            world_pin=(stem_pose.x, stem_pose.y, stem_pose.z + stem_length_m * 0.5),
+        )
+
+    def _subscribe_simulation_events(self) -> None:
+        from omni.physx import get_physx_interface
+
+        events = get_physx_interface().get_simulation_event_stream_v2()
+        self._simulation_event_subscription = events.create_subscription_to_pop(
+            self._on_simulation_event
+        )
+
+    def _on_simulation_event(self, event: object) -> None:
+        from omni.physx.bindings._physx import SimulationEvent
+        from pxr import PhysicsSchemaTools
+
+        if event.type != int(SimulationEvent.JOINT_BREAK):
+            return
+        encoded_parts = encoded_joint_path_parts(event.payload)
+        if encoded_parts is None:
+            decision = self._stem_break_matcher.observe("joint_break", None)
+            self._debug_log(f"[JointBreakObs] decision={decision.value} joint=n/a")
+            return
+        encoded_part_0, encoded_part_1 = encoded_parts
+        decoded_path = str(
+            PhysicsSchemaTools.decodeSdfPath(encoded_part_0, encoded_part_1)
+        )
+        decision = self._stem_break_matcher.observe("joint_break", decoded_path)
+        if decision is StemBreakDecision.TARGET_BROKEN:
+            print(
+                f"[JointBreakObs] decision={decision.value} "
+                f"joint={decoded_path} seq={self._physics_sequence_id}",
+                flush=True,
+            )
+        else:
+            self._debug_log(
+                f"[JointBreakObs] decision={decision.value} joint={decoded_path} "
+                f"seq={self._physics_sequence_id}"
+            )
 
     def _create_grasp_joint(self, tomato_pose: Pose3D) -> None:
         from pxr import Gf, Gf as _Gf, Sdf, UsdPhysics

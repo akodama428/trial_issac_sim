@@ -83,6 +83,13 @@ def should_defer_detaching_execution_result(
     return evaluation_enabled and phase is HarvestTaskPhase.DETACHING
 
 
+def should_defer_non_pull_execution_result(
+    phase: HarvestTaskPhase, *, evaluation_enabled: bool
+) -> bool:
+    """Issue #5非pull評価中だけGRASP_EVALUATION終点を維持する。"""
+    return evaluation_enabled and phase is HarvestTaskPhase.GRASP_EVALUATION
+
+
 def moving_to_place_outcome(
     tomato_status: TomatoStatus,
     robot_tool_pose: object | None,
@@ -151,7 +158,21 @@ def main() -> None:
             self._last_plan = None
             self._execution_status: str = "idle"
             self._friction_hold_evaluation_enabled = (
-                int(os.environ.get("TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS", "0"))
+                int(
+                    os.environ.get(
+                        "TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS", "0"
+                    )
+                    or "0"
+                )
+                > 0
+            )
+            self._stem_break_non_pull_evaluation_enabled = (
+                int(
+                    os.environ.get(
+                        "TOMATO_HARVEST_STEM_BREAK_NON_PULL_STEPS", "0"
+                    )
+                    or "0"
+                )
                 > 0
             )
 
@@ -218,6 +239,9 @@ def main() -> None:
             if should_defer_detaching_execution_result(
                 self._phase,
                 evaluation_enabled=self._friction_hold_evaluation_enabled,
+            ) or should_defer_non_pull_execution_result(
+                self._phase,
+                evaluation_enabled=self._stem_break_non_pull_evaluation_enabled,
             ):
                 return
             self._apply_transition(advance(self._machine, ExecutionSucceeded()))
@@ -233,6 +257,9 @@ def main() -> None:
             if should_defer_detaching_execution_result(
                 self._phase,
                 evaluation_enabled=self._friction_hold_evaluation_enabled,
+            ) or should_defer_non_pull_execution_result(
+                self._phase,
+                evaluation_enabled=self._stem_break_non_pull_evaluation_enabled,
             ):
                 return
             self._apply_transition(
@@ -245,6 +272,11 @@ def main() -> None:
 
         def _step(self) -> None:
             if not self._machine.running or self._last_snapshot is None:
+                return
+            if should_defer_non_pull_execution_result(
+                self._phase,
+                evaluation_enabled=self._stem_break_non_pull_evaluation_enabled,
+            ):
                 return
             snapshot = self._last_snapshot
             place_reached = moving_to_place_outcome(

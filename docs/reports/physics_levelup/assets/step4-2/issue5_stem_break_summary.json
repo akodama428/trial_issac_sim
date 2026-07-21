@@ -1,0 +1,29 @@
+{
+  "implementation": {
+    "visible_stem_prim": "/World/TomatoStem",
+    "stem_is_dynamic_rigid_body": true,
+    "stem_collider_enabled": false,
+    "stem_pin_local_m": [0.0, 0.0, 0.03],
+    "stem_tomato_local_m": [0.0, 0.0, -0.03],
+    "tomato_stem_local_m": [0.0, 0.0, 0.01],
+    "break_force_n": 20.0
+  },
+  "pull": {
+    "expect_break": true,
+    "target_break_count": 1,
+    "break_sequence": 1027,
+    "placement_completed": true,
+    "overall_pass": true,
+    "artifact": ".artifacts/issue5-step4-2/visible-stem-no-collider-pull-20n/e2e/e2e/"
+  },
+  "non_pull": {
+    "expect_break": false,
+    "target_break_count": 0,
+    "held_samples": 1695,
+    "required_held_samples": 1200,
+    "overall_pass": true,
+    "artifact": ".artifacts/issue5-step4-2/visible-stem-no-collider-non-pull-20n/e2e/e2e/"
+  },
+  "overall_pass": true,
+  "qualification": "stem collider disabled; GUI visual-motion review remains"
+}
