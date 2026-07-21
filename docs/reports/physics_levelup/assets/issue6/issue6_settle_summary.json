@@ -1,0 +1,150 @@
+{
+  "runs": {
+    "placed": [
+      {
+        "observation_samples": 21,
+        "release_marker_pass": true,
+        "contact_marker_pass": true,
+        "terminal_marker_pass": true,
+        "decision": "placed",
+        "reason": "settled_in_tray",
+        "release_to_contact_sec": 0.075,
+        "contact_to_terminal_sec": 0.1,
+        "release_to_terminal_sec": 0.175,
+        "final_local_position_m": {
+          "x": 0.00296,
+          "y": -0.0001,
+          "z": 0.022
+        },
+        "maximum_linear_speed_m_s": 1.52702,
+        "terminal_linear_speed_m_s": 0.01766,
+        "marker_pass": true,
+        "decision_pass": true,
+        "overall_pass": true
+      },
+      {
+        "observation_samples": 21,
+        "release_marker_pass": true,
+        "contact_marker_pass": true,
+        "terminal_marker_pass": true,
+        "decision": "placed",
+        "reason": "settled_in_tray",
+        "release_to_contact_sec": 0.075,
+        "contact_to_terminal_sec": 0.1,
+        "release_to_terminal_sec": 0.175,
+        "final_local_position_m": {
+          "x": 0.00163,
+          "y": 0.00336,
+          "z": 0.022
+        },
+        "maximum_linear_speed_m_s": 1.50158,
+        "terminal_linear_speed_m_s": 0.0159,
+        "marker_pass": true,
+        "decision_pass": true,
+        "overall_pass": true
+      },
+      {
+        "observation_samples": 21,
+        "release_marker_pass": true,
+        "contact_marker_pass": true,
+        "terminal_marker_pass": true,
+        "decision": "placed",
+        "reason": "settled_in_tray",
+        "release_to_contact_sec": 0.075,
+        "contact_to_terminal_sec": 0.1,
+        "release_to_terminal_sec": 0.175,
+        "final_local_position_m": {
+          "x": -0.00116,
+          "y": 0.00634,
+          "z": 0.022
+        },
+        "maximum_linear_speed_m_s": 1.50821,
+        "terminal_linear_speed_m_s": 0.01737,
+        "marker_pass": true,
+        "decision_pass": true,
+        "overall_pass": true
+      }
+    ],
+    "fallen": [
+      {
+        "observation_samples": 1,
+        "release_marker_pass": true,
+        "contact_marker_pass": false,
+        "terminal_marker_pass": true,
+        "decision": "failed",
+        "reason": "escaped_tray",
+        "release_to_contact_sec": null,
+        "contact_to_terminal_sec": null,
+        "release_to_terminal_sec": 0.0083,
+        "final_local_position_m": {
+          "x": 0.2045,
+          "y": 0.00047,
+          "z": 0.14704
+        },
+        "maximum_linear_speed_m_s": 0.1635,
+        "terminal_linear_speed_m_s": 0.1635,
+        "marker_pass": true,
+        "decision_pass": true,
+        "overall_pass": true
+      },
+      {
+        "observation_samples": 1,
+        "release_marker_pass": true,
+        "contact_marker_pass": false,
+        "terminal_marker_pass": true,
+        "decision": "failed",
+        "reason": "escaped_tray",
+        "release_to_contact_sec": null,
+        "contact_to_terminal_sec": null,
+        "release_to_terminal_sec": 0.0083,
+        "final_local_position_m": {
+          "x": 0.19992,
+          "y": -0.00394,
+          "z": 0.15337
+        },
+        "maximum_linear_speed_m_s": 0.1635,
+        "terminal_linear_speed_m_s": 0.1635,
+        "marker_pass": true,
+        "decision_pass": true,
+        "overall_pass": true
+      },
+      {
+        "observation_samples": 1,
+        "release_marker_pass": true,
+        "contact_marker_pass": false,
+        "terminal_marker_pass": true,
+        "decision": "failed",
+        "reason": "escaped_tray",
+        "release_to_contact_sec": null,
+        "contact_to_terminal_sec": null,
+        "release_to_terminal_sec": 0.0083,
+        "final_local_position_m": {
+          "x": 0.21085,
+          "y": 0.00529,
+          "z": 0.15343
+        },
+        "maximum_linear_speed_m_s": 0.1635,
+        "terminal_linear_speed_m_s": 0.1635,
+        "marker_pass": true,
+        "decision_pass": true,
+        "overall_pass": true
+      }
+    ]
+  },
+  "minimum_three_runs_pass": true,
+  "images": {
+    "placed_trajectory_xz": "docs/reports/physics_levelup/assets/issue6/issue6_placed_trajectory_xz.png",
+    "placed_trajectory_xy": "docs/reports/physics_levelup/assets/issue6/issue6_placed_trajectory_xy.png",
+    "placed_speed": "docs/reports/physics_levelup/assets/issue6/issue6_placed_speed.png",
+    "fallen_trajectory_xz": "docs/reports/physics_levelup/assets/issue6/issue6_fallen_trajectory_xz.png",
+    "fallen_trajectory_xy": "docs/reports/physics_levelup/assets/issue6/issue6_fallen_trajectory_xy.png",
+    "fallen_speed": "docs/reports/physics_levelup/assets/issue6/issue6_fallen_speed.png",
+    "settle_latency": "docs/reports/physics_levelup/assets/issue6/issue6_settle_latency.png"
+  },
+  "release_to_terminal_sec": {
+    "min": 0.0083,
+    "median": 0.09165,
+    "max": 0.175
+  },
+  "overall_pass": true
+}
