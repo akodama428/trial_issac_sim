@@ -99,14 +99,24 @@ if [[ "${NON_PULL_STEPS}" -gt 0 ]]; then
   exit 0
 fi
 
-if ! grep -Eq 'Phase: returning_home .* complete' "${ROBOT_LOG}"; then
-  echo "Harvest cycle completion marker was not found in robot log." >&2
-  exit 1
-fi
-
-if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
-  echo "Failure phase transition was detected in robot log." >&2
-  exit 1
+if [[ "${CI_EXPECT_PLACEMENT:-placed}" == "fallen" ]]; then
+  if ! grep -Eq 'Phase: releasing .* failed' "${ROBOT_LOG}"; then
+    echo "Expected physical FALLEN transition was not found in robot log." >&2
+    exit 1
+  fi
+  if ! grep -Eq '^\[PlacementObs\].*event=.*terminal.*decision=failed' "${STACK_LOG}"; then
+    echo "Expected terminal PlacementObs failure was not found." >&2
+    exit 1
+  fi
+else
+  if ! grep -Eq 'Phase: returning_home .* complete' "${ROBOT_LOG}"; then
+    echo "Harvest cycle completion marker was not found in robot log." >&2
+    exit 1
+  fi
+  if grep -Eq 'Phase: .* failed' "${ROBOT_LOG}"; then
+    echo "Failure phase transition was detected in robot log." >&2
+    exit 1
+  fi
 fi
 
 # JTC feedback由来の実行中tracking errorがServo adapterから周期配信されることを固定する。

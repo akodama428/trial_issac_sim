@@ -42,6 +42,8 @@ class PlacementResult:
     settle_steps: int
     elapsed_sec: float
     containment: ContainmentResult | None = None
+    contact_seen: bool = False
+    event: str = "none"
 
 
 class PlacementGeometry:
@@ -97,6 +99,7 @@ class PlacementEvaluator:
         self._elapsed_sec = 0.0
         self._settle_steps = 0
         self._contact_seen = False
+        self._first_sample = False
         self._result = PlacementResult(
             PlacementDecision.PENDING, "inactive", 0, 0.0
         )
@@ -104,6 +107,7 @@ class PlacementEvaluator:
     def release_started(self) -> None:
         self.reset()
         self._active = True
+        self._first_sample = True
         self._result = PlacementResult(
             PlacementDecision.PENDING, "release_started", 0, 0.0
         )
@@ -116,6 +120,7 @@ class PlacementEvaluator:
         if containment.escaped:
             return self._terminal(PlacementDecision.FAILED, "escaped_tray", containment)
 
+        first_contact = observation.tomato_tray_contact and not self._contact_seen
         if observation.tomato_tray_contact:
             self._contact_seen = True
 
@@ -143,8 +148,19 @@ class PlacementEvaluator:
             self._settle_steps,
             self._elapsed_sec,
             containment,
+            self._contact_seen,
+            self._sample_event(first_contact=first_contact),
         )
         return self._result
+
+    def _sample_event(self, *, first_contact: bool) -> str:
+        events: list[str] = []
+        if self._first_sample:
+            events.append("release_started")
+            self._first_sample = False
+        if first_contact:
+            events.append("first_tray_contact")
+        return "+".join(events) if events else "sample"
 
     def _terminal(
         self,
@@ -152,7 +168,17 @@ class PlacementEvaluator:
         reason: str,
         containment: ContainmentResult,
     ) -> PlacementResult:
+        event = "terminal"
+        if self._first_sample:
+            event = "release_started+terminal"
+            self._first_sample = False
         self._result = PlacementResult(
-            decision, reason, self._settle_steps, self._elapsed_sec, containment
+            decision,
+            reason,
+            self._settle_steps,
+            self._elapsed_sec,
+            containment,
+            self._contact_seen,
+            event,
         )
         return self._result

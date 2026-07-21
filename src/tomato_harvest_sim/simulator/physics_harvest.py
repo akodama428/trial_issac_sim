@@ -141,6 +141,10 @@ class IsaacPhysicsHarvestBridge:
         self._teleport_restore_count = 0
         self._placement_config = load_placement_config()
         self._placement_evaluator: PlacementEvaluator | None = None
+        self._placement_cycle_id = 0
+        self._placement_test_offset_x_m = float(
+            os.environ.get("TOMATO_HARVEST_PLACEMENT_TEST_OFFSET_X_M", "0") or "0"
+        )
         self._friction_strategy = FrictionGraspStrategy(FrictionGraspConfig(
             self._physics_tuning.friction_grasp_required_steps,
             self._physics_tuning.friction_grasp_minimum_force_n,
@@ -359,6 +363,24 @@ class IsaacPhysicsHarvestBridge:
                                                reason="tomato_detached_from_stem_friction")
 
     def _start_placement(self, snapshot: object) -> None:
+        self._placement_cycle_id += 1
+        if self._placement_test_offset_x_m:
+            pose = self._world_pose(self._scene_paths.tomato_prim_path)
+            self._set_world_pose(
+                self._scene_paths.tomato_prim_path,
+                Pose3D(
+                    pose.x + self._placement_test_offset_x_m,
+                    pose.y,
+                    pose.z,
+                    pose.roll,
+                    pose.pitch,
+                    pose.yaw,
+                ),
+            )
+            self._debug_log(
+                "[PlacementTestOverride] "
+                f"offset_x_m={self._placement_test_offset_x_m:.5f}"
+            )
         self._placement_evaluator = PlacementEvaluator(
             PlacementGeometry(
                 tray_pose=snapshot.tray_pose,
@@ -382,16 +404,26 @@ class IsaacPhysicsHarvestBridge:
             tomato_tray_contact=self._pending_tomato_tray_contact_impulse_ns > 0.0,
             dt_sec=self.OBSERVATION_PHYSICS_DT_SEC,
         ))
+        containment = result.containment
+        if containment is None:
+            return
         self._debug_log(
             "[PlacementObs] "
+            f"cycle={self._placement_cycle_id} "
             f"seq={self._physics_sequence_id} "
+            f"event={result.event} "
             f"decision={result.decision.value} reason={result.reason} "
             f"settle={result.settle_steps} elapsed={result.elapsed_sec:.4f} "
-            f"tomato=({tomato_pose.x:.5f},{tomato_pose.y:.5f},{tomato_pose.z:.5f}) "
-            f"velocity=({velocity[0]:.5f},{velocity[1]:.5f},{velocity[2]:.5f}) "
-            f"angular_velocity_rad_s=({angular_velocity[0]:.5f},"
-            f"{angular_velocity[1]:.5f},{angular_velocity[2]:.5f}) "
-            f"contact={int(self._pending_tomato_tray_contact_impulse_ns > 0.0)}"
+            f"x={tomato_pose.x:.5f} y={tomato_pose.y:.5f} z={tomato_pose.z:.5f} "
+            f"local_x={containment.local_x_m:.5f} "
+            f"local_y={containment.local_y_m:.5f} "
+            f"local_z={containment.local_z_m:.5f} "
+            f"margin_x={containment.margin_x_m:.5f} "
+            f"margin_y={containment.margin_y_m:.5f} "
+            f"speed={self._vector_norm(velocity):.5f} "
+            f"angular_speed={self._vector_norm(angular_velocity):.5f} "
+            f"contact={int(self._pending_tomato_tray_contact_impulse_ns > 0.0)} "
+            f"contact_seen={int(result.contact_seen)}"
         )
         if result.decision is PlacementDecision.PLACED:
             controller.sync_tomato_physics(

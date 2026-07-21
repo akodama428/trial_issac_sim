@@ -180,3 +180,85 @@ def test_release_timeout_fails_with_reason() -> None:
 
     assert result is PlacementDecision.FAILED
     assert evaluator.result.reason == "release_contact_timeout"
+
+
+def test_boundary_is_contained_but_just_inside_wall_is_not() -> None:
+    geometry = PlacementGeometry(
+        tray_pose=Pose3D(0.0, 0.0, 0.45, 0.0, 0.0, 0.0), config=_config()
+    )
+
+    boundary = geometry.evaluate(Pose3D(0.095, 0.0, 0.466, 0.0, 0.0, 0.0))
+    beyond = geometry.evaluate(Pose3D(0.095001, 0.0, 0.466, 0.0, 0.0, 0.0))
+
+    assert boundary.contained
+    assert not beyond.contained
+
+
+def test_escape_boundary_is_not_terminal_but_just_outside_is() -> None:
+    evaluator = PlacementEvaluator(
+        PlacementGeometry(
+            tray_pose=Pose3D(0.0, 0.0, 0.45, 0.0, 0.0, 0.0), config=_config()
+        ),
+        _config().settling,
+    )
+    evaluator.release_started()
+
+    at_boundary = evaluator.observe(
+        _observation(pose=Pose3D(0.13, 0.0, 0.466, 0.0, 0.0, 0.0), contact=False)
+    )
+    outside = evaluator.observe(
+        _observation(pose=Pose3D(0.130001, 0.0, 0.466, 0.0, 0.0, 0.0), contact=False)
+    )
+
+    assert at_boundary.decision is PlacementDecision.PENDING
+    assert outside.decision is PlacementDecision.FAILED
+    assert outside.reason == "escaped_tray"
+
+
+def test_immediate_escape_preserves_release_and_terminal_markers() -> None:
+    evaluator = PlacementEvaluator(
+        PlacementGeometry(
+            tray_pose=Pose3D(0.0, 0.0, 0.45, 0.0, 0.0, 0.0), config=_config()
+        ),
+        _config().settling,
+    )
+    evaluator.release_started()
+
+    result = evaluator.observe(
+        _observation(pose=Pose3D(0.14, 0.0, 0.466, 0.0, 0.0, 0.0), contact=False)
+    )
+
+    assert result.event == "release_started+terminal"
+
+
+def test_speed_threshold_is_inclusive_and_terminal_result_is_stable() -> None:
+    evaluator = PlacementEvaluator(
+        PlacementGeometry(
+            tray_pose=Pose3D(0.35, -0.35, 0.45, 0.0, 0.0, 0.0), config=_config()
+        ),
+        _config().settling,
+    )
+    evaluator.release_started()
+    for _ in range(3):
+        result = evaluator.observe(_observation(speed=0.03))
+    assert result.decision is PlacementDecision.PLACED
+
+    unchanged = evaluator.observe(_observation(speed=1.0, contact=False))
+    assert unchanged == result
+
+
+def test_contact_cycle_is_cleared_by_next_release() -> None:
+    evaluator = PlacementEvaluator(
+        PlacementGeometry(
+            tray_pose=Pose3D(0.35, -0.35, 0.45, 0.0, 0.0, 0.0), config=_config()
+        ),
+        _config().settling,
+    )
+    evaluator.release_started()
+    evaluator.observe(_observation(contact=True, speed=0.2))
+
+    evaluator.release_started()
+    result = evaluator.observe(_observation(contact=False, speed=0.01))
+
+    assert result.reason == "awaiting_tray_contact"
+    assert not result.contact_seen
