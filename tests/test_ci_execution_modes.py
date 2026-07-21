@@ -79,3 +79,9 @@ def test_friction_hold_evaluation_environment_is_forwarded() -> None:
 
     assert "TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS" in launcher_source
     assert "TOMATO_HARVEST_FRICTION_HOLD_EVAL_MIN_LIFT_M" in launcher_source
+
+
+def test_stem_break_non_pull_evaluation_environment_is_forwarded() -> None:
+    launcher_source = RUN_E2E.read_text(encoding="utf-8")
+
+    assert "TOMATO_HARVEST_STEM_BREAK_NON_PULL_STEPS" in launcher_source

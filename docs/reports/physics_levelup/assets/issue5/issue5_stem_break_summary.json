@@ -1,0 +1,41 @@
+{
+  "pull": {
+    "expect_break": true,
+    "observation_samples": 1152,
+    "observation_duration_sec": 18.578999999910593,
+    "target_break_count": 1,
+    "break_sequence": 831,
+    "break_force_n": 7.5,
+    "maximum_estimated_tension_n": 0.6503,
+    "maximum_stem_distance_m": 0.0065,
+    "post_break_samples": 321,
+    "post_break_held_samples": 321,
+    "break_detected_pass": true,
+    "post_break_hold_pass": true,
+    "no_false_break_pass": false,
+    "overall_pass": true
+  },
+  "non_pull": {
+    "expect_break": false,
+    "observation_samples": 340,
+    "observation_duration_sec": 6.167999999597669,
+    "target_break_count": 0,
+    "break_sequence": null,
+    "break_force_n": 7.5,
+    "maximum_estimated_tension_n": 0.6558,
+    "maximum_stem_distance_m": 0.0086,
+    "post_break_samples": 0,
+    "post_break_held_samples": 0,
+    "break_detected_pass": false,
+    "post_break_hold_pass": true,
+    "no_false_break_pass": false,
+    "overall_pass": false
+  },
+  "images": {
+    "pull_tension": "docs/reports/physics_levelup/assets/issue5/issue5_pull_tension.png",
+    "non_pull_tension": "docs/reports/physics_levelup/assets/issue5/issue5_non_pull_tension.png",
+    "tension_margin": "docs/reports/physics_levelup/assets/issue5/issue5_tension_margin.png",
+    "post_break_hold": "docs/reports/physics_levelup/assets/issue5/issue5_post_break_hold.png"
+  },
+  "overall_pass": false
+}

@@ -10,6 +10,7 @@ from tomato_harvest_sim.simulator.isaac_viewer import (
     is_headless_terminal_phase,
     parse_args,
     select_hand_mount_prim_path,
+    stem_physics_prim_path,
 )
 from tomato_harvest_sim.simulator.scene_config import load_scene_layout_config
 from tomato_harvest_sim.simulator.scene_plan import build_review_scene_plan
@@ -86,6 +87,11 @@ class IsaacViewerConfigTest(unittest.TestCase):
         self.assertIn("/World/TargetTomato", plan.required_prim_paths)
         self.assertIn("/World/PlaceTray", plan.required_prim_paths)
         self.assertIn("/World/RobotToolProxy", plan.required_prim_paths)
+
+    def test_visible_stem_is_the_physics_rigid_body(self) -> None:
+        plan = build_review_scene_plan()
+
+        self.assertEqual(stem_physics_prim_path(plan), "/World/TomatoStem")
 
     def test_select_hand_mount_prim_path_prefers_geometry_hand(self) -> None:
         prim_path = select_hand_mount_prim_path(

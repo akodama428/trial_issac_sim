@@ -2,12 +2,40 @@ from __future__ import annotations
 
 import math
 import unittest
+from unittest.mock import patch
 
 from tomato_harvest_sim.msg.contracts import Pose3D, TomatoStatus
 from tomato_harvest_sim.simulator.physics_harvest import IsaacPhysicsHarvestBridge, PhysicsHarvestScenePaths
 
 
 class PhysicsGraspRuntimeTest(unittest.TestCase):
+    def test_blank_optional_evaluation_steps_are_treated_as_disabled(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "TOMATO_HARVEST_FRICTION_HOLD_EVAL_STEPS": "",
+                "TOMATO_HARVEST_FRICTION_HOLD_EVAL_MIN_LIFT_M": "",
+                "TOMATO_HARVEST_STEM_BREAK_NON_PULL_STEPS": "",
+            },
+        ):
+            bridge = IsaacPhysicsHarvestBridge(
+                stage=object(),
+                scene_paths=PhysicsHarvestScenePaths(
+                    ground_prim_path="/World/GroundPlane",
+                    tray_prim_path="/World/PlaceTray",
+                    tomato_prim_path="/World/TargetTomato",
+                    stem_anchor_prim_path="/World/TomatoStemAnchor",
+                    stem_joint_prim_path="/World/TomatoStemJoint",
+                    grasp_joint_prim_path="/World/TomatoGraspJoint",
+                    hand_mount_prim_path="/World/FrankaPanda/panda_hand",
+                ),
+                initial_tomato_pose=Pose3D(
+                    0.62, 0.0, 0.54, 0.0, 0.0, 0.0
+                ),
+            )
+
+        self.assertIsNone(bridge._hold_evaluator)
+
     def test_usd_angular_velocity_is_converted_from_degrees_to_radians(self) -> None:
         converted = IsaacPhysicsHarvestBridge._degrees_to_radians_per_second(
             (180.0, -90.0, 0.0)
@@ -17,8 +45,45 @@ class PhysicsGraspRuntimeTest(unittest.TestCase):
         self.assertAlmostEqual(converted[1], -math.pi / 2.0)
         self.assertEqual(converted[2], 0.0)
 
-    def test_stem_break_force_uses_real_tomato_range_with_margin(self) -> None:
-        self.assertEqual(IsaacPhysicsHarvestBridge.STEM_BREAK_FORCE_N, 7.5)
+    def test_physics_mode_requires_joint_break_event_for_detached(self) -> None:
+        self.assertFalse(
+            IsaacPhysicsHarvestBridge._should_report_detached(
+                grasp_mode="physics",
+                stem_break_observed=False,
+                stem_distance_m=0.1,
+            )
+        )
+
+    def test_compliant_stem_joint_frames_pin_only_the_branch_side(self) -> None:
+        frames = IsaacPhysicsHarvestBridge._compliant_stem_joint_frames(
+            tomato_pose=Pose3D(0.62, 0.0, 0.54, 0.0, 0.0, 0.0),
+            stem_pose=Pose3D(0.62, 0.0, 0.58, 0.0, 0.0, 0.0),
+            stem_length_m=0.06,
+            tomato_radius_m=0.01,
+        )
+
+        self.assertEqual(frames.tomato_stem_local, (0.0, 0.0, 0.01))
+        self.assertEqual(frames.stem_tomato_local, (0.0, 0.0, -0.03))
+        self.assertEqual(frames.stem_pin_local, (0.0, 0.0, 0.03))
+        self.assertAlmostEqual(frames.world_pin[0], 0.62)
+        self.assertAlmostEqual(frames.world_pin[1], 0.0)
+        self.assertAlmostEqual(frames.world_pin[2], 0.61)
+        self.assertTrue(
+            IsaacPhysicsHarvestBridge._should_report_detached(
+                grasp_mode="physics",
+                stem_break_observed=True,
+                stem_distance_m=0.0,
+            )
+        )
+
+    def test_success_mode_keeps_distance_compatibility(self) -> None:
+        self.assertTrue(
+            IsaacPhysicsHarvestBridge._should_report_detached(
+                grasp_mode="success",
+                stem_break_observed=False,
+                stem_distance_m=IsaacPhysicsHarvestBridge.DETACH_DISTANCE_M,
+            )
+        )
 
     def test_contact_batches_are_accumulated_within_one_physics_step(self) -> None:
         bridge = IsaacPhysicsHarvestBridge(

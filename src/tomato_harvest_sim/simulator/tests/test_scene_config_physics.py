@@ -61,6 +61,13 @@ _FULL_PAYLOAD = {
             "maximum_relative_speed_m_s": 0.015,
             "maximum_slip_m": 0.005,
         },
+        "stem_joint": {
+            "break_force_n": 7.5,
+            "break_torque_nm": 50.0,
+            "compliant_stem_enabled": True,
+            "stem_length_m": 0.06,
+            "stem_mass_kg": 0.005,
+        },
     }
 }
 
@@ -94,6 +101,34 @@ class PhysicsTuningFromPayloadTest(unittest.TestCase):
         self.assertEqual(config.tomato_solver_velocity_iterations, 4)
         self.assertAlmostEqual(config.tomato_angular_damping, 2.0)
         self.assertTrue(config.tomato_disable_sleep)
+        self.assertEqual(config.stem_joint_break_force_n, 7.5)
+        self.assertEqual(config.stem_joint_break_torque_nm, 50.0)
+        self.assertTrue(config.compliant_stem_enabled)
+        self.assertEqual(config.stem_length_m, 0.06)
+        self.assertEqual(config.stem_mass_kg, 0.005)
+
+    def test_invalid_stem_break_threshold_is_rejected(self) -> None:
+        physics = dict(_FULL_PAYLOAD["physics"])
+        physics["stem_joint"] = {
+            "break_force_n": 0.0,
+            "break_torque_nm": 50.0,
+        }
+
+        with self.assertRaisesRegex(ValueError, "stem joint"):
+            physics_tuning_from_payload({"physics": physics})
+
+    def test_invalid_compliant_stem_geometry_is_rejected(self) -> None:
+        physics = dict(_FULL_PAYLOAD["physics"])
+        physics["stem_joint"] = {
+            "break_force_n": 7.5,
+            "break_torque_nm": 50.0,
+            "compliant_stem_enabled": True,
+            "stem_length_m": 0.0,
+            "stem_mass_kg": 0.005,
+        }
+
+        with self.assertRaisesRegex(ValueError, "compliant stem"):
+            physics_tuning_from_payload({"physics": physics})
 
     def test_missing_disable_sleep_defaults_to_false(self) -> None:
         """tomato_solver.disable_sleep未指定なら既定のsleep挙動を維持する。"""

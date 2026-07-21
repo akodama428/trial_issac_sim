@@ -126,3 +126,9 @@ physics:
     minimum_force_n: 1.0
     maximum_relative_speed_m_s: 0.02
     maximum_slip_m: 0.005
+  stem_joint:
+    break_force_n: 20.0             # Step 4-2 sweepでnon-pull無破断・pull分離を両立した最小評価値
+    break_torque_nm: 50.0           # Step 4初回はforce軸だけを比較するため既存値を維持
+    compliant_stem_enabled: true    # Step 4-2: 枝側端のみ球面ピン固定し、把持時の横荷重を逃がす
+    stem_length_m: 0.06             # scene.stem_height_m と一致させる
+    stem_mass_kg: 0.005             # 動的stemの明示質量

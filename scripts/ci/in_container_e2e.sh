@@ -82,6 +82,23 @@ if ! grep -q "Headless simulator node setup completed." "${STACK_LOG}"; then
   exit 1
 fi
 
+NON_PULL_STEPS="${TOMATO_HARVEST_STEM_BREAK_NON_PULL_STEPS:-0}"
+if [[ "${NON_PULL_STEPS}" -gt 0 ]]; then
+  held_samples="$(
+    grep -Ec '^\[PhysicsObs\].*status=held' "${STACK_LOG}" || true
+  )"
+  if [[ "${held_samples}" -lt "${NON_PULL_STEPS}" ]]; then
+    echo "Non-pull evaluation observed ${held_samples}/${NON_PULL_STEPS} held physics samples." >&2
+    exit 1
+  fi
+  if grep -q '^\[JointBreakObs\] decision=target_broken' "${STACK_LOG}"; then
+    echo "Stem joint broke during the non-pull evaluation." >&2
+    exit 1
+  fi
+  echo "Stem break non-pull evaluation passed: ${held_samples} held samples without JOINT_BREAK."
+  exit 0
+fi
+
 if ! grep -Eq 'Phase: returning_home .* complete' "${ROBOT_LOG}"; then
   echo "Harvest cycle completion marker was not found in robot log." >&2
   exit 1
