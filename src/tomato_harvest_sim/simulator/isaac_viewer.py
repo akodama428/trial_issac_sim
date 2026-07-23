@@ -41,6 +41,11 @@ def is_headless_terminal_phase(phase: str | None) -> bool:
     return phase in _HEADLESS_TERMINAL_PHASES
 
 
+def is_detach_intent_phase(phase: str | None) -> bool:
+    """BehaviorPlannerのphaseから物理detach intentを導出する。"""
+    return phase == HarvestTaskPhase.DETACHING.value
+
+
 @dataclass(frozen=True)
 class CameraPrimPaths:
     fixed_camera_prim_path: str
@@ -680,6 +685,18 @@ def _run_simulator_node_main_loop(
     if not headless:
         control_window = IsaacControlPanelWindow(control_controller)
 
+    observed_phase: dict[str, str] = {}
+
+    def _on_phase(msg: String) -> None:
+        phase = msg.data.strip()
+        observed_phase["value"] = phase
+        if artifacts.physics_bridge is not None:
+            artifacts.physics_bridge.set_detach_intent(
+                is_detach_intent_phase(phase)
+            )
+
+    node.create_subscription(String, PHASE_TOPIC, _on_phase, 10)
+
     def _step() -> None:
         isaac_joint_bridge.step()
 
@@ -712,13 +729,6 @@ def _run_simulator_node_main_loop(
         # 差分は描画表示を出さないことと、所定 step 数を上限として実行し、
         # 収穫サイクルの終端フェーズ（complete / failed）を検知したら
         # 早期終了することだけ。
-        observed_phase: dict[str, str] = {}
-
-        def _on_phase(msg: String) -> None:
-            observed_phase["value"] = msg.data.strip()
-
-        node.create_subscription(String, PHASE_TOPIC, _on_phase, 10)
-
         for executed_steps in range(1, headless_steps + 1):
             _step()
             if is_headless_terminal_phase(observed_phase.get("value")):

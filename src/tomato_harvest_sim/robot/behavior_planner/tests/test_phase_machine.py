@@ -1,6 +1,7 @@
 from tomato_harvest_sim.msg.contracts import ControlCommand, HarvestTaskPhase, TomatoStatus
 from tomato_harvest_sim.robot.behavior_planner.phase_machine import (
     DETACH_ABORT_OUTCOME_CONFIRM_STEPS,
+    DETACH_EXECUTION_OUTCOME_CONFIRM_STEPS,
     FALLEN_CONFIRM_STEPS,
     ControlReceived, ExecutionAborted, ExecutionSucceeded, PhaseMachineState,
     SnapshotTick, advance,
@@ -125,6 +126,36 @@ def test_detaching_abort_accepts_delayed_detached_outcome() -> None:
 
     assert transition.state.phase is HarvestTaskPhase.MOVING_TO_PLACE
     assert not transition.state.abort_pending
+
+
+def test_detaching_execution_success_waits_for_physical_detached_outcome() -> None:
+    state = PhaseMachineState(HarvestTaskPhase.DETACHING, True)
+
+    after_execution = advance(state, ExecutionSucceeded())
+
+    assert after_execution.state.phase is HarvestTaskPhase.DETACHING
+    assert after_execution.state.detach_motion_complete
+    assert after_execution.warning == "detaching_execution_outcome_wait"
+
+    after_detached = advance(
+        after_execution.state,
+        SnapshotTick(TomatoStatus.DETACHED),
+    )
+    assert after_detached.state.phase is HarvestTaskPhase.MOVING_TO_PLACE
+
+
+def test_detaching_execution_without_detached_outcome_fails_in_finite_steps() -> None:
+    state = advance(
+        PhaseMachineState(HarvestTaskPhase.DETACHING, True),
+        ExecutionSucceeded(),
+    ).state
+
+    for _ in range(DETACH_EXECUTION_OUTCOME_CONFIRM_STEPS):
+        transition = advance(state, SnapshotTick(TomatoStatus.HELD))
+        state = transition.state
+
+    assert state.phase is HarvestTaskPhase.FAILED
+    assert transition.warning == "detaching_execution_outcome_timeout"
 
 
 def test_detaching_abort_without_outcome_fails_within_finite_steps() -> None:

@@ -7,6 +7,7 @@ from tomato_harvest_sim.simulator.isaac_viewer import (
     build_appframework_argv,
     build_official_franka_asset_path,
     build_simulation_app_config,
+    is_detach_intent_phase,
     is_headless_terminal_phase,
     parse_args,
     select_hand_mount_prim_path,
@@ -115,6 +116,12 @@ class HeadlessTerminalPhaseTest(unittest.TestCase):
 
     def test_harvest_cycle_completion_stops_headless_run(self) -> None:
         self.assertTrue(is_headless_terminal_phase("complete"))
+
+    def test_only_detaching_phase_activates_detach_intent(self) -> None:
+        self.assertTrue(is_detach_intent_phase("detaching"))
+        for phase in (None, "grasp_evaluation", "moving_to_place", "failed"):
+            with self.subTest(phase=phase):
+                self.assertFalse(is_detach_intent_phase(phase))
 
     def test_harvest_cycle_failure_stops_headless_run(self) -> None:
         self.assertTrue(is_headless_terminal_phase("failed"))

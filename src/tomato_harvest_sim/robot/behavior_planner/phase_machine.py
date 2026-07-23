@@ -20,6 +20,9 @@ FALLEN_CONFIRM_STEPS = 30
 # 成果が得られない場合は有限時間でFAILEDへ落とし、replan対象外phaseでの
 # 永久待機を防ぐ (Issue #58)。
 DETACH_ABORT_OUTCOME_CONFIRM_STEPS = 30
+# DETACHING軌道の成功はpull動作の終了であり、物理分離の成功ではない。
+# 軌道終了後にDETACHEDが届かない場合の待機上限。
+DETACH_EXECUTION_OUTCOME_CONFIRM_STEPS = 30
 
 
 @dataclass(frozen=True)
@@ -32,6 +35,8 @@ class PhaseMachineState:
     abort_pending: bool = False
     abort_reason: str | None = None
     abort_wait_steps: int = 0
+    detach_motion_complete: bool = False
+    detach_wait_steps: int = 0
 
 
 @dataclass(frozen=True)
@@ -136,10 +141,18 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
         warning = f"trajectory aborted at phase={state.phase.value} — waiting for replan" if state.phase in moving else None
         return Transition(state, warning=warning)
     if isinstance(event, ExecutionSucceeded):
+        if state.phase is HarvestTaskPhase.DETACHING:
+            return Transition(
+                replace(
+                    state,
+                    detach_motion_complete=True,
+                    detach_wait_steps=0,
+                ),
+                warning="detaching_execution_outcome_wait",
+            )
         next_by_phase = {
             HarvestTaskPhase.MOVING_TO_PREGRASP: HarvestTaskPhase.MOVING_TO_GRASP,
             HarvestTaskPhase.MOVING_TO_GRASP: HarvestTaskPhase.AT_GRASP,
-            HarvestTaskPhase.DETACHING: HarvestTaskPhase.MOVING_TO_PLACE,
             HarvestTaskPhase.MOVING_TO_PLACE: HarvestTaskPhase.RELEASING,
             HarvestTaskPhase.RETURNING_HOME: HarvestTaskPhase.COMPLETE,
         }
@@ -183,6 +196,14 @@ def advance(state: PhaseMachineState, event: PhaseEvent) -> Transition:
                     warning="detaching_abort_outcome_timeout",
                 )
             return Transition(replace(state, abort_wait_steps=steps))
+        if state.detach_motion_complete:
+            steps = state.detach_wait_steps + 1
+            if steps >= DETACH_EXECUTION_OUTCOME_CONFIRM_STEPS:
+                return Transition(
+                    _enter(state, HarvestTaskPhase.FAILED),
+                    warning="detaching_execution_outcome_timeout",
+                )
+            return Transition(replace(state, detach_wait_steps=steps))
     if state.phase is HarvestTaskPhase.MOVING_TO_PLACE:
         if event.tomato_status is TomatoStatus.FALLEN:
             return _confirm_fallen(state)

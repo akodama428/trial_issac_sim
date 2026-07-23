@@ -101,6 +101,7 @@ class IsaacPhysicsHarvestBridge:
         self._recent_contact_grace_steps_remaining = 0
         self._grasp_joint_active = False
         self._detach_reported = False
+        self._detach_intent_active = False
         self._contact_subscription = None
         self._simulation_event_subscription = None
         self._stem_break_matcher = StemBreakEventMatcher(
@@ -157,6 +158,17 @@ class IsaacPhysicsHarvestBridge:
             raise ValueError(f"unsupported physics grasp mode: {grasp_mode}")
         self._grasp_mode = grasp_mode
 
+    def set_detach_intent(self, active: bool) -> None:
+        """上位タスクがDETACHINGへ入ったことを物理判定へ伝える。
+
+        Args:
+            active: pull実行中だけTrue。Falseの間は物理条件が成立しても
+                TomatoStatus.DETACHEDを上位へ通知しない。
+        """
+        if active != self._detach_intent_active:
+            self._debug_log(f"[PhysicsHarvest] detach_intent_active={int(active)}")
+        self._detach_intent_active = active
+
     def prepare_scene(self) -> None:
         self._enable_static_collision(self._scene_paths.ground_prim_path)
         self._enable_static_collision(f"{self._scene_paths.tray_prim_path}/Base")
@@ -181,9 +193,12 @@ class IsaacPhysicsHarvestBridge:
         cls,
         *,
         grasp_mode: str,
+        detach_intent_active: bool,
         stem_break_observed: bool,
         stem_distance_m: float,
     ) -> bool:
+        if not detach_intent_active:
+            return False
         if grasp_mode == "physics":
             return stem_break_observed
         return stem_distance_m >= cls.DETACH_DISTANCE_M
@@ -295,6 +310,7 @@ class IsaacPhysicsHarvestBridge:
             )
             if self._should_report_detached(
                 grasp_mode=self._grasp_mode,
+                detach_intent_active=self._detach_intent_active,
                 stem_break_observed=self._stem_break_matcher.broken,
                 stem_distance_m=stem_distance,
             ):
@@ -345,6 +361,7 @@ class IsaacPhysicsHarvestBridge:
             stem_distance = self._distance(self._world_pose(self._stem_attachment_prim_path()), tomato_pose)
             if self._should_report_detached(
                 grasp_mode=self._grasp_mode,
+                detach_intent_active=self._detach_intent_active,
                 stem_break_observed=self._stem_break_matcher.broken,
                 stem_distance_m=stem_distance,
             ):
@@ -445,6 +462,7 @@ class IsaacPhysicsHarvestBridge:
         self._recent_finger_contacts = set()
         self._recent_contact_grace_steps_remaining = 0
         self._detach_reported = False
+        self._detach_intent_active = False
         self._stem_break_matcher.reset()
         self._placement_evaluator = None
         self._friction_strategy.reset()
